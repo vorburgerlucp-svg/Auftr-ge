@@ -1,0 +1,3228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Montage Baustellen Manager</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons@3.0.0/tabler-icons.min.css">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+h1 { font-size: 22px; margin: 0 0 1.5rem 0; color: #333; }
+.tabs { display: flex; gap: 8px; margin-bottom: 2rem; border-bottom: 1px solid #ddd; overflow-x: auto; }
+.tab { padding: 12px 16px; border: none; background: transparent; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; color: #666; white-space: nowrap; }
+.tab.active { border-bottom-color: #2563eb; color: #2563eb; font-weight: 500; }
+.section { margin-bottom: 2rem; }
+.section-title { font-size: 16px; font-weight: 500; margin-bottom: 1rem; color: #333; }
+input, select { padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; }
+input:focus, select:focus { outline: none; border-color: #2563eb; }
+button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer; font-size: 14px; font-weight: 500; }
+button:hover { background: #f9f9f9; }
+button.primary { border-color: #2563eb; color: white; background: #2563eb; }
+button.primary:hover { background: #1d4ed8; }
+button.danger { color: #dc2626; }
+button.warning { color: #f59e0b; border-color: #f59e0b; }
+button.small { padding: 6px 10px; font-size: 12px; }
+.card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+.input-row { display: flex; gap: 8px; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap; }
+.input-row input, .input-row select { flex: 1; min-width: 200px; }
+.login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-box { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 2rem; width: 100%; max-width: 450px; }
+.pin-input { font-size: 24px; letter-spacing: 8px; text-align: center; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 1rem; width: 100%; }
+.pin-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 1rem; }
+.pin-btn { padding: 16px; border: 1px solid #ddd; border-radius: 6px; font-size: 18px; font-weight: 500; background: white; cursor: pointer; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+.progress-bar { width: 100%; height: 10px; background: #eee; border-radius: 4px; overflow: hidden; margin: 12px 0; }
+.progress-fill { height: 100%; background: #4CAF50; transition: width 0.3s; }
+.status-banner { padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid; font-weight: 500; }
+.status-ok { background: #e8f5e9; border-color: #4CAF50; color: #2e7d32; }
+.status-warning { background: #fff3e0; border-color: #ff9800; color: #e65100; }
+.status-danger { background: #ffebee; border-color: #f44336; color: #c62828; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 1rem 0; }
+.stat-box { background: #f0f7ff; padding: 1rem; border-radius: 6px; border-left: 3px solid #2563eb; }
+.stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+.stat-value { font-size: 24px; font-weight: 600; margin-top: 8px; color: #2563eb; }
+.task-card { padding: 1.5rem; background: #f9f9f9; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #2196F3; }
+.task-name { font-weight: 500; margin-bottom: 0.5rem; font-size: 15px; }
+.task-info { font-size: 12px; color: #666; margin-bottom: 1rem; }
+.task-input-row { display: grid; grid-template-columns: 1fr 100px 80px; gap: 12px; align-items: center; }
+.hours-input { padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; text-align: center; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 1rem; }
+.task-item { padding: 8px; background: #f9f9f9; border-radius: 4px; margin-bottom: 6px; border-left: 3px solid #ddd; cursor: pointer; transition: all 0.2s; }
+.task-item.done { background: #f1f8e9; border-left-color: #4CAF50; }
+.task-item:hover { background: #f5f5f5; }
+.task-item.done:hover { background: #e8f5e9; }
+
+/* 📱 MOBILE OPTIMIZATION */
+@media (max-width: 768px) {
+  .container { padding: 1rem; }
+  h1 { font-size: 20px; margin-bottom: 1rem; }
+  
+  /* Header */
+  .header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .header > div { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; }
+  .header button { flex: 1; min-height: 44px; }
+  
+  /* Tabs */
+  .tabs { gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { padding: 10px 12px; font-size: 13px; }
+  
+  /* Forms */
+  input, select { padding: 12px; font-size: 16px; }
+  button { padding: 12px 14px; min-height: 44px; font-size: 15px; }
+  button.small { padding: 10px 12px; font-size: 13px; }
+  
+  /* Input rows */
+  .input-row { flex-direction: column; }
+  .input-row input, .input-row select { width: 100%; min-width: unset; }
+  
+  /* Grid layouts */
+  .stat-grid { grid-template-columns: 1fr; }
+  .task-input-row { grid-template-columns: 1fr; gap: 8px; }
+  
+  /* PIN keyboard */
+  .pin-buttons { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pin-btn { padding: 14px 8px; font-size: 16px; }
+  .pin-input { font-size: 20px; padding: 14px; }
+  
+  /* Cards */
+  .card { padding: 1rem; }
+  .section { margin-bottom: 1.5rem; }
+  .section-title { font-size: 15px; }
+  
+  /* Status banner */
+  .status-banner { padding: 1rem; margin-bottom: 1.5rem; }
+  
+  /* Task cards */
+  .task-card { padding: 1rem; margin-bottom: 0.75rem; }
+  .task-name { font-size: 14px; }
+  .task-info { font-size: 11px; }
+  
+  /* Login */
+  .login-box { padding: 1.5rem; width: calc(100% - 1rem); }
+  
+  /* Checkboxes */
+  .checkbox-row { gap: 10px; }
+  
+  /* Modal adjustments */
+  div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+  
+  /* Monteur/Position dropdowns */
+  select { width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .container { padding: 0.75rem; }
+  h1 { font-size: 18px; }
+  
+  button { padding: 10px 12px; min-height: 42px; font-size: 14px; }
+  input, select { padding: 10px; font-size: 16px; }
+  
+  .header { gap: 0.75rem; }
+  .header button { min-width: 100%; }
+  
+  .pin-buttons { gap: 4px; }
+  .pin-btn { padding: 12px 6px; font-size: 14px; }
+  
+  .stat-grid { gap: 8px; }
+  .stat-box { padding: 0.75rem; }
+  .stat-value { font-size: 20px; }
+  
+  .tabs { gap: 2px; }
+  .tab { padding: 8px 10px; font-size: 12px; }
+  
+  .task-card { padding: 0.75rem; }
+  .task-name { font-size: 13px; }
+  
+  .login-box { padding: 1rem; }
+  
+  .input-row { gap: 6px; }
+  
+  /* Hide non-essential info on very small screens */
+  .section-title { margin-bottom: 0.75rem; }
+}
+</style>
+</head>
+<body>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+
+<script>
+// 💾 BACKUP DATEN - 36 Monteure
+const BACKUP_DATA = {"config": {"admin": {"pin": "0804", "name": "Luc Vorburger"}, "baustellen": [], "regieStunden": []}, "allMonteure": [{"name": "Luc Vorburger", "rolle": "admin", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Ibrahim Bekim", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Canard Jeremy", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "David Bodein", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Franck Sebastian", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Durki Michal", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Harter Patrick", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Boguslaw Stefanovic", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Florent Marbois", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Slawomir Kubach", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Sester Christophe", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Tristan Flieller", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Gölec Mateus", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Germpolski Eder", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Colin Clement", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Dubs Gilles", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Mitteregger Christian", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Diego Höfs", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Falasea König", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Feigel Nicolas", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Sefki Dauti", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Günther Peter", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Müller Christian", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Böhler Yohan", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Emmanuel Voltz", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Emmanuel Bonneville", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Ahmed Bouhadjar", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Lionel Umbrecht", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Fournier Johan", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Alexandre Weingand", "rolle": "leiter", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Jonas Krakau", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Thibeault Riedel Frank", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Ribstein Sebastien", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Tüchsen Uff", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Czarny Gregg", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}, {"name": "Sanitar-Bauer Simon", "rolle": "monteur", "phone": "", "fahrzeug": "", "arbeitslog": [], "maengel": []}]};
+let config = JSON.parse(JSON.stringify(BACKUP_DATA.config));
+let allMonteure = JSON.parse(JSON.stringify(BACKUP_DATA.allMonteure));
+
+// ☁️ Firebase REST API (einfach & zuverlässig!)
+const FB_URL = 'https://baustellen-7cf37-default-rtdb.europe-west1.firebasedatabase.app';
+
+async function saveToCloud() {
+  try {
+    // LocalStorage Backup
+    localStorage.setItem('montage_config', JSON.stringify(config));
+    localStorage.setItem('montage_monteure', JSON.stringify(allMonteure));
+    
+    // Cloud Save
+    const payload = {
+      config: config,
+      monteure: allMonteure,
+      lastUpdate: new Date().toISOString()
+    };
+    
+    const response = await fetch(FB_URL + '/data.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (response.ok) {
+      console.log('☁️ In Cloud gespeichert');
+    } else {
+      console.log('✅ LocalStorage OK (Cloud offline)');
+    }
+  } catch (e) {
+    console.log('✅ LocalStorage OK (kein Internet)');
+  }
+}
+
+async function loadFromCloud() {
+  return new Promise((resolve) => {
+    // Zuerst LocalStorage laden
+    try {
+      const savedConfig = localStorage.getItem('montage_config');
+      const savedMonteure = localStorage.getItem('montage_monteure');
+      
+      if (savedConfig) config = JSON.parse(savedConfig);
+      if (savedMonteure) allMonteure = JSON.parse(savedMonteure);
+      console.log('✅ Daten geladen');
+    } catch (e) {
+      console.error('Fehler:', e.message);
+    }
+    
+    // Dann Cloud versuchen
+    fetch(FB_URL + '/data.json')
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.config) {
+          config = data.config;
+          allMonteure = data.monteure || allMonteure;
+          console.log('☁️ Cloud-Daten geladen');
+        }
+        resolve();
+      })
+      .catch(() => {
+        console.log('ℹ️ Offline - nur LocalStorage');
+        resolve();
+      });
+  });
+}
+</script>
+
+<!-- LOGIN -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <div style="font-size: 24px; font-weight: 500; margin-bottom: 2rem; text-align: center;">🏗️ Monteur Login</div>
+    <div style="margin-bottom: 1.5rem;">
+      <label style="font-size: 12px; color: #666; display: block; margin-bottom: 8px; font-weight: 500;">Name auswählen</label>
+      <select id="monteurName" style="width: 100%;"></select>
+    </div>
+    <div style="margin-bottom: 1.5rem;">
+      <label style="font-size: 12px; color: #666; display: block; margin-bottom: 8px; font-weight: 500;">PIN eingeben</label>
+      <input type="password" id="pinDisplay" class="pin-input" readonly>
+    </div>
+    <div class="pin-buttons">
+      <button class="pin-btn" onclick="addPin('1')">1</button>
+      <button class="pin-btn" onclick="addPin('2')">2</button>
+      <button class="pin-btn" onclick="addPin('3')">3</button>
+      <button class="pin-btn" onclick="addPin('4')">4</button>
+      <button class="pin-btn" onclick="addPin('5')">5</button>
+      <button class="pin-btn" onclick="addPin('6')">6</button>
+      <button class="pin-btn" onclick="addPin('7')">7</button>
+      <button class="pin-btn" onclick="addPin('8')">8</button>
+      <button class="pin-btn" onclick="addPin('9')">9</button>
+      <button class="pin-btn" onclick="addPin('0')">0</button>
+      <button class="pin-btn danger" style="grid-column: 2 / 4; background: #f44336; color: white; border-color: #f44336; font-weight: bold;" onclick="deletePin()"><i class="ti ti-backspace"></i> Löschen</button>
+      <button class="pin-btn" style="grid-column: 1 / 4; background: #2563eb; color: white; border-color: #2563eb;" onclick="login()"><i class="ti ti-check"></i>Login</button>
+    </div>
+    <div style="text-align: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #ddd; font-size: 12px; color: #999;">
+
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div class="container" id="adminScreen" style="display: none;">
+  <div class="header">
+    <h1><i class="ti ti-building-warehouse" style="font-size:28px; vertical-align:-3px; margin-right:8px;"></i>Admin Dashboard</h1>
+    <div><div style="margin-bottom: 8px; font-weight: 500;" id="userName"></div><button style="padding: 8px 16px; margin-right: 8px; background: #4CAF50; color: white; border-color: #4CAF50;" onclick="saveToCloud(); showSuccess('✓ Daten zu Firebase hochgeladen!')"><i class="ti ti-cloud-upload"></i>☁️ Zu Firebase speichern</button><button style="padding: 8px 16px; margin-right: 8px; background: #2196F3; color: white; border-color: #2196F3;" onclick="autoBackupDownload()"><i class="ti ti-download"></i>💾 Backup downloaden</button><button style="padding: 8px 16px;" onclick="logout()"><i class="ti ti-logout"></i>Logout</button></div>
+  </div>
+  <div id="firmaStatsBanner"></div>
+  <div class="tabs" id="navTabs"></div>
+  <div style="padding: 12px 0; text-align: center;">
+    
+  </div>
+  <div id="screenContent"></div>
+</div>
+
+<!-- MONTEUR -->
+<div class="container" id="monteurScreen" style="display: none;">
+  <div class="header">
+    <h1><i class="ti ti-hammer" style="font-size:28px; vertical-align:-3px; margin-right:8px;"></i>Meine Baustelle</h1>
+    <div><div style="margin-bottom: 8px; font-weight: 500;" id="monteurName"></div><button style="padding: 8px 16px;" onclick="logout()"><i class="ti ti-logout"></i>Logout</button></div>
+  </div>
+  <div id="monteurContent"></div>
+</div>
+
+<input type="file" id="fileInput" accept=".json" style="display:none;">
+
+<script>
+// ÜBERSCHRIEBEN DURCH BACKUP - siehe oben
+const old_allMonteure = [
+  { name: 'Luc Vorburger', rolle: 'admin', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Ibrahim Bekim', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Canard Jeremy', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'David Bodein', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Franck Sebastian', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Durki Michal', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Harter Patrick', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Boguslaw Stefanovic', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Florent Marbois', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Slawomir Kubach', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Sester Christophe', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Tristan Flieller', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Gölec Mateus', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Germpolski Eder', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Colin Clement', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Dubs Gilles', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Mitteregger Christian', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Diego Höfs', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Falasea König', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Feigel Nicolas', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Sefki Dauti', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Günther Peter', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Müller Christian', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Böhler Yohan', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Emmanuel Voltz', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Emmanuel Bonneville', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Ahmed Bouhadjar', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Lionel Umbrecht', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Fournier Johan', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Alexandre Weingand', rolle: 'leiter', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Jonas Krakau', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Thibeault Riedel Frank', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Ribstein Sebastien', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Tüchsen Uff', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Czarny Gregg', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] },
+  { name: 'Sanitar-Bauer Simon', rolle: 'monteur', phone: '', fahrzeug: '', arbeitslog: [], maengel: [] }
+];
+
+// ÜBERSCHRIEBEN DURCH BACKUP - siehe oben
+const old_config = { admin: { pin: '0804', name: 'Luc Vorburger' }, baustellen: [], regieStunden: [] };
+let currentPin = '', currentUser = null, currentBaustelle = null, currentEditingPos = null;
+
+window.addEventListener('load', () => {
+  const select = document.getElementById('monteurName');
+  allMonteure.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.name;
+    opt.textContent = m.name + (m.rolle === 'admin' ? ' 👑' : m.rolle === 'leiter' ? ' 👷' : '');
+    select.appendChild(opt);
+  });
+});
+
+function addPin(digit) { if (currentPin.length < 4) currentPin += digit; updatePinDisplay(); }
+function deletePin() { currentPin = currentPin.slice(0, -1); updatePinDisplay(); }
+function clearPin() { currentPin = ''; updatePinDisplay(); }
+function updatePinDisplay() { document.getElementById('pinDisplay').value = '•'.repeat(currentPin.length); }
+
+// 🎹 Tastatur-Eingabe für PIN
+window.addEventListener('keydown', (e) => {
+  // ESC = Alle Dialoge schließen
+  if (e.key === 'Escape') {
+    closeAllDialogs();
+    e.preventDefault();
+    return;
+  }
+  
+  // Nur wenn PIN-Input fokussiert oder wenn nicht in anderer Eingabe
+  const pinInput = document.getElementById('pinDisplay');
+  if (!pinInput) return;
+  
+  // Ziffern 0-9
+  if (e.key >= '0' && e.key <= '9' && currentPin.length < 4) {
+    addPin(e.key);
+    e.preventDefault();
+  }
+  // Backspace / Delete
+  if ((e.key === 'Backspace' || e.key === 'Delete') && currentPin.length > 0) {
+    deletePin();
+    e.preventDefault();
+  }
+  // Enter = Login
+  if (e.key === 'Enter') {
+    login();
+    e.preventDefault();
+  }
+});
+
+// 💾 Cloud + LocalStorage Autosave
+function saveToCloud() {
+  try {
+    localStorage.setItem('montage_config', JSON.stringify(config));
+    localStorage.setItem('montage_monteure', JSON.stringify(allMonteure));
+    console.log('✅ Gespeichert');
+  } catch (e) {
+    console.error('❌ Fehler:', e.message);
+  }
+}
+
+function loadFromCloud() {
+  return new Promise((resolve) => {
+    try {
+      const savedConfig = localStorage.getItem('montage_config');
+      const savedMonteure = localStorage.getItem('montage_monteure');
+      
+      if (savedConfig) config = JSON.parse(savedConfig);
+      if (savedMonteure) allMonteure = JSON.parse(savedMonteure);
+      
+      // Sicherstellen, dass regieStunden existiert
+      if (!config.regieStunden) config.regieStunden = [];
+      
+      console.log('✅ Daten geladen');
+    } catch (e) {
+      console.error('❌ Fehler beim Laden:', e.message);
+    }
+    resolve();
+  });
+}
+
+// Beim Start laden
+loadFromCloud();
+
+// 💾 Backup Modal
+function showBackupModal() {
+  const modal = document.createElement('div');
+  modal.id = 'backupModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: flex; align-items: center; justify-content: center;';
+  
+  const today = new Date().toISOString().split('T')[0];
+  
+  modal.innerHTML = `
+    <div style="background: white; border-radius: 12px; padding: 2.5rem; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+      <div style="font-size: 24px; font-weight: 700; margin-bottom: 1rem; color: #333;">💾 Datensicherung</div>
+      <div style="color: #666; margin-bottom: 1.5rem; line-height: 1.6; font-size: 15px;">
+        <strong>Wichtig:</strong> Bevor du die App updatest, sichere deine Daten! 
+        <br><br>
+        Laden Sie Ihre Daten jetzt herunter und speichern Sie sie an einem sicheren Ort.
+      </div>
+      
+      <div style="background: #f0f7ff; border-left: 4px solid #2196F3; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; font-size: 13px; color: #1565c0;">
+        📌 <strong>Tipp:</strong> Nach dem Update einfach die Datei importieren und alle Daten sind wieder da!
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <button class="primary" style="padding: 12px; margin: 0; font-size: 14px; font-weight: 600; min-height: 44px;" onclick="autoBackupDownload()">
+          <i class="ti ti-download"></i> Jetzt sichern
+        </button>
+        <button style="padding: 12px; margin: 0; font-size: 14px; font-weight: 600; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; color: #333; min-height: 44px;" onclick="closeBackupModal()">
+          Nicht jetzt
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+function closeBackupModal() {
+  const modal = document.getElementById('backupModal');
+  if (modal) modal.remove();
+}
+
+function autoBackupDownload() {
+  const today = new Date().toISOString().split('T')[0];
+  const json = JSON.stringify({config, allMonteure}, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `montage_backup_${today}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  closeBackupModal();
+  showSuccess(' Backup erfolgreich gespeichert!');
+}
+
+function login() {
+  const monName = document.getElementById('monteurName').value;
+  if (!monName) { showError('Name auswählen'); return; }
+  if (currentPin.length !== 4) { showError('PIN muss 4 Ziffern sein'); return; }
+  
+  if (monName === 'Luc Vorburger' && currentPin === config.admin.pin) {
+    currentUser = { type: 'admin', name: config.admin.name };
+    showAdminDash();
+    setTimeout(showBackupModal, 500); // Backup Modal nach 500ms zeigen
+  } else if (currentPin === config.admin.pin) {
+    currentUser = { type: 'admin', name: config.admin.name };
+    showAdminDash();
+    setTimeout(showBackupModal, 500);
+  } else {
+    const baustelle = config.baustellen.find(b => b.monteure.some(m => m.name === monName && m.pin === currentPin));
+    if (!baustelle) { showError('Name oder PIN ungültig'); currentPin = ''; updatePinDisplay(); return; }
+    currentUser = { type: 'monteur', name: monName, baustelle: baustelle.id };
+    const monteur = baustelle.monteure.find(m => m.name === monName);
+    if (monteur.rolle === 'leiter') {
+      currentBaustelle = baustelle;
+      showLeiterDash();
+    } else {
+      currentBaustelle = baustelle;
+      showMonteurDash();
+    }
+  }
+}
+
+function logout() {
+  currentUser = null; currentPin = ''; currentBaustelle = null;
+  document.getElementById('monteurName').value = '';
+  updatePinDisplay();
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('adminScreen').style.display = 'none';
+  document.getElementById('monteurScreen').style.display = 'none';
+}
+
+function showAdminDash() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('monteurScreen').style.display = 'none';
+  document.getElementById('adminScreen').style.display = 'block';
+  document.getElementById('userName').textContent = currentUser.name + ' 👑 Admin';
+  
+  // Calculate company-wide statistics
+  const firmaStats = calculateFirmaStats();
+  
+  // Create gauge
+  const gaugeHtml = createGauge(parseFloat(firmaStats.quote));
+  document.getElementById('firmaStatsBanner').innerHTML = gaugeHtml;
+  
+  // Set tabs
+  const tabs = ['Baustellen', 'Übersicht', 'Positionen', 'Monteure', 'Mängel', 'Monteure-Entwicklung', 'Statistik', 'Daten'];
+  document.getElementById('navTabs').innerHTML = tabs.map((t, i) => 
+    `<button class="tab ${i === 0 ? 'active' : ''}" onclick="switchTab(${i})">${t}</button>`
+  ).join('');
+  switchTab(0);
+}
+
+function createGauge(value) {
+  const clampedValue = Math.min(Math.max(value, 0), 10);
+  
+  // Determine color and status
+  let color, bgColor, textColor, status, icon;
+  if (clampedValue <= 3) {
+    color = '#4CAF50';
+    bgColor = '#E8F5E9';
+    textColor = '#2E7D32';
+    status = '✓ OK';
+    icon = '✓';
+  } else if (clampedValue <= 5) {
+    color = '#FF9800';
+    bgColor = '#FFF3E0';
+    textColor = '#E65100';
+    status = '⚠ WARNUNG';
+    icon = '!';
+  } else {
+    color = '#F44336';
+    bgColor = '#FFEBEE';
+    textColor = '#C62828';
+    status = '✕ KRITISCH';
+    icon = '✕';
+  }
+  
+  // Calculate circle progress
+  const circumference = 2 * Math.PI * 70;
+  const percentage = (clampedValue / 10) * 100;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+  
+  return `
+    <div style="padding: 3rem 2rem; background: linear-gradient(135deg, ${bgColor} 0%, white 100%); border-radius: 16px; margin: 2rem; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.08);">
+      
+      <!-- Main Gauge Circle -->
+      <div style="margin-bottom: 2.5rem;">
+        <svg width="280" height="280" style="margin: 0 auto; display: block; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));">
+          <!-- Outer ring (background) -->
+          <circle cx="140" cy="140" r="70" fill="none" stroke="#f0f0f0" stroke-width="16"/>
+          
+          <!-- Progress ring -->
+          <defs>
+            <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:${color};stop-opacity:1" />
+              <stop offset="100%" style="stop-color:${color};stop-opacity:0.7" />
+            </linearGradient>
+          </defs>
+          <circle cx="140" cy="140" r="70" fill="none" stroke="url(#gaugeGradient)" stroke-width="16"
+                  stroke-dasharray="${circumference}" stroke-dashoffset="${strokeDashoffset}"
+                  stroke-linecap="round" style="transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0.0, 0.2, 1); transform: rotate(-90deg); transform-origin: 140px 140px;"/>
+          
+          <!-- Center circle -->
+          <circle cx="140" cy="140" r="55" fill="white" stroke="${color}" stroke-width="2"/>
+          
+          <!-- Status icon -->
+          <text x="140" y="125" font-size="56" font-weight="700" text-anchor="middle" fill="${color}" font-family="Arial, sans-serif">
+            ${icon}
+          </text>
+          
+          <!-- Percentage text -->
+          <text x="140" y="165" font-size="52" font-weight="800" text-anchor="middle" fill="${color}" font-family="Arial, sans-serif">
+            ${value.toFixed(1)}%
+          </text>
+        </svg>
+      </div>
+      
+      <!-- Status Label -->
+      <div style="font-size: 20px; font-weight: 700; color: ${textColor}; margin-bottom: 2rem; letter-spacing: 0.5px;">
+        ${status}
+      </div>
+      
+      <!-- Legend -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 2rem;">
+        <div style="padding: 1rem; background: white; border-radius: 12px; border: 2px solid #4CAF50; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600;">OK</div>
+          <div style="font-size: 16px; font-weight: 700; color: #4CAF50;">0-3%</div>
+        </div>
+        <div style="padding: 1rem; background: white; border-radius: 12px; border: 2px solid #FF9800; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600;">Warnung</div>
+          <div style="font-size: 16px; font-weight: 700; color: #FF9800;">3-5%</div>
+        </div>
+        <div style="padding: 1rem; background: white; border-radius: 12px; border: 2px solid #F44336; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <div style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600;">Kritisch</div>
+          <div style="font-size: 16px; font-weight: 700; color: #F44336;">>5%</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function calculateFirmaStats() {
+  let totalGeleistet = 0;
+  let totalFehler = 0;
+  const baustellenStats = [];
+  
+  // Aggregate all data
+  config.baustellen.forEach(bau => {
+    const baustelle = {
+      name: bau.name,
+      stunden: 0,
+      fehler: 0,
+      quote: 0
+    };
+    
+    // Get all hours for this baustelle
+    const pos = bau.positionen || [];
+    pos.forEach(p => {
+      const tasks = p.tasks || [];
+      tasks.forEach(t => {
+        const hours = Object.values(t.monteurHours || {}).reduce((a, b) => a + b, 0);
+        baustelle.stunden += hours;
+        totalGeleistet += hours;
+      });
+    });
+    
+    // Get all errors for this baustelle
+    bau.monteure.forEach(mon => {
+      const monteurData = allMonteure.find(m => m.name === mon.name);
+      if (monteurData && monteurData.mangel) {
+        monteurData.mangel.forEach(m => {
+          if (config.baustellen.find(b => b.monteure.some(mo => mo.name === m.verursacher))) {
+            baustelle.fehler += m.aufwand;
+            totalFehler += m.aufwand;
+          }
+        });
+      }
+    });
+    
+    if (baustelle.stunden > 0) {
+      baustelle.quote = ((baustelle.fehler / baustelle.stunden) * 100).toFixed(1);
+      baustellenStats.push(baustelle);
+    }
+  });
+  
+  // Addiere globale Regiestunden EINMAL (nicht pro Baustelle!)
+  if (config.regieStunden && Array.isArray(config.regieStunden)) {
+    config.regieStunden.forEach(regie => {
+      totalGeleistet += regie.stunden;
+    });
+  }
+  
+  const gesamtQuote = totalGeleistet > 0 ? ((totalFehler / totalGeleistet) * 100).toFixed(1) : 0;
+  
+  let color, borderColor, textColor, status;
+  if (gesamtQuote <= 3) {
+    color = '#e8f5e9';
+    borderColor = '#4CAF50';
+    textColor = '#2e7d32';
+    status = '✓ OK';
+  } else if (gesamtQuote <= 5) {
+    color = '#fff3e0';
+    borderColor = '#ff9800';
+    textColor = '#e65100';
+    status = '⚠ WARNING';
+  } else {
+    color = '#ffebee';
+    borderColor = '#f44336';
+    textColor = '#c62828';
+    status = '✕ CRITICAL';
+  }
+  
+  return {
+    gesamtStunden: totalGeleistet,
+    fehlerStunden: totalFehler,
+    quote: gesamtQuote,
+    status: status,
+    color: color,
+    borderColor: borderColor,
+    textColor: textColor,
+    baustellen: baustellenStats
+  };
+}
+
+function switchTab(tab) {
+  const tabs = ['baustellen', 'übersicht', 'positionen', 'monteure', 'monteure-entwicklung', 'statistik', 'daten'];
+  
+  // Refresh gauge
+  const firmaStats = calculateFirmaStats();
+  const gaugeHtml = createGauge(parseFloat(firmaStats.quote));
+  document.getElementById('firmaStatsBanner').innerHTML = gaugeHtml;
+  
+  const tabsHtml = ['Baustellen', 'Übersicht', 'Positionen', 'Monteure', 'Monteure-Entwicklung', 'Statistik', 'Daten']
+    .map((t, i) => `<button class="tab ${i === tab ? 'active' : ''}" onclick="switchTab(${i})">${t}</button>`)
+    .join('');
+  
+  document.getElementById('navTabs').innerHTML = tabsHtml;
+  
+  if (tabs[tab] === 'baustellen') renderBaustellen();
+  else if (tabs[tab] === 'übersicht') renderBaustelleÜbersicht();
+  else if (tabs[tab] === 'positionen') renderPositionen();
+  else if (tabs[tab] === 'monteure') renderMonteure();
+  else if (tabs[tab] === 'monteure-entwicklung') renderMonteureEntwicklung();
+  else if (tabs[tab] === 'statistik') renderStatistik();
+  else if (tabs[tab] === 'daten') renderDaten();
+}
+
+function renderBaustellen() {
+  let html = `
+    <div class="section">
+      <div class="section-title">⏱️ Regiestunden / Pauschalaufträge (pro KW)</div>
+      <div style="background: #fff3e0; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #ff9800; margin-bottom: 1.5rem;">
+        <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+          <div style="flex: 0 0 120px;">
+            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 6px;">Kalenderwoche</label>
+            <input type="number" id="regieKW" placeholder="z.B. 23" min="1" max="52" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+          </div>
+          <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 6px;">Stunden (Tastatur)</label>
+            <input type="text" id="regieStunden" placeholder="z.B. 578.5" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+          </div>
+          <button class="primary" onclick="addRegieStunden()" style="padding: 10px 20px; font-weight: 500;">+ Hinzufügen</button>
+        </div>
+        <div id="regieList" style="margin-top: 1rem;"></div>
+      </div>
+    </div>
+    
+    <div class="section"><div class="section-title">🏗️ Baustelle erstellen</div>
+      <div class="input-row">
+        <input type="text" id="bauName" placeholder="Name">
+        <input type="text" id="bauOrt" placeholder="Ort" style="flex: 0 0 200px;">
+        <input type="date" id="bauVon" placeholder="Von">
+        <input type="date" id="bauBis" placeholder="Bis">
+        <button class="primary small" onclick="createBaustelle()"><i class="ti ti-plus"></i>Erstellen</button>
+      </div></div>
+    <div class="section"><div class="section-title">Alle Baustellen</div>
+    ${config.baustellen.map((bau, bauIndex) => {
+      const pos = bau.positionen || [];
+      const soll = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + tk.hours, 0), 0);
+      const ist = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + Object.values(tk.monteurHours || {}).reduce((a, b) => a + b, 0), 0), 0);
+      
+      // Berechne Fehler-Stunden für diese Baustelle
+      const fehlerStunden = allMonteure.reduce((total, m) => {
+        const mangel = (m.mangel || []).filter(mg => pos.some(p => p.id === mg.positionId));
+        return total + mangel.reduce((s, mg) => s + (mg.aufwand || 0), 0);
+      }, 0);
+      
+      const verfuegbar = soll - ist - fehlerStunden;
+      const pct = soll > 0 ? Math.round((ist / soll) * 100) : 0;
+      return `<div class="card"><div style="font-weight: 500; font-size: 16px; margin-bottom: 0.5rem;">${bau.name} <span style="font-size: 12px; color: #999;">${bau.ort}</span></div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-label">Soll</div><div class="stat-value">${soll.toFixed(1)}h</div></div>
+          <div class="stat-box"><div class="stat-label">Gebucht</div><div class="stat-value">${ist.toFixed(1)}h</div></div>
+          <div class="stat-box"><div class="stat-label">Verfügbar</div><div class="stat-value">${Math.max(0, verfuegbar).toFixed(1)}h</div></div>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(pct, 100)}%;"></div></div>
+        <div style="font-size: 13px; color: #666; margin-top: 1rem; margin-bottom: 1rem;">
+          <strong>Monteure: ${bau.monteure.length}</strong><br>
+          ${bau.monteure.map((m, mIdx) => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; background: white; padding: 8px; border-radius: 4px; margin-bottom: 4px;">
+              <span>• ${m.rolle === 'leiter' ? '👷' : '👨‍🔧'} ${m.name} (PIN: ${m.pin})</span>
+              <div style="display: flex; gap: 4px;">
+                <button style="padding: 4px 8px; font-size: 11px; border: 1px solid #2563eb; color: #2563eb; background: white; border-radius: 3px; cursor: pointer;" onclick="handleToggleRole(${bauIndex}, '${m.name}')">
+                  ${m.rolle === 'leiter' ? 'Monteur' : 'Chef'}
+                </button>
+                <button style="padding: 4px 8px; font-size: 11px; border: 1px solid #f44336; color: #f44336; background: white; border-radius: 3px; cursor: pointer;" onclick="handleRemoveMonteur(${bauIndex}, '${m.name}')">
+                  ✕ Entfernen
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <button class="primary small" onclick="showAddMonteur('${bau.id}')"><i class="ti ti-plus"></i>Monteur</button>
+          <button class="danger small" onclick="deleteBaustelle('${bau.id}')"><i class="ti ti-trash"></i>Löschen</button>
+        </div>
+      </div>`;
+    }).join('') || '<p style="color: #999;">Keine Baustellen</p>'}
+    </div>
+    <div id="addMonteurDiv" style="display: none;"><div class="section"><div class="section-title">Monteur hinzufügen</div>
+      <div class="input-row">
+        <select id="monteurSelect"><option value="">-- Monteur auswählen --</option>
+          ${allMonteure.filter(m => m.rolle !== 'admin').map(m => `<option value="${m.name}">${m.name}</option>`).join('')}
+        </select>
+        <label style="flex: 0 0 auto; display: flex; gap: 6px;"><input type="checkbox" id="isLeiter">👷 Leiter</label>
+        <button class="primary small" onclick="addMonteurToBaustelle()"><i class="ti ti-plus"></i>Hinzufügen</button>
+        <button onclick="closeMonteurDialog()"><i class="ti ti-x"></i>Abbrechen</button>
+      </div></div></div>`;
+  document.getElementById('screenContent').innerHTML = html;
+  renderRegieList();
+}
+
+function renderRegieList() {
+  const regieDiv = document.getElementById('regieList');
+  if (!regieDiv) return;
+  
+  // Sicherstelle dass regieStunden existiert
+  if (!config.regieStunden) config.regieStunden = [];
+  
+  if (config.regieStunden.length === 0) {
+    regieDiv.innerHTML = '<p style="color: #999; font-size: 12px;">Keine Regiestunden erfasst</p>';
+    return;
+  }
+  
+  let html = '<div style="margin-top: 1rem; display: grid; gap: 8px;">';
+  config.regieStunden.forEach((regie, idx) => {
+    html += `
+      <div style="background: white; padding: 12px; border-radius: 6px; border-left: 3px solid #ff9800; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-weight: 500;">KW ${regie.kw}: <strong>${regie.stunden}</strong> Stunden</div>
+        <button onclick="deleteRegieStunden(${idx})" style="padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">✕ Löschen</button>
+      </div>
+    `;
+  });
+  html += '</div>';
+  regieDiv.innerHTML = html;
+}
+
+function addRegieStunden() {
+  const kwInput = document.getElementById('regieKW');
+  const stundenInput = document.getElementById('regieStunden');
+  
+  const kw = parseInt(kwInput.value);
+  const stunden = parseFloat(stundenInput.value);
+  
+  if (!kw || kw < 1 || kw > 52) { showError('KW 1-52 erforderlich'); return; }
+  if (!stunden || stunden <= 0) { showError('Stunden erforderlich'); return; }
+  
+  // Sicherstelle dass regieStunden existiert
+  if (!config.regieStunden) config.regieStunden = [];
+  
+  // Prüfe ob KW bereits existiert
+  const existingIdx = config.regieStunden.findIndex(r => r.kw === kw);
+  if (existingIdx >= 0) {
+    config.regieStunden[existingIdx].stunden = stunden;
+  } else {
+    config.regieStunden.push({ kw, stunden });
+  }
+  
+  config.regieStunden.sort((a, b) => a.kw - b.kw);
+  
+  kwInput.value = '';
+  stundenInput.value = '';
+  saveToCloud();
+  renderRegieList();
+}
+
+function deleteRegieStunden(idx) {
+  if (!confirm('KW löschen?')) return;
+  config.regieStunden.splice(idx, 1);
+  saveToCloud();
+  renderRegieList();
+}
+
+function handleToggleRole(bauIndex, monteurName) {
+  console.log('handleToggleRole - index:', bauIndex, 'monteur:', monteurName);
+  const bau = config.baustellen[bauIndex];
+  if (bau) toggleMonteurRole(bau.id, monteurName);
+  else console.error('Baustelle index nicht gefunden:', bauIndex);
+}
+
+function handleRemoveMonteur(bauIndex, monteurName) {
+  console.log('handleRemoveMonteur - index:', bauIndex, 'monteur:', monteurName);
+  const bau = config.baustellen[bauIndex];
+  if (bau) removeMonteurFromBaustelle(bau.id, monteurName);
+  else console.error('Baustelle index nicht gefunden:', bauIndex);
+}
+
+function createBaustelle() {
+  const name = document.getElementById('bauName').value.trim();
+  const ort = document.getElementById('bauOrt').value.trim();
+  const von = document.getElementById('bauVon').value;
+  const bis = document.getElementById('bauBis').value;
+  if (!name) { showError('Name erforderlich'); return; }
+  if (!von || !bis) { showError('Datum von/bis erforderlich'); return; }
+  config.baustellen.push({ 
+    id: 'b' + Math.random().toString(36).substr(2, 9), 
+    name, ort, von, bis,
+    freieStunden: 0,
+    monteure: [], 
+    positionen: [] 
+  });
+  saveToCloud();
+  document.getElementById('bauName').value = '';
+  document.getElementById('bauOrt').value = '';
+  document.getElementById('bauVon').value = '';
+  document.getElementById('bauBis').value = '';
+  renderBaustellen();
+}
+
+let selectedBauIdForMonteur = null;
+function showAddMonteur(bauId) { selectedBauIdForMonteur = bauId; document.getElementById('addMonteurDiv').style.display = 'block'; }
+function addMonteurToBaustelle() {
+  const name = document.getElementById('monteurSelect').value;
+  const isLeiter = document.getElementById('isLeiter').checked;
+  if (!name) { showError('Monteur auswählen'); return; }
+  const bau = config.baustellen.find(b => b.id === selectedBauIdForMonteur);
+  if (bau.monteure.find(m => m.name === name)) { showError('Schon hinzugefügt'); return; }
+  const pin = String(1000 + Math.floor(Math.random() * 8999));
+  bau.monteure.push({ name, pin, rolle: isLeiter ? 'leiter' : 'monteur' });
+  saveToCloud();
+  closeMonteurDialog();
+  renderBaustellen();
+}
+
+function toggleMonteurRole(bauId, monteurName) {
+  console.log('toggleMonteurRole - bauId:', bauId, 'monteur:', monteurName);
+  console.log('Alle baustellen IDs:', config.baustellen.map(b => b.id));
+  
+  const bau = config.baustellen.find(b => b.id === bauId);
+  console.log('Baustelle gefunden:', !!bau);
+  
+  if (!bau) { console.error('Baustelle nicht gefunden'); showError('Baustelle nicht gefunden'); return; }
+  
+  const monteur = bau.monteure.find(m => m.name === monteurName);
+  console.log('Monteur gefunden:', !!monteur);
+  
+  if (!monteur) { console.error('Monteur nicht gefunden'); showError('Monteur nicht gefunden'); return; }
+  
+  // Toggle role
+  monteur.rolle = monteur.rolle === 'leiter' ? 'monteur' : 'leiter';
+  console.log('Neue Rolle:', monteur.rolle);
+  
+  saveToCloud();
+  renderBaustellen();
+}
+
+function removeMonteurFromBaustelle(bauId, monteurName) {
+  console.log('removeMonteurFromBaustelle - bauId:', bauId, 'monteur:', monteurName);
+  
+  const bau = config.baustellen.find(b => b.id === bauId);
+  console.log('Baustelle gefunden:', !!bau);
+  if (!bau) { console.error('❌ Baustelle nicht gefunden!'); return; }
+  
+  const vorher = bau.monteure.length;
+  bau.monteure = bau.monteure.filter(m => m.name !== monteurName);
+  console.log('✅ Monteur entfernt! Vorher:', vorher, 'Nachher:', bau.monteure.length);
+  
+  saveToCloud();
+  renderBaustellen();
+}
+
+function deleteMaengelFromDashboard(monteurName, maengelId) {
+  if (!confirm('Mangel wirklich löschen?')) return;
+  
+  const monteur = allMonteure.find(m => m.name === monteurName);
+  if (!monteur) return;
+  
+  // Löschen aus maengel
+  if (monteur.maengel && Array.isArray(monteur.maengel)) {
+    monteur.maengel = monteur.maengel.filter(m => m && m.id !== maengelId);
+  }
+  
+  // Löschen aus mangel
+  if (monteur.mangel && Array.isArray(monteur.mangel)) {
+    monteur.mangel = monteur.mangel.filter(m => m && m.id !== maengelId);
+  }
+  
+  saveToCloud();
+  renderMonteurDashboard();
+}
+function closeMonteurDialog() {
+  selectedBauIdForMonteur = null;
+  document.getElementById('addMonteurDiv').style.display = 'none';
+  document.getElementById('monteurSelect').value = '';
+  document.getElementById('isLeiter').checked = false;
+}
+function saveRegieStunden(bauId) {
+  const input = document.getElementById('regie_' + bauId);
+  const stunden = parseFloat(input.value) || 0;
+  const bau = config.baustellen.find(b => b.id === bauId);
+  if (bau) {
+    bau.freieStunden = stunden;
+    saveToCloud();
+    renderBaustellen();
+  }
+}
+
+function togglePosFertig(bauId, posId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  if (bau) {
+    const pos = (bau.positionen || []).find(p => p.id === posId);
+    if (pos) {
+      pos.fertig = !pos.fertig;
+      saveToCloud();
+      renderPositionen();
+    }
+  }
+}
+
+function deleteBaustelle(bauId) {
+  if (!confirm('Baustelle löschen?')) return;
+  config.baustellen = config.baustellen.filter(b => b.id !== bauId);
+  saveToCloud();
+  renderBaustellen();
+}
+
+function renderPositionen() {
+  let html = `<div class="section"><div class="section-title">📋 Position einrichten</div>
+    <div class="input-row">
+      <select id="posBauId"><option value="">-- Baustelle --</option>
+        ${config.baustellen.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+      </select>
+      <input type="text" id="posName" placeholder="Position (z.B. Tür 1)">
+      <button class="primary small" onclick="startEditPos()"><i class="ti ti-pencil"></i>Bearbeiten</button>
+    </div></div>
+    <div id="editPosDiv" style="display: none;"><div class="section"><div class="section-title">Tätigkeiten</div>
+      <div class="input-row">
+        <input type="text" id="taskName" placeholder="Tätigkeit">
+        <input type="number" id="taskHours" placeholder="Soll-h" min="0" step="0.5" style="flex: 0 0 100px;">
+        <button class="primary small" onclick="addTaskPos()"><i class="ti ti-plus"></i>Hinzufügen</button>
+      </div></div>
+      <div id="tasksListDiv"></div>
+      <button class="primary" onclick="savePosData()" style="margin-right: 8px;"><i class="ti ti-check"></i>Speichern</button>
+      <button onclick="cancelPosData()"><i class="ti ti-x"></i>Abbrechen</button>
+    </div>
+    <div class="section"><div class="section-title">Alle Positionen</div>
+    ${config.baustellen.length === 0 ? '<p style="color: #999;">Keine Baustellen</p>' : config.baustellen.map(bau => {
+      const bPos = bau.positionen || [];
+      return bPos.length === 0 ? '' : `<div style="margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid #ddd;">
+        <div style="font-weight: 500; margin-bottom: 1rem;">🏗️ ${bau.name}</div>
+        ${bPos.map(pos => {
+          const soll = pos.tasks.reduce((s, t) => s + t.hours, 0);
+          const ist = pos.tasks.reduce((s, t) => s + Object.values(t.monteurHours || {}).reduce((a, b) => a + b, 0), 0);
+          const pct = soll > 0 ? Math.round((ist / soll) * 100) : 0;
+          return `<div class="card" style="${pos.fertig ? 'opacity: 0.8; background: #e8f5e9; border: 2px solid #4CAF50;' : ''}">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; gap: 1rem;">
+              <div style="flex: 1;">
+                <div style="font-weight: 600; font-size: 16px; margin-bottom: 0.5rem;">${pos.name}</div>
+                <div style="font-size: 12px; color: #666; margin-bottom: 0.75rem;"><strong>Soll: ${soll.toFixed(1)}h | Gebucht: ${ist.toFixed(1)}h | Fortschritt: ${pct}%</strong></div>
+                <div class="progress-bar"><div class="progress-fill" style="width: ${pct}%;"></div></div>
+              </div>
+              <div style="text-align: center; padding: 12px 16px; background: ${pos.fertig ? '#4CAF50' : '#f5f5f5'}; border-radius: 8px; border: 2px ${pos.fertig ? 'solid #4CAF50' : 'dashed #ccc'}; cursor: pointer; user-select: none;" onclick="togglePosFertig('${bau.id}', '${pos.id}')">
+                <div style="font-size: 32px; font-weight: bold; color: ${pos.fertig ? 'white' : '#999'}; line-height: 1;">${pos.fertig ? '✓' : '☐'}</div>
+                <div style="font-size: 11px; font-weight: 500; color: ${pos.fertig ? 'white' : '#666'}; margin-top: 6px;">${pos.fertig ? 'ERLEDIGT' : 'AUSSTEHEND'}</div>
+              </div>
+            </div>
+              ${pos.tasks.map(t => {
+                const monteurList = Object.entries(t.monteurHours || {}).map(([name, h]) => `${name}: ${h.toFixed(1)}h`).join(', ');
+                return `<div class="task-item ${t.fertig ? 'done' : ''}" style="cursor: pointer;" onclick="openHourDialog('${bau.id}', '${pos.id}', '${t.id}')">
+                  <div style="font-weight: 500; margin-bottom: 4px;">${t.fertig ? '✅' : '☐'} ${t.name} (Soll: ${t.hours.toFixed(1)}h)</div>
+                  ${monteurList ? `<div style="font-size: 11px; color: #666;">📊 ${monteurList}</div>` : '<div style="font-size: 11px; color: #999;">Noch nicht gebucht</div>'}
+                  <div style="font-size: 10px; color: #999; margin-top: 4px;">Klick zum Stunden eingeben</div>
+                </div>`;
+              }).join('')}
+            </div>
+            ${(() => {
+              const posMangel = allMonteure.flatMap(m => (m.mangel || []).filter(mg => mg.positionId === pos.id));
+              return posMangel.length > 0 ? `
+                <div style="background: #ffebee; padding: 0.75rem; border-radius: 6px; margin-top: 1rem; border-left: 3px solid #f44336;">
+                  <div style="font-weight: 500; color: #c62828; margin-bottom: 0.5rem; font-size: 12px;">⚠️ ${posMangel.length} Mängel | ${posMangel.reduce((s, m) => s + m.aufwand, 0).toFixed(1)}h</div>
+                  ${posMangel.map(m => `<div style="font-size: 11px; color: #c62828; padding: 8px; background: #fff5f5; border-radius: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>• ${m.verursacher}: ${m.aufwand}h ${m.grund ? '(' + m.grund + ')' : ''}</span>
+                    <button onclick="editMangel('${m.id}')" style="padding: 2px 8px; font-size: 11px; background: #ff9800; color: white; border: none; border-radius: 3px; cursor: pointer;">✎ Edit</button>
+                  </div>`).join('')}
+                </div>
+              ` : '';
+            })()}
+            <div style="margin-top: 1rem;"></div>
+            <button class="primary small" onclick="openEditTasksDialog('${bau.id}', '${pos.id}')" style="margin-right: 8px; flex: 1;"><i class="ti ti-plus"></i>Tätigkeiten verwalten</button>
+            <button class="warning small" onclick="openMängelDialog('${bau.id}', '${pos.id}')" style="flex: 1;"><i class="ti ti-alert-circle"></i>Mängel</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('')}
+    </div>`;
+  document.getElementById('screenContent').innerHTML = html;
+}
+
+function startEditPos() {
+  const bauId = document.getElementById('posBauId').value;
+  const name = document.getElementById('posName').value.trim();
+  if (!bauId || !name) { showError('Baustelle + Name erforderlich'); return; }
+  currentEditingPos = { id: 'pos' + Math.random().toString(36).substr(2, 9), name, tasks: [], bauId };
+  document.getElementById('posName').disabled = true;
+  document.getElementById('posBauId').disabled = true;
+  document.getElementById('editPosDiv').style.display = 'block';
+  renderTasksList();
+}
+function addTaskPos() {
+  const name = document.getElementById('taskName').value.trim();
+  const hours = parseFloat(document.getElementById('taskHours').value) || 0;
+  if (!name || hours <= 0) { showError('Name + Stunden erforderlich'); return; }
+  currentEditingPos.tasks.push({ id: 't' + Math.random().toString(36).substr(2, 9), name, hours, monteurHours: {}, fertig: false });
+  document.getElementById('taskName').value = '';
+  document.getElementById('taskHours').value = '';
+  renderTasksList();
+}
+function renderTasksList() {
+  document.getElementById('tasksListDiv').innerHTML = `<div style="background: white; border: 1px solid #ddd; border-radius: 8px; padding: 1rem;">
+    ${currentEditingPos.tasks.map(task => `
+      <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+        <span><strong>${task.name}</strong> ${task.hours.toFixed(1)}h</span>
+        <button class="danger small" onclick="deleteTask('${task.id}')"><i class="ti ti-trash"></i></button>
+      </div>
+    `).join('')}
+  </div>`;
+}
+function deleteTask(taskId) {
+  currentEditingPos.tasks = currentEditingPos.tasks.filter(t => t.id !== taskId);
+  renderTasksList();
+}
+function savePosData() {
+  if (currentEditingPos.tasks.length === 0) { showError('Mindestens eine Tätigkeit'); return; }
+  const bau = config.baustellen.find(b => b.id === currentEditingPos.bauId);
+  if (!bau.positionen) bau.positionen = [];
+  bau.positionen.push(currentEditingPos);
+  saveToCloud();
+  cancelPosData();
+}
+function cancelPosData() {
+  currentEditingPos = null;
+  document.getElementById('posName').value = '';
+  document.getElementById('posName').disabled = false;
+  document.getElementById('posBauId').disabled = false;
+  document.getElementById('posBauId').value = '';
+  document.getElementById('editPosDiv').style.display = 'none';
+  document.getElementById('taskName').value = '';
+  document.getElementById('taskHours').value = '';
+  renderPositionen();
+}
+function deletePos(bauId, posId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  bau.positionen = (bau.positionen || []).filter(p => p.id !== posId);
+  saveToCloud();
+  renderPositionen();
+}
+function openEditTasksDialog(bauId, posId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  
+  const modal = document.createElement('div');
+  modal.id = 'editTasksModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+  
+  // Verhindere dass clicks außerhalb das Modal schließen
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeEditTasksModal();
+    }
+  });
+  
+  let html = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);" onclick="event.stopPropagation();">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 1rem;">📋 ${pos.name} - Tätigkeiten verwalten</div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 1.5rem;">Aktuelle Tätigkeiten: ${pos.tasks.length}</div>
+      
+      <div style="background: #f9f9f9; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; max-height: 250px; overflow-y: auto;">
+        <div style="margin-bottom: 1rem;">
+          <div style="font-weight: 500; margin-bottom: 0.75rem; font-size: 13px;">➕ Neue Tätigkeit hinzufügen:</div>
+          <div style="display: grid; grid-template-columns: 1fr 120px; gap: 8px; margin-bottom: 1rem;">
+            <input type="text" id="newTaskName" placeholder="Tätigkeit (z.B. Schleifen)" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            <input type="number" id="newTaskHours" placeholder="Stunden" min="0" step="0.5" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+          </div>
+          <button class="primary" style="width: 100%; padding: 10px;" onclick="addNewTaskToPos('${bauId}', '${posId}')">
+            <i class="ti ti-plus"></i>Hinzufügen
+          </button>
+        </div>
+        
+        <div style="border-top: 1px solid #ddd; padding-top: 1rem;">
+          <div style="font-weight: 500; margin-bottom: 0.75rem; font-size: 13px;">📌 Vorhandene Tätigkeiten:</div>
+          ${pos.tasks.map((t, idx) => `
+            <div style="padding: 0.75rem; background: white; border-radius: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee;">
+              <div style="flex: 1;">
+                <div style="font-weight: 500; font-size: 13px;">${t.name}</div>
+                <div style="font-size: 11px; color: #666;">${t.hours.toFixed(1)}h</div>
+              </div>
+              <button class="danger small" style="padding: 6px 10px;" onclick="removeTaskFromPos('${bauId}', '${posId}', '${t.id}')">
+                <i class="ti ti-trash"></i>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="primary" style="margin: 0; padding: 10px;" onclick="closeEditTasksModal()">Speichern</button>
+        <button style="margin: 0; padding: 10px;" onclick="closeEditTasksModal()">Fertig</button>
+      </div>
+    </div>
+  `;
+  
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+  
+  // Fokus auf das erste Input-Feld
+  setTimeout(() => document.getElementById('newTaskName')?.focus(), 100);
+}
+
+function showError(message) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);';
+  
+  modal.innerHTML = `
+    <div style="background: linear-gradient(135deg, #ffebee 0%, #fff5f5 100%); border-radius: 16px; padding: 2.5rem; max-width: 420px; box-shadow: 0 20px 60px rgba(244, 67, 54, 0.3); text-align: center; border: 2px solid #ef5350; animation: slideIn 0.3s ease-out;">
+      <style>
+        @keyframes slideIn {
+          from { transform: translateY(-30px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+      </style>
+      
+      <div style="font-size: 64px; margin-bottom: 1rem; animation: bounce 0.6s ease-out; display: inline-block;">
+        ⚠️
+      </div>
+      
+      <div style="font-size: 14px; font-weight: 600; color: #d32f2f; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.75rem;">Fehler</div>
+      
+      <div style="font-size: 16px; font-weight: 500; color: #333; margin-bottom: 2rem; line-height: 1.5;">
+        ${message}
+      </div>
+      
+      <button onclick="this.closest('div').parentElement.remove()" style="padding: 12px 32px; background: linear-gradient(135deg, #ef5350 0%, #e53935 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px; box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4); transition: all 0.2s; letter-spacing: 0.5px;">
+        OK, VERSTANDEN
+      </button>
+    </div>
+    
+    <style>
+      @keyframes bounce {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+      }
+    </style>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+function showSuccess(message) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);';
+  
+  modal.innerHTML = `
+    <div style="background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border-radius: 16px; padding: 2.5rem; max-width: 420px; box-shadow: 0 20px 60px rgba(76, 175, 80, 0.3); text-align: center; border: 2px solid #4caf50; animation: slideIn 0.3s ease-out;">
+      <style>
+        @keyframes slideIn {
+          from { transform: translateY(-30px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+      </style>
+      
+      <div style="font-size: 64px; margin-bottom: 1rem; animation: bounce 0.6s ease-out; display: inline-block;">
+        ✓
+      </div>
+      
+      <div style="font-size: 14px; font-weight: 600; color: #2e7d32; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.75rem;">Erfolg</div>
+      
+      <div style="font-size: 16px; font-weight: 500; color: #333; margin-bottom: 2rem; line-height: 1.5;">
+        ${message}
+      </div>
+      
+      <button onclick="this.closest('div').parentElement.remove()" style="padding: 12px 32px; background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 15px; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4); transition: all 0.2s; letter-spacing: 0.5px;">
+        OK, SUPER!
+      </button>
+    </div>
+    
+    <style>
+      @keyframes bounce {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+      }
+    </style>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Auto-close nach 2 Sekunden
+  setTimeout(() => {
+    modal.remove();
+  }, 2000);
+}
+
+function addNewTaskToPos(bauId, posId) {
+  const nameInput = document.getElementById('newTaskName');
+  const hoursInput = document.getElementById('newTaskHours');
+  
+  if (!nameInput || !hoursInput) return;
+  
+  const name = nameInput.value.trim();
+  const hours = parseFloat(hoursInput.value) || 0;
+  
+  if (!name || hours <= 0) { showError('Name + Stunden erforderlich'); return; }
+  
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  
+  // Task hinzufügen
+  pos.tasks.push({ id: 't' + Math.random().toString(36).substr(2, 9), name, hours, monteurHours: {}, fertig: false });
+  saveToCloud();
+  
+  // Modal SCHLIESSEN
+  const modal = document.getElementById('editTasksModal');
+  if (modal) modal.remove();
+  
+  // Warten, dann NEU ÖFFNEN mit leeren Feldern
+  setTimeout(() => {
+    openEditTasksDialog(bauId, posId);
+  }, 150);
+}
+
+function removeTaskFromPos(bauId, posId, taskId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  pos.tasks = pos.tasks.filter(t => t.id !== taskId);
+  saveToCloud();
+  openEditTasksDialog(bauId, posId);
+}
+
+function closeEditTasksModal() {
+  const modal = document.getElementById('editTasksModal');
+  if (modal) modal.remove();
+  renderPositionen();
+}
+
+function openHourDialog(bauId, posId, taskId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  const task = pos.tasks.find(t => t.id === taskId);
+  
+  const modal = document.createElement('div');
+  modal.id = 'hourModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+  
+  let html = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 450px;">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 1rem;">⏱️ ${task.name}</div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 1.5rem;">Soll-Stunden: <strong>${task.hours.toFixed(1)}h</strong></div>
+      
+      <div style="max-height: 350px; overflow-y: auto; margin-bottom: 1.5rem; border: 1px solid #ddd; border-radius: 6px; padding: 1rem; background: #f9f9f9;">
+  `;
+  
+  bau.monteure.forEach(mon => {
+    const hours = task.monteurHours?.[mon.name] || 0;
+    html += `
+      <div style="padding: 1rem; background: white; border-radius: 6px; margin-bottom: 8px; display: grid; grid-template-columns: 1fr 120px; gap: 12px; align-items: center; border: 1px solid #eee;">
+        <label style="font-weight: 500; margin: 0;">${mon.rolle === 'leiter' ? '👷' : '👨‍🔧'} ${mon.name}</label>
+        <input type="number" class="monteur-hours-input" data-monteur="${mon.name}" value="${hours}" min="0" step="0.5" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; text-align: center;">
+      </div>
+    `;
+  });
+  
+  html += `
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="primary" style="margin: 0; padding: 10px;" onclick="saveHourDialog('${bauId}', '${posId}', '${taskId}')">Speichern</button>
+        <button style="margin: 0; padding: 10px;" onclick="closeHourModal()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+  
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function saveHourDialog(bauId, posId, taskId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  const task = pos.tasks.find(t => t.id === taskId);
+  
+  if (!task.monteurHours) task.monteurHours = {};
+  
+  document.querySelectorAll('.monteur-hours-input').forEach(input => {
+    const monName = input.dataset.monteur;
+    const hours = parseFloat(input.value) || 0;
+    if (hours > 0) {
+      task.monteurHours[monName] = hours;
+    } else {
+      delete task.monteurHours[monName];
+    }
+  });
+  
+  saveToCloud();
+  closeHourModal();
+  renderPositionen();
+}
+
+function closeHourModal() {
+  const modal = document.getElementById('hourModal');
+  if (modal) modal.remove();
+}
+
+function renderMonteure() {
+  // Sortiere Monteure alphabetisch nach Name
+  const sortedMonteure = [...allMonteure].sort((a, b) => 
+    a.name.localeCompare(b.name, 'de')
+  );
+  
+  let html = `<div class="section"><div class="section-title">👥 Monteur-Stammdaten</div>
+    <button class="primary" style="width: 100%; padding: 12px; margin-bottom: 1.5rem; font-size: 15px;"><i class="ti ti-plus"></i>➕ Neuen Monteur hinzufügen</button>
+    ${sortedMonteure.map((m, displayIndex) => {
+      if (m.rolle === 'admin') return '';
+      const actualIndex = allMonteure.indexOf(m);
+      return `
+      <div class="card">
+        <div style="font-weight: 500; margin-bottom: 0.5rem; font-size: 15px;">${m.name}</div>
+        <div style="font-size: 12px; color: #666; margin-bottom: 1rem;">
+          Rolle: <strong>${m.rolle === 'leiter' ? '👷 Leiter' : '👨‍🔧 Monteur'}</strong><br>
+          Tel: <strong>${m.phone || '-'}</strong><br>
+          Fahrzeug: <strong>${m.fahrzeug || '-'}</strong><br>
+          PIN: <strong style="color: #2563eb; font-size: 13px; background: #dbeafe; padding: 2px 8px; border-radius: 4px;">${m.pin || '❌ Nicht gesetzt'}</strong>
+        </div>
+        <button class="primary small" onclick="editMonteur(${actualIndex})" style="width: 100%;"><i class="ti ti-edit"></i>Bearbeiten</button>
+      </div>
+    `;
+    }).join('')}</div>`;
+  document.getElementById('screenContent').innerHTML = html;
+  document.querySelector('button.primary').onclick = openNewMonteurDialog;
+}
+function openNewMonteurDialog() {
+  const modal = document.createElement('div');
+  modal.id = 'newMonteurModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+  
+  modal.innerHTML = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 450px;">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 1.5rem;">➕ Neuen Monteur erstellen</div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Name *</label>
+        <input type="text" id="newMonName" placeholder="z.B. Max Müller" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Rolle</label>
+        <select id="newMonRolle" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+          <option value="monteur">👨‍🔧 Monteur</option>
+          <option value="leiter">👷 Leiter</option>
+        </select>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📍 PIN (4-stellig)</label>
+        <div style="display: grid; grid-template-columns: 1fr 110px; gap: 8px;">
+          <input type="text" id="newMonPin" placeholder="z.B. 1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+          <button style="padding: 10px; border: 1px solid #2563eb; color: #2563eb; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; background: white;" onclick="document.getElementById('newMonPin').value = String(1000 + Math.floor(Math.random() * 8999));">🎲 Gen.</button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📞 Telefonnummer</label>
+        <input type="text" id="newMonPhone" placeholder="z.B. 0041791234567" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">🚗 Fahrzeug</label>
+        <input type="text" id="newMonFahrzeug" placeholder="z.B. VW Transporter" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="primary" style="padding: 12px; margin: 0; font-size: 14px;" onclick="saveNewMonteur()"><i class="ti ti-plus"></i>Erstellen</button>
+        <button style="padding: 12px; margin: 0; font-size: 14px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; color: #333;" onclick="document.getElementById('newMonteurModal').remove()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+function saveNewMonteur() {
+  const name = document.getElementById('newMonName').value.trim();
+  const rolle = document.getElementById('newMonRolle').value;
+  const pin = document.getElementById('newMonPin').value.trim();
+  const phone = document.getElementById('newMonPhone').value.trim();
+  const fahrzeug = document.getElementById('newMonFahrzeug').value.trim();
+  
+  if (!name) { showError('Name erforderlich'); return; }
+  if (allMonteure.find(m => m.name === name)) { showError('Monteur existiert bereits'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { showError('PIN muss 4 Ziffern sein'); return; }
+  
+  allMonteure.push({ name, rolle, phone, fahrzeug, arbeitslog: [], maengel: [] });
+  alert('✓ Monteur ' + name + ' erstellt');
+  document.getElementById('newMonteurModal').remove();
+  renderMonteure();
+}
+
+function editMonteur(index) {
+  const m = allMonteure[index];
+  const modal = document.createElement('div');
+  modal.id = 'editModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; overflow-y: auto;';
+  
+  // Mängel HTML separat bauen
+  let maengelHtml = '';
+  if (m.maengel && m.maengel.length > 0) {
+    maengelHtml = '<div style="background: #ffebee; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; max-height: 200px; overflow-y: auto;">';
+    maengelHtml += '<div style="font-size: 13px; font-weight: 500; color: #c62828; margin-bottom: 0.5rem;">⚠️ Mängel (' + m.maengel.length + '):</div>';
+    maengelHtml += '<div style="font-size: 12px; color: #b71c1c;">';
+    m.maengel.forEach(mg => {
+      maengelHtml += '<div style="margin: 6px 0;">• <strong>' + (mg.kategorie || '?') + '</strong>: ' + (mg.beschreibung || '') + ' (' + (mg.datum || '?') + ')</div>';
+    });
+    maengelHtml += '</div></div>';
+  }
+  
+  modal.innerHTML = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 500px; margin: auto;">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 1.5rem;">✏️ Monteur bearbeiten</div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Name</label>
+        <input type="text" id="editName" value="${m.name}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📍 PIN (4-stellig, nur Admin)</label>
+        <div style="display: grid; grid-template-columns: 1fr 110px; gap: 8px;">
+          <input type="text" id="editPin" value="${m.pin || ''}" placeholder="z.B. 1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-weight: 600; letter-spacing: 2px;">
+          <button style="padding: 10px; border: 1px solid #2563eb; color: #2563eb; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;" onclick="generatePin()">🎲 Gen</button>
+        </div>
+        <div style="font-size: 11px; color: #2563eb; margin-top: 6px; background: #dbeafe; padding: 6px 10px; border-radius: 4px;">✓ Aktuelle PIN: <strong>${m.pin || '❌ Nicht gesetzt'}</strong></div>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📞 Telefonnummer</label>
+        <input type="text" id="editPhone" value="${m.phone || ''}" placeholder="z.B. 0041791234567" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">🚗 Fahrzeug</label>
+        <input type="text" id="editFahrzeug" value="${m.fahrzeug || ''}" placeholder="z.B. MB Sprinter" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      </div>
+      
+      ${maengelHtml}
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="primary" style="margin: 0; padding: 10px;" onclick="saveMonteurEdit(${index})">Speichern</button>
+        <button style="margin: 0; padding: 10px;" onclick="closeEditModal()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function generatePin() {
+  const pin = String(1000 + Math.floor(Math.random() * 8999));
+  document.getElementById('editPin').value = pin;
+}
+
+function saveMonteurEdit(index) {
+  const m = allMonteure[index];
+  m.name = document.getElementById('editName').value.trim() || m.name;
+  m.phone = document.getElementById('editPhone').value.trim();
+  m.fahrzeug = document.getElementById('editFahrzeug').value.trim();
+  
+  // PIN-Änderung nur wenn Admin (currentUser === admin)
+  const pinInput = document.getElementById('editPin').value.trim();
+  if (pinInput && pinInput !== m.pin) {
+    // PIN wurde geändert
+    if (pinInput.length === 4 && /^\d+$/.test(pinInput)) {
+      m.pin = pinInput;
+      showSuccess('PIN aktualisiert: ' + pinInput);
+    } else {
+      showError('PIN muss 4 Ziffern sein (z.B. 1234)');
+      return;
+    }
+  }
+  
+  saveToCloud();
+  closeEditModal();
+  renderMonteure();
+}
+
+function closeEditModal() {
+  const modal = document.getElementById('editModal');
+  if (modal) modal.remove();
+}
+
+// Berechne Statistiken für einen Monteur
+function getMonthForWeek(kw) {
+  // Berechne Monat für Kalenderwoche (Approximation)
+  // KW 1-4 ≈ Januar, KW 5-9 ≈ Februar, etc.
+  if (kw <= 4) return 0;   // Jan
+  if (kw <= 9) return 1;   // Feb
+  if (kw <= 13) return 2;  // Mar
+  if (kw <= 18) return 3;  // Apr
+  if (kw <= 22) return 4;  // May
+  if (kw <= 27) return 5;  // Jun
+  if (kw <= 31) return 6;  // Jul
+  if (kw <= 36) return 7;  // Aug
+  if (kw <= 40) return 8;  // Sep
+  if (kw <= 44) return 9;  // Oct
+  if (kw <= 48) return 10; // Nov
+  return 11; // Dec
+}
+
+function getMonteurStats(monteurName) {
+  const gearbeiteteStunden = Array(12).fill(0);
+  const fehlerStunden = Array(12).fill(0);
+  
+  const monteur = allMonteure.find(m => m.name === monteurName);
+  if (!monteur) return null;
+  
+  // Geleistete Stunden
+  config.baustellen.forEach(bau => {
+    (bau.positionen || []).forEach(pos => {
+      (pos.tasks || []).forEach(task => {
+        if (task.monteurHours && task.monteurHours[monteurName]) {
+          // Nutze Position-Datum wenn vorhanden, sonst aktuellen Monat
+          let monat = new Date().getMonth();
+          if (pos.datum) {
+            monat = new Date(pos.datum + 'T00:00:00').getMonth();
+          }
+          gearbeiteteStunden[monat] += task.monteurHours[monteurName];
+        }
+      });
+    });
+    
+    // Addiere Regiestunden (verteilt auf Monteure der Baustelle)
+    if (bau.freieStunden && bau.freieStunden > 0 && bau.monteure && bau.monteure.length > 0) {
+      const isMonteurOnBaustelle = bau.monteure.some(m => m.name === monteurName);
+      if (isMonteurOnBaustelle) {
+        const regieProMonteur = bau.freieStunden / bau.monteure.length;
+        const monat = new Date().getMonth();
+        gearbeiteteStunden[monat] += regieProMonteur;
+      }
+    }
+  });
+  
+  // Addiere globale Regiestunden pro KW
+  config.regieStunden.forEach(regie => {
+    const monat = getMonthForWeek(regie.kw);
+    // Verteile auf alle Monteure gleichmäßig
+    gearbeiteteStunden[monat] += regie.stunden / allMonteure.length;
+  });
+  
+  // Fehler-Stunden (mangel + maengel)
+  [...(monteur.mangel || []), ...(monteur.maengel || [])].forEach(mg => {
+    try {
+      const datum = new Date(mg.datum + 'T00:00:00');
+      const monat = datum.getMonth();
+      const aufwand = mg.aufwand || 1;
+      fehlerStunden[monat] += aufwand;
+    } catch (e) {
+      console.warn('Fehler bei Datum:', mg.datum);
+    }
+  });
+  
+  // Berechne Fehlerquoten
+  const fehlerQuoten = Array(12).fill(0);
+  let totalStunden = 0;
+  let totalFehler = 0;
+  
+  for (let i = 0; i < 12; i++) {
+    totalStunden += gearbeiteteStunden[i];
+    totalFehler += fehlerStunden[i];
+    
+    if (gearbeiteteStunden[i] > 0) {
+      fehlerQuoten[i] = (fehlerStunden[i] / gearbeiteteStunden[i]) * 100;
+      fehlerQuoten[i] = Math.min(fehlerQuoten[i], 20);
+    }
+  }
+  
+  const gesamtQuote = totalStunden > 0 ? (totalFehler / totalStunden) * 100 : 0;
+  
+  return {
+    name: monteurName,
+    gearbeiteteStunden,
+    fehlerStunden,
+    fehlerQuoten,
+    totalStunden: totalStunden.toFixed(1),
+    totalFehler: totalFehler.toFixed(1),
+    gesamtQuote: gesamtQuote.toFixed(2)
+  };
+}
+
+function renderStatistik() {
+  let html = '<div class="section"><div class="section-title">📊 Baustellen-Übersicht</div>';
+  config.baustellen.forEach(bau => {
+    const pos = bau.positionen || [];
+    const soll = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + tk.hours, 0), 0);
+    const ist = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + Object.values(tk.monteurHours || {}).reduce((a, b) => a + b, 0), 0), 0);
+    const pct = soll > 0 ? Math.round((ist / soll) * 100) : 0;
+    let status = 'status-ok'; if (pct > 100) status = 'status-danger'; else if (pct < 100) status = 'status-warning';
+    html += `<div class="card"><div style="font-weight: 500; font-size: 16px; margin-bottom: 1rem;">${bau.name}</div>
+      <div class="status-banner ${status}">${pct > 100 ? '✕ Über Soll' : pct === 100 ? '✓ Im Soll' : '⚠ Noch Zeit'}</div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-label">Soll</div><div class="stat-value">${soll.toFixed(1)}h</div></div>
+        <div class="stat-box"><div class="stat-label">Gebucht</div><div class="stat-value">${ist.toFixed(1)}h</div></div>
+        <div class="stat-box"><div class="stat-label">Verfügbar</div><div class="stat-value">${Math.max(0, soll - ist).toFixed(1)}h</div></div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(pct, 100)}%;"></div></div>
+      <div style="margin-top: 1.5rem; font-size: 12px;"><strong>Buchungen:</strong><br>
+        ${bau.monteure.map(mon => {
+          const h = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + (tk.monteurHours?.[mon.name] || 0), 0), 0);
+          return `• ${mon.name}: <strong>${h.toFixed(1)}h</strong><br>`;
+        }).join('')}
+      </div>
+    </div>`;
+  });
+  document.getElementById('screenContent').innerHTML = html + '</div>';
+}
+
+function renderBaustelleÜbersicht() {
+  let html = '<div class="section"><div class="section-title">🏗️ Baustellen-Übersichten</div>';
+  
+  config.baustellen.forEach(bau => {
+    const pos = bau.positionen || [];
+    const soll = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + tk.hours, 0), 0);
+    const ist = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + Object.values(tk.monteurHours || {}).reduce((a, b) => a + b, 0), 0), 0);
+    const diff = soll - ist;
+    const pct = soll > 0 ? Math.round((ist / soll) * 100) : 0;
+    let status = 'status-ok'; if (pct > 100) status = 'status-danger'; else if (pct < 100) status = 'status-warning';
+    
+    html += `<div class="card">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 0.5rem;">${bau.name}</div>
+      <div style="font-size: 12px; color: #999; margin-bottom: 1rem;">📍 ${bau.ort}</div>
+      
+      <div class="status-banner ${status}">
+        ${pct > 100 ? '✕ Über Soll (' + (ist - soll).toFixed(1) + 'h)' : pct === 100 ? '✓ Soll erfüllt' : '⚠ ' + diff.toFixed(1) + 'h verbleibend'}
+      </div>
+      
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-label">Soll (${pos.length} Pos.)</div><div class="stat-value">${soll.toFixed(1)}h</div></div>
+        <div class="stat-box"><div class="stat-label">Gebucht</div><div class="stat-value">${ist.toFixed(1)}h</div></div>
+        <div class="stat-box"><div class="stat-label">Progress</div><div class="stat-value">${pct}%</div></div>
+      </div>
+      
+      <div class="progress-bar" style="height: 12px; margin-bottom: 1rem;"><div class="progress-fill" style="width: ${Math.min(pct, 100)}%;"></div></div>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <div style="font-weight: 500; margin-bottom: 1rem; font-size: 14px;">📊 Positionen (${pos.length}):</div>
+        <div style="max-height: 300px; overflow-y: auto;">
+          ${pos.map((p, idx) => {
+            const pSoll = p.tasks.reduce((s, t) => s + t.hours, 0);
+            const pIst = p.tasks.reduce((s, t) => s + Object.values(t.monteurHours || {}).reduce((a, b) => a + b, 0), 0);
+            const pPct = pSoll > 0 ? Math.round((pIst / pSoll) * 100) : 0;
+            return `
+              <div style="padding: 0.75rem; background: #f9f9f9; border-radius: 4px; margin-bottom: 6px; border-left: 3px solid ${pPct === 100 ? '#4CAF50' : pPct > 0 ? '#ff9800' : '#ddd'};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-weight: 500; font-size: 13px;">${idx + 1}. ${p.name}</span>
+                  <span style="font-size: 11px; font-weight: 500; color: ${pPct === 100 ? '#4CAF50' : pPct > 0 ? '#ff9800' : '#999'};">${pPct}%</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666;">
+                  <span>Soll: <strong>${pSoll.toFixed(1)}h</strong></span>
+                  <span>Gebucht: <strong>${pIst.toFixed(1)}h</strong></span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+      
+      <div style="background: #f9f9f9; padding: 1rem; border-radius: 6px;">
+        <div style="font-weight: 500; margin-bottom: 0.75rem; font-size: 13px;">👥 Monteur-Leistung:</div>
+        ${bau.monteure.map(mon => {
+          const monHours = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + (tk.monteurHours?.[mon.name] || 0), 0), 0);
+          return `<div style="padding: 6px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; font-size: 12px;">
+            <span>${mon.name}</span>
+            <strong>${monHours.toFixed(1)}h</strong>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  });
+  
+  document.getElementById('screenContent').innerHTML = html + '</div>';
+}
+
+function renderMonteureEntwicklung() {
+  let html = '<div class="section"><div class="section-title">📈 Monteure-Entwicklung (Fehlerquoten)</div>';
+  
+  html += '<div style="background: #e3f2fd; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; border-left: 3px solid #2196F3;">';
+  html += '<div style="font-size: 12px; color: #1565C0;"><strong>👥 Klick auf einen Monteur</strong> → zeigt Fehlerquote pro Monat</div>';
+  html += '</div>';
+  
+  html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">';
+  
+  allMonteure.forEach(monteur => {
+    if (monteur.rolle === 'admin') return;
+    
+    const stats = getMonteurStats(monteur.name);
+    if (!stats) return;
+    
+    const quote = parseFloat(stats.gesamtQuote);
+    let quoteColor = '#4CAF50';
+    let quoteBgColor = '#e8f5e9';
+    if (quote > 5) {
+      quoteColor = '#f44336';
+      quoteBgColor = '#ffebee';
+    } else if (quote > 3) {
+      quoteColor = '#ff9800';
+      quoteBgColor = '#fff3e0';
+    }
+    
+    html += `<div style="background: white; padding: 1.5rem; border-radius: 8px; border: 2px solid #e0e0e0; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.boxShadow='none'" onclick="showMonteurStatistik('${monteur.name}')">
+      <div style="font-size: 16px; font-weight: 500; margin-bottom: 1rem;">${monteur.name}</div>
+      <div style="display: grid; gap: 0.75rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #666;">Stunden:</span>
+          <strong style="color: #2196F3;">${stats.totalStunden}h</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #666;">Fehler:</span>
+          <strong style="color: #f44336;">${stats.totalFehler}h</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; background: ${quoteBgColor}; padding: 0.75rem; border-radius: 4px;">
+          <span style="color: #666;">Fehlerquote:</span>
+          <strong style="color: ${quoteColor};">${stats.gesamtQuote}%</strong>
+        </div>
+      </div>
+      <button style="width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">📊 Diagramm anzeigen</button>
+    </div>`;
+  });
+  
+  html += '</div></div>';
+  document.getElementById('screenContent').innerHTML = html;
+}
+
+function showMonteurStatistik(monteurName) {
+  const monteur = allMonteure.find(m => m.name === monteurName);
+  if (!monteur) return;
+  
+  const kategorien = ['Küche', 'Innenausbau', 'Fenster', 'Türe', 'Ladenbau', 'Sonstiges'];
+  const allMaengel = [...(monteur.mangel || []), ...(monteur.maengel || [])];
+  
+  // Gruppiere Mängel nach Kategorie
+  const byKat = {};
+  kategorien.forEach(k => byKat[k] = []);
+  allMaengel.forEach(mg => {
+    const kat = mg.kategorie || 'Sonstiges';
+    if (!byKat[kat]) byKat[kat] = [];
+    byKat[kat].push(mg);
+  });
+  
+  // Berechne Statistiken pro Kategorie
+  const katStats = {};
+  kategorien.forEach(kat => {
+    const maengel = byKat[kat] || [];
+    const fehlerStunden = maengel.reduce((s, m) => s + (m.aufwand || 1), 0);
+    katStats[kat] = {
+      count: maengel.length,
+      fehlerStunden: fehlerStunden,
+      maengel: maengel
+    };
+  });
+  
+  let html = '<div class="section"><div class="section-title">📊 ' + monteurName + ' - Jahres-Übersicht</div>';
+  html += '<button onclick="switchTab(5)" style="margin-bottom: 1.5rem; padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">← Zurück zu Monteure-Entwicklung</button>';
+  
+  // KATEGORIEN-ÜBERSICHT
+  html += '<div style="background: white; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">';
+  html += '<div style="font-size: 14px; font-weight: 500; margin-bottom: 1rem;">📈 Fehler nach Kategorie:</div>';
+  
+  html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">';
+  
+  kategorien.forEach(kat => {
+    const stats = katStats[kat];
+    const hasErrors = stats.count > 0;
+    const bgColor = hasErrors ? '#ffebee' : '#e8f5e9';
+    const borderColor = hasErrors ? '#f44336' : '#4CAF50';
+    const textColor = hasErrors ? '#c62828' : '#2e7d32';
+    
+    html += `<div style="background: ${bgColor}; padding: 1rem; border-radius: 6px; border-left: 4px solid ${borderColor};">
+      <div style="font-size: 13px; font-weight: 500; color: ${textColor}; margin-bottom: 0.75rem;">🏷️ ${kat}</div>
+      <div style="display: grid; gap: 0.5rem; font-size: 12px;">
+        <div><span style="color: #666;">Fehler:</span> <strong style="color: ${textColor}; font-size: 16px;">${stats.count}</strong></div>
+        <div><span style="color: #666;">Stunden:</span> <strong style="color: #f44336;">${stats.fehlerStunden.toFixed(1)}h</strong></div>
+      </div>
+    </div>`;
+  });
+  
+  html += '</div></div>';
+  
+  // DETAILLIERTE LISTE PRO KATEGORIE
+  html += '<div style="background: white; padding: 1.5rem; border-radius: 8px;">';
+  html += '<div style="font-size: 14px; font-weight: 500; margin-bottom: 1rem;">⚠️ Detaillierte Mängel-Liste:</div>';
+  
+  kategorien.forEach(kat => {
+    const maengel = katStats[kat].maengel;
+    if (maengel.length === 0) return;
+    
+    html += `<div style="margin-bottom: 1.5rem; padding: 1rem; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #2196F3;">
+      <div style="font-size: 13px; font-weight: 500; color: #1565C0; margin-bottom: 1rem;">📂 ${kat} (${maengel.length})</div>
+      <div style="display: grid; gap: 0.75rem;">`;
+    
+    maengel.forEach((mg, idx) => {
+      const aufwand = (mg.aufwand || 1).toFixed(1);
+      const datum = mg.datum || '?';
+      const beschreibung = mg.beschreibung || mg.grund || '-';
+      
+      html += `<div style="background: white; padding: 0.75rem; border-radius: 4px; border-left: 2px solid #f44336;">
+        <div style="font-size: 12px; color: #333; margin-bottom: 0.5rem;"><strong>#${idx + 1}:</strong> ${beschreibung}</div>
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #999;">
+          <span>⏱️ ${aufwand}h</span>
+          <span>📅 ${datum}</span>
+        </div>
+      </div>`;
+    });
+    
+    html += '</div></div>';
+  });
+  
+  html += '</div></div>';
+  document.getElementById('screenContent').innerHTML = html;
+}
+
+function renderMaengel() {
+  const kategorien = ['Küche', 'Innenausbau', 'Fenster', 'Türe', 'Ladenbau', 'Sonstiges'];
+  
+  let html = '<div class="section"><div class="section-title">⚠️ Mängel-Erfassung</div>';
+  
+  // FILTER-ROW
+  html += `
+    <div style="background: #f5f5f5; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div>
+        <label style="font-size: 12px; color: #666; font-weight: 500; display: block; margin-bottom: 8px;">Kategorie anzeigen:</label>
+        <select id="filterKategorie" onchange="updateMaengelList()" style="width:100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          <option value="">-- Alle Kategorien --</option>
+  `;
+  
+  kategorien.forEach(k => {
+    html += `<option value="${k}">${k}</option>`;
+  });
+  
+  html += `
+        </select>
+      </div>
+      
+      <div>
+        <label style="font-size: 12px; color: #666; font-weight: 500; display: block; margin-bottom: 8px;">Monteur:</label>
+        <select id="filterMonteur" onchange="updateMaengelList()" style="width:100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          <option value="">-- Alle Monteure --</option>
+  `;
+  
+  allMonteure.forEach(m => {
+    if (m.rolle !== 'admin') html += `<option value="${m.name}">${m.name}</option>`;
+  });
+  
+  html += `
+        </select>
+      </div>
+    </div>
+  `;
+  
+  // Formular
+  html += `
+    <div style="background: #f5f5f5; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+      <div class="input-row">
+        <div><label>Monteur:</label>
+        <select id="maengelMonteur" style="width:100%;">
+          <option>-- Wähle Monteur --</option>
+  `;
+  
+  allMonteure.forEach(m => {
+    if (m.rolle !== 'admin') html += `<option>${m.name}</option>`;
+  });
+  
+  html += `
+        </select></div>
+        <div><label>Kategorie:</label>
+        <select id="maengelKategorie" style="width:100%;">
+          <option>-- Wähle Kategorie --</option>
+  `;
+  
+  kategorien.forEach(k => {
+    html += `<option>${k}</option>`;
+  });
+  
+  html += `
+        </select></div>
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label>Beschreibung:</label>
+        <input type="text" id="maengelBeschreibung" placeholder="z.B. Corpus nicht im Wasser eingebaut" style="width:100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <label>Datum:</label>
+        <input type="date" id="maengelDatum" style="width:100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+      </div>
+      
+      <button onclick="saveMaengel()" style="width:100%; padding: 10px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">💾 Mangel speichern</button>
+    </div>
+  `;
+  
+  // Alle Mängel anzeigen
+  html += '<div class="section-title" style="margin-top: 2rem;">Übersicht Mängel</div>';
+  html += '<div id="maengelListContainer"></div>';
+  
+  html += '</div>';
+  document.getElementById('adminScreen').innerHTML = html;
+  
+  // Set today's date as default
+  document.getElementById('maengelDatum').valueAsDate = new Date();
+  
+  // Initial list
+  updateMaengelList();
+}
+
+function updateMaengelList() {
+  const filterKat = document.getElementById('filterKategorie')?.value || '';
+  const filterMon = document.getElementById('filterMonteur')?.value || '';
+  
+  const allMaengel = [];
+  allMonteure.forEach(m => {
+    (m.maengel || []).forEach(mg => {
+      allMaengel.push({ ...mg, monteur: m.name });
+    });
+  });
+  
+  // Filter
+  const filtered = allMaengel.filter(m => {
+    if (filterKat && m.kategorie !== filterKat) return false;
+    if (filterMon && m.monteur !== filterMon) return false;
+    return true;
+  });
+  
+  let html = '';
+  if (filtered.length === 0) {
+    html = '<div style="text-align: center; padding: 2rem; color: #999;">Keine Mängel gefunden</div>';
+  } else {
+    html = '<table style="width:100%; border-collapse: collapse; font-size: 13px;">';
+    html += '<tr style="background: #f0f0f0; font-weight: bold;"><th style="padding: 8px; text-align: left;">Monteur</th><th>Kategorie</th><th>Beschreibung</th><th>Datum</th><th>Aktion</th></tr>';
+    
+    filtered.forEach((mg, idx) => {
+      html += `<tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 8px;">${mg.monteur}</td>
+        <td>${mg.kategorie}</td>
+        <td>${mg.beschreibung}</td>
+        <td>${mg.datum}</td>
+        <td><button onclick="deleteMaengelById('${mg.monteur}', '${mg.id}')" style="background: #f44336; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">🗑️</button></td>
+      </tr>`;
+    });
+    
+    html += '</table>';
+  }
+  
+  document.getElementById('maengelListContainer').innerHTML = html;
+}
+
+function saveMaengel() {
+  const monteur = document.getElementById('maengelMonteur').value;
+  const kategorie = document.getElementById('maengelKategorie').value;
+  const beschreibung = document.getElementById('maengelBeschreibung').value;
+  const datum = document.getElementById('maengelDatum').value;
+  
+  if (!monteur || !kategorie || !beschreibung || !datum) {
+    showError('Alle Felder ausfüllen!');
+    return;
+  }
+  
+  const monteurObj = allMonteure.find(m => m.name === monteur);
+  if (!monteurObj) {
+    showError('Monteur nicht gefunden!');
+    return;
+  }
+  
+  const maengel = {
+    id: 'mg_' + Date.now(),
+    kategorie: kategorie,
+    beschreibung: beschreibung,
+    datum: datum,
+    ersteller: currentUser.name
+  };
+  
+  if (!monteurObj.maengel) monteurObj.maengel = [];
+  monteurObj.maengel.push(maengel);
+  
+  saveToCloud();
+  showError('✅ Mangel gespeichert!');
+  renderMaengel();
+}
+
+function deleteMaengelById(monteurName, maengelId) {
+  if (!confirm('Mangel wirklich löschen?')) return;
+  
+  const monteur = allMonteure.find(m => m.name === monteurName);
+  if (!monteur) return;
+  
+  // Versuche aus maengel zu löschen
+  if (monteur.maengel && Array.isArray(monteur.maengel)) {
+    const beforeLen = monteur.maengel.length;
+    monteur.maengel = monteur.maengel.filter(m => m && m.id !== maengelId);
+    if (monteur.maengel.length < beforeLen) {
+      saveToCloud();
+      renderMaengel();
+      return;
+    }
+  }
+  
+  // Versuche aus mangel zu löschen (alte Struktur)
+  if (monteur.mangel && Array.isArray(monteur.mangel)) {
+    const beforeLen = monteur.mangel.length;
+    monteur.mangel = monteur.mangel.filter(m => m && m.id !== maengelId);
+    if (monteur.mangel.length < beforeLen) {
+      saveToCloud();
+      renderMaengel();
+      return;
+    }
+  }
+  
+  console.warn('Mangel nicht gefunden:', maengelId);
+}
+
+function renderStatistik() {
+  const monate = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+  
+  // Berechne für jeden Monat: Fehlerquote % = (Fehler-Stunden / Geleistete Stunden) * 100
+  const fehlerQuoten = Array(12).fill(0);
+  const gearbeiteteStunden = Array(12).fill(0);
+  const fehlerStunden = Array(12).fill(0);
+  
+  // Sammle alle Daten
+  allMonteure.forEach(m => {
+    // Geleistete Stunden aus Baustellen
+    config.baustellen.forEach(bau => {
+      (bau.positionen || []).forEach(pos => {
+        (pos.tasks || []).forEach(task => {
+          if (task.monteurHours && task.monteurHours[m.name]) {
+            // Nutze Position-Datum wenn vorhanden, sonst aktuellen Monat
+            let monat = new Date().getMonth();
+            if (pos.datum) {
+              monat = new Date(pos.datum + 'T00:00:00').getMonth();
+            }
+            gearbeiteteStunden[monat] += task.monteurHours[m.name];
+          }
+        });
+      });
+    });
+    
+    // Addiere globale Regiestunden pro KW (verteilt auf Monteure)
+    config.regieStunden.forEach(regie => {
+      const monat = getMonthForWeek(regie.kw);
+      gearbeiteteStunden[monat] += regie.stunden / allMonteure.length;
+    });
+    
+    // Fehler-Stunden aus mangel (alte) und maengel (neue)
+    [...(m.mangel || []), ...(m.maengel || [])].forEach(mg => {
+      try {
+        const datum = new Date(mg.datum + 'T00:00:00');
+        const monat = datum.getMonth();
+        const aufwand = mg.aufwand || 1; // Standard 1h wenn nicht angegeben
+        fehlerStunden[monat] += aufwand;
+      } catch (e) {
+        console.warn('Fehler bei Datum:', mg.datum);
+      }
+    });
+  });
+  
+  // Berechne Fehlerquoten (%)
+  for (let i = 0; i < 12; i++) {
+    if (gearbeiteteStunden[i] > 0) {
+      fehlerQuoten[i] = (fehlerStunden[i] / gearbeiteteStunden[i]) * 100;
+      // Begrenzen auf 20% für bessere Darstellung
+      fehlerQuoten[i] = Math.min(fehlerQuoten[i], 20);
+    }
+  }
+  
+  let html = '<div class="section"><div class="section-title">📊 Jahres-Statistik: Fehlerquote (Six Sigma)</div>';
+  
+  // KATEGORIEN-STATISTIK HINZUFÜGEN
+  const kategorien = ['Küche', 'Innenausbau', 'Fenster', 'Türe', 'Ladenbau', 'Sonstiges'];
+  const farbeKat = {
+    'Küche': '#FF6384',
+    'Innenausbau': '#36A2EB',
+    'Fenster': '#FFCE56',
+    'Türe': '#4BC0C0',
+    'Ladenbau': '#9966FF',
+    'Sonstiges': '#FF9F40'
+  };
+  
+  // Berechne Fehler pro Kategorie (einfache Variante)
+  const katStats = {};
+  kategorien.forEach(k => katStats[k] = { fehler: 0 });
+  
+  allMonteure.forEach(m => {
+    [...(m.mangel || []), ...(m.maengel || [])].forEach(mg => {
+      const kat = mg.kategorie || 'Sonstiges';
+      if (!katStats[kat]) katStats[kat] = { fehler: 0 };
+      katStats[kat].fehler += (mg.aufwand || 1);
+    });
+  });
+  
+  html += '<div style="background: #f5f5f5; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">';
+  html += '<div style="font-size: 14px; font-weight: 500; margin-bottom: 1rem;">🎨 Jahresfehler nach Kategorie:</div>';
+  html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">';
+  
+  kategorien.forEach(kat => {
+    const stats = katStats[kat];
+    const farbe = farbeKat[kat];
+    
+    html += `<div style="background: white; padding: 1rem; border-radius: 6px; border-left: 4px solid ${farbe}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      <div style="font-size: 13px; font-weight: 500; color: ${farbe}; margin-bottom: 0.75rem;">🏷️ ${kat}</div>
+      <div style="font-size: 20px; font-weight: bold; color: ${farbe}; margin-bottom: 0.5rem;">${stats.fehler.toFixed(1)}h</div>
+      <div style="font-size: 11px; color: #999;">Fehler-Stunden</div>
+    </div>`;
+  });
+  
+  html += '</div></div>';
+  
+  html += '<div style="background: #e8f5e9; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; border-left: 3px solid #4CAF50;">';
+  html += '<div style="font-size: 12px; color: #2e7d32; line-height: 1.5;"><strong>📐 Formel:</strong> (Fehler-Stunden ÷ Geleistete Stunden) × 100<br>';
+  html += '<strong>🎯 Ziel:</strong> 0% | <strong>✓ Akzeptabel:</strong> ≤ 3% | <strong>⚠️ Warnung:</strong> 3-5% | <strong>🚨 Kritisch:</strong> > 5%</div>';
+  html += '</div>';
+  
+  html += '<div style="background: white; padding: 2rem; border-radius: 8px; margin-bottom: 2rem;">';
+  html += '<canvas id="fehlerquotenChart" style="max-height: 400px;"></canvas>';
+  html += '</div>';
+  html += '<button onclick="switchTab(5)" style="width: 100%; padding: 12px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">← Zurück zu Daten</button>';
+  html += '</div>';
+  
+  const screenContent = document.getElementById('screenContent');
+  if (screenContent) {
+    screenContent.innerHTML = html;
+  }
+  
+  // Chart zeichnen
+  setTimeout(() => {
+    const ctx = document.getElementById('fehlerquotenChart');
+    if (!ctx) {
+      console.warn('Canvas nicht gefunden');
+      return;
+    }
+    
+    // Zerstöre alten Chart
+    if (window.fehlerquotenChartInstance) {
+      window.fehlerquotenChartInstance.destroy();
+    }
+    
+    window.fehlerquotenChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: monate,
+        datasets: [
+          {
+            label: 'Fehlerquote (%)',
+            data: fehlerQuoten,
+            borderColor: '#f44336',
+            backgroundColor: '#f4433620',
+            borderWidth: 3,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 6,
+            pointHoverRadius: 8,
+            pointBackgroundColor: '#f44336',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2
+          },
+          {
+            label: 'Ziel: 0%',
+            data: Array(12).fill(0),
+            borderColor: '#4CAF50',
+            borderDash: [5, 5],
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false
+          },
+          {
+            label: 'Warnung: 3%',
+            data: Array(12).fill(3),
+            borderColor: '#ff9800',
+            borderDash: [5, 5],
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false
+          },
+          {
+            label: 'Kritisch: 5%',
+            data: Array(12).fill(5),
+            borderColor: '#f44336',
+            borderDash: [5, 5],
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            position: 'top'
+          },
+          title: {
+            display: true,
+            text: 'Fehlerquote pro Monat (Jan-Dez) - Ziel: 0-3%'
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 20,
+            ticks: {
+              callback: function(value) {
+                return value + '%';
+              }
+            },
+            title: {
+              display: true,
+              text: 'Fehlerquote (%)'
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Monat'
+            }
+          }
+        }
+      }
+    });
+    
+    console.log('✅ Fehlerquoten-Chart erstellt:', fehlerQuoten);
+  }, 200);
+}
+
+
+function renderFehleranalyse() {
+  let html = '<div class="section"><div class="section-title">📊 Fehleranalyse - Six Sigma</div>';
+  
+  html += `<div style="background: #e8f5e9; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #4CAF50;">
+    <div style="font-size: 13px; color: #2e7d32; line-height: 1.6;">
+      <strong>Six Sigma Qualitätskontrolle:</strong><br>
+      🎯 <strong>Soll:</strong> 0 Fehler<br>
+      ✓ <strong>Akzeptabel:</strong> ≤ 3% Fehlerquote<br>
+      ⚠️ <strong>Kritisch:</strong> > 5% Fehlerquote<br>
+      <strong style="color: #1b5e20;">Formel:</strong> (Fehler-Aufwand ÷ Geleistete Stunden) × 100
+    </div>
+  </div>`;
+  
+  // Aggregate monteur stats
+  const monteurStats = {};
+  allMonteure.forEach(m => {
+    const mangel = m.mangel || [];
+    const gesamtStunden = config.baustellen.flatMap(b => b.positionen || [])
+      .flatMap(p => p.tasks || [])
+      .reduce((s, t) => s + (t.monteurHours?.[m.name] || 0), 0);
+    
+    const fehlerStunden = mangel.reduce((s, mg) => s + mg.aufwand, 0);
+    const fehlerQuote = gesamtStunden > 0 ? (fehlerStunden / gesamtStunden) * 100 : 0;
+    
+    if (gesamtStunden > 0) {
+      monteurStats[m.name] = {
+        gesamtStunden: gesamtStunden,
+        fehlerStunden: fehlerStunden,
+        fehlerAnzahl: mangel.length,
+        fehlerQuote: fehlerQuote.toFixed(2),
+        status: fehlerQuote <= 3 ? 'ok' : fehlerQuote <= 5 ? 'warning' : 'critical',
+        mangel: mangel,
+        durchschnittFehler: mangel.length > 0 ? (fehlerStunden / mangel.length).toFixed(2) : 0
+      };
+    }
+  });
+  
+  if (Object.keys(monteurStats).length === 0) {
+    html += '<div style="text-align: center; padding: 2rem; color: #999;">Noch keine Daten erfasst - Baustellen starten!</div>';
+  } else {
+    // Summary stats
+    const sorted = Object.entries(monteurStats).sort((a, b) => parseFloat(b[1].fehlerQuote) - parseFloat(a[1].fehlerQuote));
+    const totalStunden = sorted.reduce((s, [_, data]) => s + data.gesamtStunden, 0);
+    const totalFehler = sorted.reduce((s, [_, data]) => s + data.fehlerStunden, 0);
+    const durchschnittQuote = totalStunden > 0 ? ((totalFehler / totalStunden) * 100).toFixed(2) : 0;
+    const kritischCount = sorted.filter(([_, data]) => parseFloat(data.fehlerQuote) > 5).length;
+    const okCount = sorted.filter(([_, data]) => parseFloat(data.fehlerQuote) <= 3).length;
+    
+    html += `<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 2rem;">
+      <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+        <div style="font-size: 11px; color: #1565c0; font-weight: 500;">👥 MONTEURE</div>
+        <div style="font-size: 28px; font-weight: 700; color: #2196F3;">${sorted.length}</div>
+      </div>
+      <div style="background: ${durchschnittQuote <= 3 ? '#e8f5e9' : durchschnittQuote <= 5 ? '#fff3e0' : '#ffebee'}; padding: 1.5rem; border-radius: 8px; text-align: center; border-left: 4px solid ${durchschnittQuote <= 3 ? '#4CAF50' : durchschnittQuote <= 5 ? '#ff9800' : '#f44336'};">
+        <div style="font-size: 11px; color: ${durchschnittQuote <= 3 ? '#2e7d32' : durchschnittQuote <= 5 ? '#e65100' : '#c62828'}; font-weight: 500;">⌀ FEHLERQUOTE</div>
+        <div style="font-size: 28px; font-weight: 700; color: ${durchschnittQuote <= 3 ? '#4CAF50' : durchschnittQuote <= 5 ? '#ff9800' : '#f44336'};">${durchschnittQuote}%</div>
+      </div>
+      <div style="background: #e8f5e9; padding: 1.5rem; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+        <div style="font-size: 11px; color: #2e7d32; font-weight: 500;">✓ OK (≤3%)</div>
+        <div style="font-size: 28px; font-weight: 700; color: #4CAF50;">${okCount}</div>
+      </div>
+      <div style="background: ${kritischCount > 0 ? '#ffebee' : '#e8f5e9'}; padding: 1.5rem; border-radius: 8px; text-align: center; border-left: 4px solid ${kritischCount > 0 ? '#f44336' : '#4CAF50'};">
+        <div style="font-size: 11px; color: ${kritischCount > 0 ? '#c62828' : '#2e7d32'}; font-weight: 500;">⚠️ KRITISCH (>5%)</div>
+        <div style="font-size: 28px; font-weight: 700; color: ${kritischCount > 0 ? '#f44336' : '#4CAF50'};">${kritischCount}</div>
+      </div>
+    </div>`;
+    
+    sorted.forEach(([monName, stats]) => {
+      const statusColor = stats.status === 'ok' ? '#4CAF50' : stats.status === 'warning' ? '#ff9800' : '#f44336';
+      const statusBg = stats.status === 'ok' ? '#e8f5e9' : stats.status === 'warning' ? '#fff3e0' : '#ffebee';
+      const statusText = stats.status === 'ok' ? '✓ AKZEPTABEL' : stats.status === 'warning' ? '⚠ WARNUNG' : '✕ KRITISCH';
+      
+      html += `<div class="card" style="border-left: 4px solid ${statusColor};">
+        <div style="display: grid; grid-template-columns: 1fr auto; align-items: start; margin-bottom: 1rem;">
+          <div>
+            <div style="font-weight: 600; font-size: 16px;">${monName}</div>
+            <div style="font-size: 12px; color: #666;">Leistung: ${stats.gesamtStunden.toFixed(1)}h</div>
+          </div>
+          <div style="background: ${statusBg}; padding: 0.5rem 1rem; border-radius: 4px; font-weight: 700; color: ${statusColor}; font-size: 13px; text-align: center;">
+            <div style="font-size: 18px;">${stats.fehlerQuote}%</div>
+            <div style="font-size: 10px;">${statusText}</div>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 1rem;">
+          <div style="background: #e3f2fd; padding: 1rem; border-radius: 6px; text-align: center; border-left: 3px solid #2196F3;">
+            <div style="font-size: 11px; color: #1565c0; font-weight: 500;">Geleistete Stunden</div>
+            <div style="font-size: 22px; font-weight: 700; color: #2196F3;">${stats.gesamtStunden.toFixed(1)}h</div>
+          </div>
+          <div style="background: ${statusBg}; padding: 1rem; border-radius: 6px; text-align: center; border-left: 3px solid ${statusColor};">
+            <div style="font-size: 11px; color: ${statusColor}; font-weight: 500;">Fehler-Aufwand</div>
+            <div style="font-size: 22px; font-weight: 700; color: ${statusColor};">${stats.fehlerStunden.toFixed(1)}h</div>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 1rem;">
+          <div style="background: #f5f5f5; padding: 0.75rem; border-radius: 4px; text-align: center;">
+            <div style="font-size: 10px; color: #666;">Fehleranzahl</div>
+            <div style="font-size: 18px; font-weight: 700; color: #333;">${stats.fehlerAnzahl}</div>
+          </div>
+          <div style="background: #f5f5f5; padding: 0.75rem; border-radius: 4px; text-align: center;">
+            <div style="font-size: 10px; color: #666;">Ø Fehler-h</div>
+            <div style="font-size: 18px; font-weight: 700; color: #333;">${stats.durchschnittFehler}h</div>
+          </div>
+          <div style="background: #f5f5f5; padding: 0.75rem; border-radius: 4px; text-align: center;">
+            <div style="font-size: 10px; color: #666;">DPMO</div>
+            <div style="font-size: 18px; font-weight: 700; color: #333;">${(parseFloat(stats.fehlerQuote) * 10000).toFixed(0)}</div>
+          </div>
+        </div>
+        
+        ${stats.mangel.length > 0 ? `
+          <div style="background: ${statusBg}; padding: 1rem; border-radius: 6px;">
+            <div style="font-weight: 600; margin-bottom: 0.75rem; font-size: 12px; color: ${statusColor};">🔍 Fehlerdetails (${stats.mangel.length}):</div>
+            <div style="max-height: 300px; overflow-y: auto;">
+              ${stats.mangel.map(m => `
+                <div style="padding: 8px 0; border-bottom: 1px solid ${statusColor}33; font-size: 11px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                    <strong style="color: ${statusColor};">${m.position}</strong>
+                    <span style="font-weight: 700; color: ${statusColor};">${m.aufwand}h</span>
+                  </div>
+                  <div style="color: #666; font-size: 10px;">${m.grund || 'Mängel'} | ${m.datum || '?'}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : `<div style="background: #e8f5e9; padding: 1rem; border-radius: 6px; color: #2e7d32; font-size: 12px; font-weight: 500;">✓ Keine Fehler erfasst - Weiter so!</div>`}
+      </div>`;
+    });
+  }
+  
+  html += '</div>';
+  document.getElementById('screenContent').innerHTML = html;
+}
+
+function renderDaten() {
+  document.getElementById('screenContent').innerHTML = `<div class="section">
+    <button class="primary" onclick="exportData()" style="margin-bottom: 1rem;"><i class="ti ti-download"></i>Speichern</button>
+    <button class="primary" onclick="importData()" style="margin-bottom: 1rem;"><i class="ti ti-upload"></i>Laden</button>
+    <button class="danger" onclick="clearAll()"><i class="ti ti-trash"></i>Alles löschen</button>
+  </div>`;
+}
+
+function showMonteurDash() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('adminScreen').style.display = 'none';
+  document.getElementById('monteurScreen').style.display = 'block';
+  document.getElementById('monteurName').textContent = currentUser.name;
+  
+  const pos = currentBaustelle.positionen || [];
+  const soll = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + tk.hours, 0), 0);
+  const ist = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + Object.values(tk.monteurHours || {}).reduce((a, b) => a + b, 0), 0), 0);
+  const meineStunden = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + (tk.monteurHours?.[currentUser.name] || 0), 0), 0);
+  const pct = soll > 0 ? Math.round((ist / soll) * 100) : 0;
+  let status = 'status-ok'; if (pct > 100) status = 'status-danger'; else if (pct < 100) status = 'status-warning';
+  
+  let html = `
+    <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #2196F3;">
+      <div style="font-size: 16px; font-weight: 500; color: #1976D2; margin-bottom: 0.5rem;">🏗️ ${currentBaustelle.name}</div>
+      <div style="font-size: 13px; color: #1565C0;">Deine bisherigen Stunden: <strong>${meineStunden.toFixed(1)}h</strong></div>
+    </div>
+    
+    <div class="status-banner ${status}" style="font-size: 15px; padding: 1.5rem;">
+      ${pct > 100 ? '✕ Baustelle über Soll!' : pct === 100 ? '✓ Baustelle im Soll!' : '⚠ Noch ' + (soll - ist).toFixed(1) + ' Stunden verfügbar'}
+    </div>
+    
+    <!-- ENTWICKLUNG ANZEIGE -->
+    ${(() => {
+      const stats = getMonteurStats(currentUser.name);
+      if (!stats) return '';
+      
+      const quote = parseFloat(stats.gesamtQuote);
+      let quoteColor = '#4CAF50';
+      let quoteEmoji = '✅';
+      if (quote > 5) {
+        quoteColor = '#f44336';
+        quoteEmoji = '🚨';
+      } else if (quote > 3) {
+        quoteColor = '#ff9800';
+        quoteEmoji = '⚠️';
+      }
+      
+      return `<div style="background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #2196F3;">
+        <div style="font-size: 15px; font-weight: 500; color: #1565C0; margin-bottom: 1rem;">📈 Meine Entwicklung (dieses Jahr)</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div style="background: white; padding: 1rem; border-radius: 6px; border: 2px solid #2196F3;">
+            <div style="font-size: 12px; color: #666;">Geleistete Stunden</div>
+            <div style="font-size: 20px; font-weight: bold; color: #2196F3;">${stats.totalStunden}h</div>
+          </div>
+          <div style="background: white; padding: 1rem; border-radius: 6px; border: 2px solid #f44336;">
+            <div style="font-size: 12px; color: #666;">Fehler-Stunden</div>
+            <div style="font-size: 20px; font-weight: bold; color: #f44336;">${stats.totalFehler}h</div>
+          </div>
+          <div style="background: white; padding: 1rem; border-radius: 6px; border: 2px solid ${quoteColor};">
+            <div style="font-size: 12px; color: #666;">Fehlerquote</div>
+            <div style="font-size: 20px; font-weight: bold; color: ${quoteColor};">${quoteEmoji} ${stats.gesamtQuote}%</div>
+          </div>
+          <div style="background: white; padding: 1rem; border-radius: 6px; border: 2px solid #4CAF50;">
+            <div style="font-size: 12px; color: #666;">Ziel ≤ 3%</div>
+            <div style="font-size: 14px; color: #2e7d32; font-weight: bold;">${quote <= 3 ? '✓ OK' : '⚠ Zu hoch'}</div>
+          </div>
+        </div>
+      </div>`;
+    })()}
+    
+    <!-- MÄNGEL IM DASHBOARD -->
+    ${(() => {
+      const allMaengel = [...(currentUser.mangel || []), ...(currentUser.maengel || [])];
+      if (allMaengel.length === 0) return '';
+      
+      return `<div style="background: #ffebee; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #f44336;">
+        <div style="font-size: 15px; font-weight: 500; color: #c62828; margin-bottom: 1rem;">⚠️ Meine Mängel (${allMaengel.length})</div>
+        <div style="display: grid; gap: 1rem;">
+          ${allMaengel.map((mg, idx) => {
+            const kategorie = mg.kategorie || '?';
+            const beschreibung = mg.beschreibung || mg.grund || '-';
+            const aufwand = (mg.aufwand || 1).toFixed(1);
+            const datum = mg.datum || '?';
+            const id = mg.id || 'mg_' + idx;
+            
+            return `<div style="background: white; padding: 1rem; border-radius: 6px; border-left: 3px solid #f44336;">
+              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                <div>
+                  <div style="font-size: 12px; color: #999; margin-bottom: 3px;">Kategorie:</div>
+                  <div style="display: inline-block; background: #FFF3E0; padding: 4px 8px; border-radius: 3px; font-size: 12px; font-weight: 500;">${kategorie}</div>
+                </div>
+                <button onclick="deleteMaengelFromDashboard('${currentUser.name}', '${id}')" style="padding: 6px 12px; background: #f44336; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 500;">🗑️ Löschen</button>
+              </div>
+              <div style="margin: 0.75rem 0;">
+                <div style="font-size: 12px; color: #999; margin-bottom: 3px;">Bemerkung:</div>
+                <div style="font-size: 13px; color: #333; background: #f9f9f9; padding: 8px; border-radius: 3px; border-left: 2px solid #2196F3;">${beschreibung}</div>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 11px; color: #999;">
+                <span>⏱️ ${aufwand}h</span>
+                <span>📅 ${datum}</span>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    })()}
+    
+    <div class="stat-grid" style="margin-bottom: 2rem;">
+      <div class="stat-box"><div class="stat-label">Soll gesamt</div><div class="stat-value">${soll.toFixed(1)}h</div></div>
+      <div class="stat-box"><div class="stat-label">Gebucht gesamt</div><div class="stat-value">${ist.toFixed(1)}h</div></div>
+      <div class="stat-box"><div class="stat-label">Progress</div><div class="stat-value">${pct}%</div></div>
+    </div>
+    
+    <div class="progress-bar" style="height: 12px; margin-bottom: 1rem;"><div class="progress-fill" style="width: ${Math.min(pct, 100)}%;"></div></div>
+    
+    <div style="background: #fff3e0; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #ff9800; font-size: 13px; color: #e65100;">
+      <strong>📋 Anleitung:</strong> Gib bei jeder Tätigkeit deine Stunden ein und klick "Speichern". Wenn du die Tätigkeit fertig hast, wähle "✓ Fertig".
+    </div>
+    
+    <div class="section-title" style="margin-bottom: 2rem;">📍 Tätigkeiten - Deine Stunden eingeben:</div>
+  `;
+  
+  pos.forEach(p => {
+    const pSoll = p.tasks.reduce((s, t) => s + t.hours, 0);
+    const pIst = p.tasks.reduce((s, t) => s + Object.values(t.monteurHours || {}).reduce((a, b) => a + b, 0), 0);
+    const pMeine = p.tasks.reduce((s, t) => s + (t.monteurHours?.[currentUser.name] || 0), 0);
+    
+    html += `<div class="card" style="background: #f0f7ff; border-left: 4px solid #2196F3; padding: 1.5rem; margin-bottom: 1.5rem;">
+      <div style="font-size: 16px; font-weight: 500; margin-bottom: 0.5rem;">📌 ${p.name}</div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 1rem;">
+        <strong>Soll: ${pSoll.toFixed(1)}h</strong> | Gesamt gebucht: ${pIst.toFixed(1)}h | <span style="color: #2196F3;"><strong>Deine Stunden: ${pMeine.toFixed(1)}h</strong></span>
+      </div>
+      <div style="display: grid; gap: 1rem;">
+        ${p.tasks.map(t => {
+          const myH = t.monteurHours?.[currentUser.name] || 0;
+          const allH = Object.values(t.monteurHours || {}).reduce((a, b) => a + b, 0);
+          const isFertig = t.fertig;
+          return `<div style="padding: 1.5rem; background: ${isFertig ? '#e8f5e9' : 'white'}; border-radius: 8px; border: 2px solid ${isFertig ? '#4CAF50' : '#e3f2fd'}; transition: all 0.3s;">
+            <div style="font-size: 15px; font-weight: 500; margin-bottom: 0.75rem; ${isFertig ? 'color: #2e7d32; text-decoration: line-through;' : ''}">✓ ${t.name}</div>
+            <div style="font-size: 12px; color: #666; margin-bottom: 1rem;">
+              Soll: ${t.hours.toFixed(1)}h | Gesamt gebucht: ${allH.toFixed(1)}h
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px; align-items: flex-end; margin-bottom: 1rem;">
+              <div>
+                <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Deine Stunden:</label>
+                <input type="number" class="hours-input" id="hours_${t.id}" value="${myH}" min="0" step="0.5" style="width: 100%; padding: 12px; font-size: 16px; border: 2px solid #2196F3; border-radius: 6px;" ${isFertig ? 'disabled' : ''}>
+              </div>
+              <button class="primary" style="padding: 12px; margin: 0; font-size: 14px; width: 100%;" onclick="saveMonteurHours('${p.id}', '${t.id}')" ${isFertig ? 'disabled style="opacity: 0.6;"' : ''}><i class="ti ti-check"></i>Speichern</button>
+            </div>
+            <div style="border-top: 1px solid ${isFertig ? '#c8e6c9' : '#eee'}; padding-top: 1rem;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px; border-radius: 6px; background: ${isFertig ? '#f1f8e9' : '#f9f9f9'}; transition: all 0.2s;">
+                <input type="checkbox" id="fertig_${t.id}" ${t.fertig ? 'checked' : ''} onchange="saveMonteurFertig('${p.id}', '${t.id}')" style="width: 20px; height: 20px; cursor: pointer; accent-color: #4CAF50;">
+                <span style="margin: 0; cursor: pointer; font-weight: 600; font-size: 14px; color: ${isFertig ? '#2e7d32' : '#333'};">
+                  ${isFertig ? '✅ Fertiggestellt!' : '⏳ Als fertig markieren'}
+                </span>
+              </label>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  });
+  
+  document.getElementById('monteurContent').innerHTML = html;
+}
+
+function showLeiterDash() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('adminScreen').style.display = 'none';
+  document.getElementById('monteurScreen').style.display = 'block';
+  document.getElementById('monteurName').textContent = currentUser.name + ' 👷 Leiter';
+  
+  const pos = currentBaustelle.positionen || [];
+  const soll = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + tk.hours, 0), 0);
+  const istGesamt = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + Object.values(tk.monteurHours || {}).reduce((a, b) => a + b, 0), 0), 0);
+  const pct = soll > 0 ? Math.round((istGesamt / soll) * 100) : 0;
+  let status = 'status-ok'; if (pct > 100) status = 'status-danger'; else if (pct < 100) status = 'status-warning';
+  
+  let html = `
+    <div style="background: #f3e5f5; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #9c27b0;">
+      <div style="font-size: 16px; font-weight: 500; color: #6a1b9a; margin-bottom: 0.5rem;">👷 ${currentBaustelle.name}</div>
+      <div style="font-size: 13px; color: #7b1fa2;"><strong>Du bist Montageleiter</strong> - Du kannst Nacharbeiten erfassen</div>
+    </div>
+    
+    <div class="status-banner ${status}" style="font-size: 15px; padding: 1.5rem;">
+      ${pct > 100 ? '✕ Baustelle über Soll!' : pct === 100 ? '✓ Baustelle im Soll!' : '⚠ Noch ' + (soll - istGesamt).toFixed(1) + ' Stunden verfügbar'}
+    </div>
+    
+    <div class="stat-grid" style="margin-bottom: 2rem;">
+      <div class="stat-box"><div class="stat-label">Soll</div><div class="stat-value">${soll.toFixed(1)}h</div></div>
+      <div class="stat-box"><div class="stat-label">Ist</div><div class="stat-value">${istGesamt.toFixed(1)}h</div></div>
+      <div class="stat-box"><div class="stat-label">Progress</div><div class="stat-value">${pct}%</div></div>
+    </div>
+    
+    <div class="progress-bar" style="height: 12px; margin-bottom: 2rem;"><div class="progress-fill" style="width: ${Math.min(pct, 100)}%;"></div></div>
+    
+    <div style="background: #fff3e0; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; border-left: 4px solid #ff9800;">
+      <div style="font-size: 15px; font-weight: 500; color: #e65100; margin-bottom: 1rem;">⚠️ Nacharbeiten erfassen</div>
+      <div style="font-size: 13px; color: #e65100; margin-bottom: 1rem;">Wenn ein Monteur einen Fehler macht → Stunden hier eingeben. Das wird automatisch vom IST-Wert abgezogen.</div>
+      
+      <div style="display: grid; gap: 12px; background: white; padding: 1rem; border-radius: 6px;">
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Monteur</label>
+          <select id="leiterMonteur" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <option value="">-- Monteur auswählen --</option>
+            ${currentBaustelle.monteure.filter(m => m.rolle === 'monteur').map(m => `<option value="${m.name}">${m.name}</option>`).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Position (wo war der Fehler?)</label>
+          <select id="leiterPosition" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <option value="">-- Position auswählen --</option>
+            ${pos.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">Nacharbeit-Stunden (wie lange hat die Korrektur gedauert?)</label>
+          <div style="display: grid; grid-template-columns: 1fr 120px; gap: 8px;">
+            <input type="number" id="leiterNacharbeit" min="0" step="0.5" placeholder="z.B. 0.5" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <button class="primary" style="padding: 10px; margin: 0;" onclick="addLeiterNacharbeit()"><i class="ti ti-plus"></i>Speichern</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="section-title">📋 Monteur-Übersicht mit Nacharbeiten:</div>
+  `;
+  
+  currentBaustelle.monteure.filter(m => m.rolle === 'monteur').forEach(mon => {
+    const monData = allMonteure.find(x => x.name === mon.name);
+    const monNacharbeiten = monData.nacharbeiten || [];
+    const monIst = pos.reduce((s, p) => s + p.tasks.reduce((t, tk) => t + (tk.monteurHours?.[mon.name] || 0), 0), 0);
+    const monNacharbeitSum = monNacharbeiten.reduce((s, n) => s + n.stunden, 0);
+    const bereinigtes = monIst - monNacharbeitSum;
+    
+    html += `<div class="card">
+      <div style="font-weight: 500; font-size: 15px; margin-bottom: 1rem;">${mon.name}</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 1rem;">
+        <div style="background: #e3f2fd; padding: 0.75rem; border-radius: 4px;">
+          <div style="font-size: 11px; color: #666;">Gebucht</div>
+          <div style="font-size: 18px; font-weight: 600; color: #2196F3;">${monIst.toFixed(1)}h</div>
+        </div>
+        <div style="background: #ffebee; padding: 0.75rem; border-radius: 4px;">
+          <div style="font-size: 11px; color: #666;">Nacharbeit</div>
+          <div style="font-size: 18px; font-weight: 600; color: #f44336;">-${monNacharbeitSum.toFixed(1)}h</div>
+        </div>
+        <div style="background: #e8f5e9; padding: 0.75rem; border-radius: 4px;">
+          <div style="font-size: 11px; color: #666;">Bereinigt</div>
+          <div style="font-size: 18px; font-weight: 600; color: #4CAF50;">${bereinigtes.toFixed(1)}h</div>
+        </div>
+      </div>
+      ${monNacharbeiten.length > 0 ? `
+        <div style="font-size: 12px; color: #666; background: #fff3e0; padding: 0.75rem; border-radius: 4px;">
+          <strong>Fehler:</strong><br>
+          ${monNacharbeiten.map(n => `• ${n.position}: ${n.stunden.toFixed(1)}h`).join('<br>')}
+        </div>
+      ` : ''}
+    </div>`;
+  });
+  
+  document.getElementById('monteurContent').innerHTML = html;
+}
+
+function addLeiterNacharbeit() {
+  const monName = document.getElementById('leiterMonteur').value;
+  const pos = document.getElementById('leiterPosition').value;
+  const stunden = parseFloat(document.getElementById('leiterNacharbeit').value) || 0;
+  
+  if (!monName || !pos || stunden <= 0) { showError('Alle Felder erforderlich'); return; }
+  
+  const monteur = allMonteure.find(m => m.name === monName);
+  if (!monteur.nacharbeiten) monteur.nacharbeiten = [];
+  monteur.nacharbeiten.push({ position: pos, stunden, datum: new Date().toISOString().split('T')[0] });
+  saveToCloud();
+  document.getElementById('leiterMonteur').value = '';
+  document.getElementById('leiterPosition').value = '';
+  document.getElementById('leiterNacharbeit').value = '';
+  
+  showSuccess(' Nacharbeit erfasst');
+  showLeiterDash();
+}
+
+function closeAllDialogs() {
+  // Alle sichtbaren Dialoge/Modals schließen
+  const dialogs = document.querySelectorAll('[style*="display: block"], [class*="modal"][style*="display"]');
+  dialogs.forEach(d => d.style.display = 'none');
+  
+  // Spezifische Dialoge versuchen zu schließen
+  const specificDivs = ['maengelDialog', 'hourDialog', 'editTasksDialog', 'addMonteurDiv'];
+  specificDivs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  
+  // Refresh current tab
+  const tabs = ['baustellen', 'uebersicht', 'positionen', 'monteure', 'monteure-entwicklung', 'statistik', 'daten'];
+  const activeTab = Array.from(document.querySelectorAll('.tab')).findIndex(t => t.classList.contains('active'));
+  if (activeTab >= 0) {
+    switchTab(activeTab);
+  }
+}
+
+function editMangel(mangelId) {
+  const allMangel = allMonteure.flatMap(m => (m.mangel || []).map(mg => ({ ...mg, monteur: m.name })));
+  const mangel = allMangel.find(m => m.id === mangelId);
+  
+  if (!mangel) { showError('Mangel nicht gefunden'); return; }
+  
+  const newVerursacher = prompt('Monteur:', mangel.verursacher);
+  if (!newVerursacher) return;
+  
+  const newAufwand = prompt('Aufwand (Stunden):', mangel.aufwand);
+  if (!newAufwand || isNaN(newAufwand)) return;
+  
+  const newGrund = prompt('Grund:', mangel.grund || '');
+  
+  // Finde und update Mangel
+  const monteur = allMonteure.find(m => m.name === mangel.monteur);
+  if (monteur) {
+    const idx = monteur.mangel.findIndex(m => m.id === mangelId);
+    if (idx >= 0) {
+      monteur.mangel[idx].verursacher = newVerursacher;
+      monteur.mangel[idx].aufwand = parseFloat(newAufwand);
+      monteur.mangel[idx].grund = newGrund;
+      saveToCloud();
+      renderPositionen();
+      showSuccess(' Mangel aktualisiert!');
+    }
+  }
+}
+
+function openMängelDialog(bauId, posId) {
+  const bau = config.baustellen.find(b => b.id === bauId);
+  const pos = bau.positionen.find(p => p.id === posId);
+  
+  const modal = document.createElement('div');
+  modal.id = 'mangelModal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;';
+  
+  const monteure = bau.monteure.filter(m => m.rolle === 'monteur').map(m => m.name);
+  
+  const existingMangel = allMonteure.flatMap(m => (m.mangel || []).filter(mg => mg.positionId === posId));
+  
+  let html = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 500px;">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 0.5rem;">⚠️ Mängelbehebung</div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 1.5rem;">Position: <strong>${pos.name}</strong></div>
+      
+      <div style="background: #e8f5e9; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; border-left: 3px solid #4CAF50;">
+        <div style="font-size: 11px; color: #2e7d32; line-height: 1.5;"><strong>📊 Six Sigma:</strong> Erfasse Fehler + Behebungszeit → Fehlerquote berechnen</div>
+      </div>
+      
+      <div style="display: grid; gap: 12px; background: #fafafa; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem;">
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">👤 Verursacher (Monteur)</label>
+          <select id="mangelMonteur" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <option value="">-- Monteur auswählen --</option>
+            ${monteure.map(m => `<option value="${m}">${m}</option>`).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">⏱️ Aufwand Behebung (Stunden)</label>
+          <input type="number" id="mangelAufwand" min="0" step="0.5" placeholder="z.B. 0.5" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">🏗️ Kategorie</label>
+          <select id="mangelKategorie" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <option value="">-- Kategorie auswählen --</option>
+            <option value="Küche">Küche</option>
+            <option value="Innenausbau">Innenausbau</option>
+            <option value="Fenster">Fenster</option>
+            <option value="Türe">Türe</option>
+            <option value="Ladenbau">Ladenbau</option>
+            <option value="Sonstiges">Sonstiges</option>
+          </select>
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📝 Grund/Beschreibung (optional)</label>
+          <input type="text" id="mangelGrund" placeholder="z.B. Kratzer, falsch montiert" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+        </div>
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📸 Foto (optional)</label>
+          <input type="file" id="mangelFoto" accept="image/*" onchange="previewMangelFoto()" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+          <div id="fotoPreview" style="margin-top: 10px; display: none;"><img style="max-width: 100%; max-height: 150px; border-radius: 4px;" id="fotoImg"></div>
+        </div>
+        
+        
+        <button class="primary" style="width: 100%; padding: 12px; margin: 0;" onclick="saveMangel('${bauId}', '${posId}')">
+          <i class="ti ti-check"></i>Mangel speichern
+        </button>
+      </div>
+      
+      ${existingMangel.length > 0 ? `
+        <div style="background: #ffebee; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+          <div style="font-weight: 500; margin-bottom: 0.75rem; color: #c62828; font-size: 12px;">📋 Erfasste Mängel (klick zum bearbeiten):</div>
+          ${existingMangel.map((m, idx) => `
+            <div style="padding: 0.75rem; background: white; border-radius: 4px; margin-bottom: 6px; border-left: 3px solid #f44336; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s;" 
+                 onmouseover="this.style.boxShadow='0 2px 8px rgba(244,67,54,0.3)'" 
+                 onmouseout="this.style.boxShadow='none'"
+                 onclick="editMangel('${bauId}', '${posId}', ${idx})">
+              <div style="flex: 1;">
+                <strong style="font-size: 13px;">${m.verursacher}</strong><br>
+                <div style="font-size: 11px; color: #666; margin: 3px 0;">
+                  <span style="background: #FFF3E0; padding: 2px 6px; border-radius: 3px; margin-right: 6px;">${m.kategorie}</span>
+                  <span style="color: #f44336; font-weight: 500;">${m.aufwand}h</span>
+                </div>
+                <span style="color: #999; font-size: 11px;">${m.grund || 'Kein Text'}</span>
+                ${m.foto ? `<div style="margin-top: 6px;"><img src="${m.foto}" style="max-width: 80px; max-height: 60px; border-radius: 3px; cursor: pointer;" onclick="event.stopPropagation(); window.open('${m.foto}', '_blank')"></div>` : ''}
+              </div>
+              <button class="danger small" style="padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation(); deleteMangel('${bauId}', '${posId}', ${idx}); openMängelDialog('${bauId}', '${posId}')">🗑️</button>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      
+      <button style="width: 100%; padding: 10px;" onclick="closeMängelModal()">Fertig</button>
+    </div>
+  `;
+  
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function previewMangelFoto() {
+  const fileInput = document.getElementById('mangelFoto');
+  const preview = document.getElementById('fotoPreview');
+  const img = document.getElementById('fotoImg');
+  
+  if (fileInput.files && fileInput.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img.src = e.target.result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(fileInput.files[0]);
+  }
+}
+
+function saveMangel(bauId, posId) {
+  const monteur = document.getElementById('mangelMonteur').value;
+  const aufwand = parseFloat(document.getElementById('mangelAufwand').value) || 0;
+  const kategorie = document.getElementById('mangelKategorie').value;
+  const grund = document.getElementById('mangelGrund').value.trim();
+  const fileInput = document.getElementById('mangelFoto');
+  
+  if (!monteur || aufwand <= 0 || !kategorie) { showError('Verursacher, Aufwand und Kategorie erforderlich'); return; }
+  
+  const monData = allMonteure.find(m => m.name === monteur);
+  if (!monData.mangel) monData.mangel = [];
+  
+  // Basis-Mangel-Objekt
+  const mangel = { 
+    id: 'mg_' + Date.now(),
+    positionId: posId, 
+    verursacher: monteur, 
+    aufwand, 
+    kategorie, 
+    grund, 
+    datum: new Date().toISOString().split('T')[0],
+    foto: null
+  };
+  
+  // Wenn Foto vorhanden, als Base64 speichern
+  if (fileInput.files && fileInput.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      mangel.foto = e.target.result;
+      monData.mangel.push(mangel);
+      saveToCloud();
+      
+      // Reset
+      document.getElementById('mangelMonteur').value = '';
+      document.getElementById('mangelAufwand').value = '';
+      document.getElementById('mangelKategorie').value = '';
+      document.getElementById('mangelGrund').value = '';
+      document.getElementById('mangelFoto').value = '';
+      
+      const modal = document.getElementById('mangelModal');
+      if (modal) modal.remove();
+      openMängelDialog(bauId, posId);
+    };
+    reader.readAsDataURL(fileInput.files[0]);
+  } else {
+    // Kein Foto
+    monData.mangel.push(mangel);
+    saveToCloud();
+    
+    // Reset
+    document.getElementById('mangelMonteur').value = '';
+    document.getElementById('mangelAufwand').value = '';
+    document.getElementById('mangelKategorie').value = '';
+    document.getElementById('mangelGrund').value = '';
+    
+    const modal = document.getElementById('mangelModal');
+    if (modal) modal.remove();
+    openMängelDialog(bauId, posId);
+  }
+}
+
+function removeMangel(bauId, posId, idx) {
+  if (!confirm('Mangel wirklich löschen?')) return;
+  
+  const posMangel = allMonteure.flatMap((m, mIdx) => 
+    (m.mangel || []).map((mg, mgIdx) => ({ ...mg, monteurIdx: mIdx, mangelIdx: mgIdx }))
+      .filter(mg => mg.positionId === posId)
+  );
+  
+  if (posMangel[idx]) {
+    const { monteurIdx, mangelIdx } = posMangel[idx];
+    allMonteure[monteurIdx].mangel.splice(mangelIdx, 1);
+    saveToCloud();
+    
+    // Dialog aktualisieren
+    const modal = document.getElementById('mangelModal');
+    if (modal) {
+      modal.remove();
+      openMängelDialog(bauId, posId);
+    }
+  }
+}
+
+function closeMängelModal() {
+  const modal = document.getElementById('mangelModal');
+  if (modal) modal.remove();
+}
+
+function editMangel(bauId, posId, idx) {
+  const posMangel = allMonteure.flatMap((m, mIdx) => 
+    (m.mangel || []).map((mg, mgIdx) => ({ ...mg, monteurIdx: mIdx, mangelIdx: mgIdx }))
+      .filter(mg => mg.positionId === posId)
+  );
+  
+  const m = posMangel[idx];
+  if (!m) {
+    console.error('Mangel nicht gefunden', idx);
+    return;
+  }
+  
+  // Edit Modal
+  const modal = document.createElement('div');
+  modal.id = 'editMangelModal_' + (m.id || idx);
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1001; display: flex; align-items: center; justify-content: center;';
+  
+  const kategorien = ['Küche', 'Innenausbau', 'Fenster', 'Türe', 'Ladenbau', 'Sonstiges'];
+  
+  let html = `
+    <div style="background: white; border-radius: 8px; padding: 2rem; width: 90%; max-width: 450px;">
+      <div style="font-size: 18px; font-weight: 500; margin-bottom: 1rem; color: #f44336;">✏️ Mangel bearbeiten</div>
+      
+      <div style="display: grid; gap: 12px; margin-bottom: 1.5rem;">
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">👤 Verursacher</label>
+          <input type="text" id="editMonteur_${idx}" value="${m.verursacher}" disabled style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f5f5f5;">
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">🏗️ Kategorie</label>
+          <select id="editKategorie_${idx}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            ${kategorien.map(k => `<option value="${k}" ${m.kategorie === k ? 'selected' : ''}>${k}</option>`).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">⏱️ Aufwand Behebung (Stunden)</label>
+          <input type="number" id="editAufwand_${idx}" value="${m.aufwand}" min="0.5" step="0.5" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+        </div>
+        
+        <div>
+          <label style="font-size: 12px; color: #666; display: block; margin-bottom: 6px; font-weight: 500;">📝 Beschreibung/Grund</label>
+          <input type="text" id="editGrund_${idx}" value="${m.grund || ''}" placeholder="z.B. Kratzer, falsch montiert" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+        </div>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+        <button class="primary" style="margin: 0; padding: 10px;" onclick="saveMangelEdit('${bauId}', '${posId}', ${idx})">💾 Speichern</button>
+        <button class="danger" style="margin: 0; padding: 10px;" onclick="deleteMangel('${bauId}', '${posId}', ${idx}); closeEditMangelModal(); openMängelDialog('${bauId}', '${posId}')">🗑️ Löschen</button>
+        <button style="margin: 0; padding: 10px;" onclick="closeEditMangelModal()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+  
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function saveMangelEdit(bauId, posId, idx) {
+  const kategorie = document.getElementById('editKategorie_' + idx).value;
+  const aufwand = parseFloat(document.getElementById('editAufwand_' + idx).value) || 0;
+  const grund = document.getElementById('editGrund_' + idx).value.trim();
+  
+  if (aufwand <= 0) { showError('Aufwand erforderlich'); return; }
+  
+  const posMangel = allMonteure.flatMap((m, mIdx) => 
+    (m.mangel || []).map((mg, mgIdx) => ({ ...mg, monteurIdx: mIdx, mangelIdx: mgIdx }))
+      .filter(mg => mg.positionId === posId)
+  );
+  
+  const m = posMangel[idx];
+  if (m) {
+    const monteur = allMonteure[m.monteurIdx];
+    monteur.mangel[m.mangelIdx].kategorie = kategorie;
+    monteur.mangel[m.mangelIdx].aufwand = aufwand;
+    monteur.mangel[m.mangelIdx].grund = grund;
+    
+    saveToCloud();
+    closeEditMangelModal();
+    openMängelDialog(bauId, posId);
+  }
+}
+
+function deleteMangel(bauId, posId, idx) {
+  if (!confirm('Mangel wirklich löschen?')) return;
+  
+  const posMangel = allMonteure.flatMap((m, mIdx) => 
+    (m.mangel || []).map((mg, mgIdx) => ({ ...mg, monteurIdx: mIdx, mangelIdx: mgIdx }))
+      .filter(mg => mg.positionId === posId)
+  );
+  
+  const m = posMangel[idx];
+  if (m) {
+    allMonteure[m.monteurIdx].mangel.splice(m.mangelIdx, 1);
+    saveToCloud();
+  }
+}
+
+function closeEditMangelModal() {
+  const modal = document.getElementById('editMangelModal');
+  if (modal) modal.remove();
+}
+
+function saveMonteurHours(posId, taskId) {
+  const pos = currentBaustelle.positionen.find(p => p.id === posId);
+  const task = pos.tasks.find(t => t.id === taskId);
+  const h = parseFloat(document.getElementById('hours_' + taskId).value) || 0;
+  if (!task.monteurHours) task.monteurHours = {};
+  if (h > 0) task.monteurHours[currentUser.name] = h;
+  else delete task.monteurHours[currentUser.name];
+  saveToCloud();
+  showMonteurDash();
+}
+
+function saveMonteurFertig(posId, taskId) {
+  const pos = currentBaustelle.positionen.find(p => p.id === posId);
+  const task = pos.tasks.find(t => t.id === taskId);
+  task.fertig = document.getElementById('fertig_' + taskId).checked;
+  saveToCloud();
+  showMonteurDash();
+}
+
+function exportData() {
+  const json = JSON.stringify({config, allMonteure}, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `baustellen_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData() {
+  document.getElementById('fileInput').click();
+}
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) { showError('Keine Datei ausgewählt'); return; }
+  
+  console.log('📂 Importiere Datei:', file.name);
+  
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const jsonText = event.target.result;
+      console.log('📖 JSON gelesen, Länge:', jsonText.length);
+      
+      const data = JSON.parse(jsonText);
+      console.log('✓ JSON geparst. Config:', data.config, 'Monteure:', data.allMonteure?.length);
+      
+      if (!data.config || !data.allMonteure) {
+        throw new Error('Dateistruktur ungültig - config oder allMonteure fehlen');
+      }
+      
+      // CLEAR old data first
+      localStorage.removeItem('montage_config');
+      localStorage.removeItem('montage_monteure');
+      console.log('🗑️ Alte LocalStorage-Daten gelöscht');
+      
+      // Import config with full replacement
+      config = {
+        admin: data.config.admin || { pin: '0804', name: 'Luc Vorburger' },
+        baustellen: (data.config.baustellen || []).map(bau => ({
+          id: bau.id,
+          name: bau.name,
+          ort: bau.ort || '',
+          monteure: bau.monteure || [],
+          positionen: (bau.positionen || []).map(pos => ({
+            id: pos.id,
+            name: pos.name,
+            bauId: pos.bauId || bau.id,
+            tasks: (pos.tasks || []).map(task => ({
+              id: task.id,
+              name: task.name,
+              hours: task.hours,
+              monteurHours: task.monteurHours || {},
+              fertig: task.fertig || false
+            }))
+          }))
+        }))
+      };
+      
+      console.log('✓ Config importiert. Baustellen:', config.baustellen.length);
+      
+      // Import monteure with full replacement
+      if (data.allMonteure && Array.isArray(data.allMonteure)) {
+        allMonteure = data.allMonteure.map(m => ({
+          name: m.name,
+          rolle: m.rolle || 'monteur',
+          phone: m.phone || '',
+          fahrzeug: m.fahrzeug || '',
+          arbeitslog: m.arbeitslog || [],
+          mangel: m.mangel || [],
+          nacharbeiten: m.nacharbeiten || []
+        }));
+        console.log('✓ Monteure importiert:', allMonteure.length);
+      }
+      
+      // Save to LocalStorage
+      saveToCloud();
+      console.log('💾 In LocalStorage gespeichert');
+      
+      const bauStr = config.baustellen.length === 1 ? 'Baustelle' : 'Baustellen';
+      const monStr = allMonteure.length === 1 ? 'Monteur' : 'Monteure';
+      alert('✅ Erfolgreich importiert!\n\n' + config.baustellen.length + ' ' + bauStr + '\n' + allMonteure.length + ' ' + monStr);
+      
+      // Reload UI
+      if (currentUser?.type === 'admin') {
+        console.log('🔄 Lade Admin Dashboard neu');
+        switchTab(0);
+      } else {
+        console.log('🔄 Logout und Login-Screen');
+        logout();
+      }
+    } catch (err) { 
+      console.error('❌ Fehler beim Import:', err);
+      alert('❌ Fehler beim Importieren:\n\n' + err.message + '\n\nBitte stelle sicher, dass die Datei korrekt ist.'); 
+    }
+  };
+  
+  reader.onerror = () => {
+    console.error('❌ Fehler beim Datei lesen');
+    showError('❌ Fehler beim Lesen der Datei');
+  };
+  
+  reader.readAsText(file);
+});
+
+function clearAll() {
+  if (confirm('Wirklich alles löschen?\n\n⚠️ Dies löscht auch die Cloud-Daten!')) {
+    config = { admin: { pin: '0804', name: 'Luc Vorburger' }, baustellen: [], regieStunden: [] };
+    allMonteure = allMonteure.map(m => ({ ...m, arbeitslog: [], maengel: [], mangel: [], nacharbeiten: [] }));
+    
+    // Lösche LocalStorage
+    localStorage.removeItem('montage_config');
+    localStorage.removeItem('montage_monteure');
+    
+    // Lösche Cloud
+    if (db) {
+      db.ref('baustellen/' + fbUser).remove().catch(e => {
+        console.warn('Cloud-Delete fehlgeschlagen:', e.message);
+      });
+    }
+    
+    if (currentUser?.type === 'admin') switchTab(0);
+  }
+}
+</script>
+</body>
+</html>
