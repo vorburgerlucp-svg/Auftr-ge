@@ -378,6 +378,7 @@
     </div>
     <div id="login-error" style="color:#dc2626;font-size:12px;margin-bottom:10px;display:none;"></div>
     <button class="btn btn-primary" style="width:100%;padding:10px;font-size:14px;" onclick="doLogin()">Login</button>
+    <button class="btn btn-secondary" style="width:100%;padding:8px;font-size:11px;margin-top:8px;" onclick="notfallDatenAnzeigen()">🆘 Lokale Daten anzeigen/sichern</button>
   </div>
 </div>
 
@@ -1295,6 +1296,14 @@ function debugClick() {
 function load() {
   const s = safeStorage.getItem('lagertool');
   if (s) state = JSON.parse(s);
+  // Absicherung: fehlende Kern-Arrays mit leerem Array initialisieren,
+  // verhindert "state.X is undefined" Fehler nach unvollständigen Backups/Syncs
+  if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
+  if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
+  if (!Array.isArray(state.artikel)) state.artikel = [];
+  if (!Array.isArray(state.baustellen)) state.baustellen = [];
+  if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
+  if (!state.plan) state.plan = {};
   if (!state.config) state.config = {};
   if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
   if (!state.config.absender) state.config.absender = 'Montage Welt LagerTool';
@@ -4641,8 +4650,45 @@ function startFirebaseListener() {
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
         console.log('[Firebase] value received, applying');
+
+        // SCHUTZ: nur übernehmen wenn der State plausibel vollständig ist.
+        // Verhindert dass ein fehlerhaft/teilweise geschriebener Firebase-Knoten
+        // (z.B. durch ein externes Skript) den lokalen State zerstört.
+        const istPlausibel = remote && typeof remote === 'object' &&
+          Array.isArray(remote.mitarbeiter) !== false && // mitarbeiter darf fehlen, aber wenn da, Array
+          (remote.mitarbeiter === undefined || Array.isArray(remote.mitarbeiter)) &&
+          (remote.fahrzeuge === undefined || Array.isArray(remote.fahrzeuge)) &&
+          (remote.artikel === undefined || Array.isArray(remote.artikel));
+
+        // Zusätzlich: wenn der LOKALE State bereits mehr Mitarbeiter/Fahrzeuge/Artikel
+        // hat als der eingehende Remote-State, und Remote diese Felder komplett vermissen
+        // lässt, ist das verdächtig (möglicher Datenverlust) - dann NICHT überschreiben.
+        const lokalHatDaten = (state.mitarbeiter?.length > 0) || (state.fahrzeuge?.length > 0) || (state.artikel?.length > 0);
+        const remoteIstLeer = !remote.mitarbeiter?.length && !remote.fahrzeuge?.length && !remote.artikel?.length;
+
+        if (lokalHatDaten && remoteIstLeer) {
+          console.warn('[Firebase] WARNUNG: eingehender State wirkt unvollständig (keine Mitarbeiter/Fahrzeuge/Artikel) - lokale Daten werden NICHT überschrieben');
+          showSyncIndicator('⚠️ Sync blockiert (Datenschutz)');
+          toast('Sync-Warnung', 'Server-Daten wirken unvollständig - lokale Daten geschützt', '⚠️');
+          firebaseReady = true;
+          return;
+        }
+
+        if (!istPlausibel) {
+          console.warn('[Firebase] WARNUNG: eingehender State hat unerwartete Struktur - wird ignoriert');
+          showSyncIndicator('⚠️ Sync blockiert (Struktur)');
+          firebaseReady = true;
+          return;
+        }
+
         if (true) {
           state = remote;
+          if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
+          if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
+          if (!Array.isArray(state.artikel)) state.artikel = [];
+          if (!Array.isArray(state.baustellen)) state.baustellen = [];
+          if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
+          if (!state.plan) state.plan = {};
           safeStorage.setItem('lagertool', JSON.stringify(state));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
@@ -4666,6 +4712,25 @@ function startFirebaseListener() {
 }
 
 // ── FAHRZEUGHISTORIE EXPORT ─────────────────────────────
+// NOTFALL: zeigt den aktuellen localStorage-Inhalt zur Rettung/Diagnose an
+function notfallDatenAnzeigen() {
+  const raw = safeStorage.getItem('lagertool');
+  if (!raw) { alert('Kein lokaler Datenbestand gefunden.'); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch(e) { alert('Daten beschädigt: ' + e.message); return; }
+  const info = 'Mitarbeiter: ' + (parsed.mitarbeiter?.length||0) +
+    '\nFahrzeuge: ' + (parsed.fahrzeuge?.length||0) +
+    '\nArtikel: ' + (parsed.artikel?.length||0) +
+    '\nBaustellen: ' + (parsed.baustellen?.length||0);
+  alert('Lokaler Datenbestand:\n\n' + info);
+  // Als Download anbieten
+  const blob = new Blob([raw], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'lagertool_backup_' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 function exportFzgHistorie() {
   const fahrzeuge = state.fahrzeuge||[];
 
@@ -5080,6 +5145,10 @@ const STANDARD_MITARBEITER = [
 
 
 function loadDefaultArtikel() {
+  if (!state.artikel) state.artikel = [];
+  if (!state.fahrzeuge) state.fahrzeuge = [];
+  if (!state.mitarbeiter) state.mitarbeiter = [];
+  if (!state.werkzeug) state.werkzeug = [];
   if (state.artikel.length === 0) {
     state.artikel = PETERHANS_ARTIKEL.map(a => ({...a}));
     save();
@@ -5090,7 +5159,6 @@ function loadDefaultArtikel() {
     save();
     toast('Fahrzeuge geladen', STANDARD_FAHRZEUGE.length + ' Fahrzeuge importiert', '🚐');
   }
-  if (!state.mitarbeiter) state.mitarbeiter = [];
   if (state.mitarbeiter.length === 0) {
     state.mitarbeiter = STANDARD_MITARBEITER.map(m => ({...m}));
     save();
