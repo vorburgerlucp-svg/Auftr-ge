@@ -443,7 +443,10 @@
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Artikelübersicht</span>
-      <input type="text" class="search-input" placeholder="Suchen..." oninput="filterArtikel(this.value)" style="max-width:200px;padding:6px 10px;font-size:12px">
+      <div style="display:flex;gap:8px">
+        <select id="art-kat-filter" onchange="filterArtikelKat(this.value)" style="padding:6px 10px;font-size:12px"></select>
+        <input type="text" class="search-input" placeholder="Suchen..." oninput="filterArtikel(this.value)" style="max-width:200px;padding:6px 10px;font-size:12px">
+      </div>
     </div>
     <div id="artikel-table-wrap"><div class="empty">Keine Artikel gefunden</div></div>
   </div>
@@ -609,6 +612,9 @@
       <div>
         <label>Artikel suchen &amp; hinzufügen</label>
         <div style="display:flex;gap:8px">
+          <select id="best-artikel-kat" style="max-width:170px" onchange="renderBestellungArtikelDropdown()">
+            <option value="">Alle Kategorien</option>
+          </select>
           <select id="best-artikel" style="flex:1">
             <option value="" selected="selected">— Artikel wählen —</option>
           </select>
@@ -1212,7 +1218,7 @@ let state = {
 // Einmalige Migration: Klebstoffe/Silikon/Acryl/Werkzeug Artikel importieren
 function migrationKlebstoffeEtc() {
   if (!state.artikel) state.artikel = [];
-  const neueArtikel = [{"id":13004,"name":"Silikon Dichtstoff PERMAFIX 142 transparent","nr":"81.2211.0010","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13005,"name":"Silikon Dichtstoff PERMAFIX 142 RAL 9016 Verkehrsweiss","nr":"81.2211.0020","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13006,"name":"Silikon Dichtstoff PERMAFIX 142 schwarz","nr":"81.2211.0200","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13007,"name":"Dichtstoff Acryl PERMAFIX 505 RAL 9016 Verkehrsweiss","nr":"81.2422.0011","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13008,"name":"Dichtstoff Acryl PERMAFIX 505 grau","nr":"81.2422.0012","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13009,"name":"Glättespachteln FALCONE Star","nr":"81.2593.0000","kat":"Werkzeug & Zubehör","einheit":"Stk","bestand":0,"min":5},{"id":13010,"name":"Abdeckvlies PETERHANS","nr":"81.7682.2050","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13011,"name":"Doppelseitiges Klebeband PERMAFIX 620/1780","nr":"81.7106.0911","kat":"Klebstoffe","einheit":"Stk","bestand":0,"min":5},{"id":13012,"name":"Abdeckband PERMAFIX 710 25mm","nr":"81.7303.2024","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13013,"name":"Abdeckband PERMAFIX 710 30mm","nr":"81.7303.2030","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13014,"name":"Abdeckband PERMAFIX 710 50mm","nr":"81.7303.2048","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13015,"name":"Verbindungsplättchen LAMELLO 0","nr":"80.1351.0000","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":13016,"name":"Verbindungsplättchen LAMELLO 10","nr":"80.1351.0010","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":13017,"name":"Verbindungsplättchen LAMELLO 20","nr":"80.1351.0020","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20}];
+  const neueArtikel = [{"id":13004,"name":"Silikon Dichtstoff PERMAFIX 142 transparent","nr":"81.2211.0010","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13005,"name":"Silikon Dichtstoff PERMAFIX 142 RAL 9016 Verkehrsweiss","nr":"81.2211.0020","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13006,"name":"Silikon Dichtstoff PERMAFIX 142 schwarz","nr":"81.2211.0200","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13007,"name":"Dichtstoff Acryl PERMAFIX 505 RAL 9016 Verkehrsweiss","nr":"81.2422.0011","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13008,"name":"Dichtstoff Acryl PERMAFIX 505 grau","nr":"81.2422.0012","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13009,"name":"Glättespachteln FALCONE Star","nr":"81.2593.0000","kat":"Werkzeug & Zubehör","einheit":"Stk","bestand":0,"min":5},{"id":13010,"name":"Abdeckvlies PETERHANS","nr":"81.7682.2050","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13011,"name":"Doppelseitiges Klebeband PERMAFIX 620/1780","nr":"81.7106.0911","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13012,"name":"Abdeckband PERMAFIX 710 25mm","nr":"81.7303.2024","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13013,"name":"Abdeckband PERMAFIX 710 30mm","nr":"81.7303.2030","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13014,"name":"Abdeckband PERMAFIX 710 50mm","nr":"81.7303.2048","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13015,"name":"Verbindungsplättchen LAMELLO 0","nr":"80.1351.0000","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13016,"name":"Verbindungsplättchen LAMELLO 10","nr":"80.1351.0010","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13017,"name":"Verbindungsplättchen LAMELLO 20","nr":"80.1351.0020","kat":"Lamello","einheit":"Stk","bestand":0,"min":20}];
   neueArtikel.forEach(a => {
     const exists = state.artikel.some(x => x.nr === a.nr);
     if (!exists) state.artikel.push(a);
@@ -1244,6 +1250,82 @@ function migrationSdsBohrer() {
     if (!exists) state.artikel.push(a);
   });
   state._sdsBohrerMigriert = true;
+  save();
+}
+
+// Einmalige Migration: Spanplattenschrauben Artikel importieren
+function migrationSpanplattenschrauben() {
+  if (!state.artikel) state.artikel = [];
+  if (state._spanplattenschraubenMigriert) return;
+  const spanplattenArtikel = [{"id":14001,"name":"Spanplattenschraube 3x25mm","nr":"82.1020.30025","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14002,"name":"Spanplattenschraube 3x30mm","nr":"82.1020.30030","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14003,"name":"Spanplattenschraube 3x35mm","nr":"82.1020.30035","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14004,"name":"Spanplattenschraube 3x40mm","nr":"82.1020.30040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14005,"name":"Spanplattenschraube 3.5x25mm","nr":"82.1020.35025","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14006,"name":"Spanplattenschraube 3.5x30mm","nr":"82.1020.35030","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14007,"name":"Spanplattenschraube 3.5x35mm","nr":"82.1020.35035","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14008,"name":"Spanplattenschraube 3.5x40mm","nr":"82.1020.35040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14009,"name":"Spanplattenschraube 3.5x45mm","nr":"82.1020.35045","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14010,"name":"Spanplattenschraube 3.5x50mm","nr":"82.1020.35050","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14011,"name":"Spanplattenschraube 4x25mm","nr":"82.1020.40025","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14012,"name":"Spanplattenschraube 4x30mm","nr":"82.1020.40030","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14013,"name":"Spanplattenschraube 4x35mm","nr":"82.1020.40035","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14014,"name":"Spanplattenschraube 4x40mm","nr":"82.1020.40040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14015,"name":"Spanplattenschraube 4x45mm","nr":"82.1020.40045","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14016,"name":"Spanplattenschraube 4x50mm","nr":"82.1020.40050","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14017,"name":"Spanplattenschraube 4x55mm","nr":"82.1020.40055","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14018,"name":"Spanplattenschraube 4x60mm","nr":"82.1020.40060","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14019,"name":"Spanplattenschraube 4x70mm","nr":"82.1020.40070","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14020,"name":"Spanplattenschraube 4.5x30mm","nr":"82.1020.45030","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14021,"name":"Spanplattenschraube 4.5x35mm","nr":"82.1020.45035","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14022,"name":"Spanplattenschraube 4.5x40mm","nr":"82.1020.45040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14023,"name":"Spanplattenschraube 4.5x45mm","nr":"82.1020.45045","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14024,"name":"Spanplattenschraube 4.5x50mm","nr":"82.1020.45050","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14025,"name":"Spanplattenschraube 4.5x55mm","nr":"82.1020.45055","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14026,"name":"Spanplattenschraube 4.5x60mm","nr":"82.1020.45060","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14027,"name":"Spanplattenschraube 4.5x70mm","nr":"82.1020.45070","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14028,"name":"Spanplattenschraube 4.5x80mm","nr":"82.1020.45080","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":100},{"id":14029,"name":"Spanplattenschraube 5x30mm","nr":"82.1020.50030","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14030,"name":"Spanplattenschraube 5x35mm","nr":"82.1020.50035","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14031,"name":"Spanplattenschraube 5x40mm","nr":"82.1020.50040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14032,"name":"Spanplattenschraube 5x45mm","nr":"82.1020.50045","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14033,"name":"Spanplattenschraube 5x50mm","nr":"82.1020.50050","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14034,"name":"Spanplattenschraube 5x55mm","nr":"82.1020.50055","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14035,"name":"Spanplattenschraube 5x60mm","nr":"82.1020.50060","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14036,"name":"Spanplattenschraube 5x65mm","nr":"82.1020.50065","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14037,"name":"Spanplattenschraube 5x70mm","nr":"82.1020.50070","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14038,"name":"Spanplattenschraube 5x80mm","nr":"82.1020.50080","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14039,"name":"Spanplattenschraube 5x90mm","nr":"82.1020.50090","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14040,"name":"Spanplattenschraube 5x100mm","nr":"82.1020.50100","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14041,"name":"Spanplattenschraube 5x120mm","nr":"82.1020.50120","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14042,"name":"Spanplattenschraube 6x40mm","nr":"82.1020.60040","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14043,"name":"Spanplattenschraube 6x50mm","nr":"82.1020.60050","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14044,"name":"Spanplattenschraube 6x60mm","nr":"82.1020.60060","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14045,"name":"Spanplattenschraube 6x70mm","nr":"82.1020.60070","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14046,"name":"Spanplattenschraube 6x80mm","nr":"82.1020.60080","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14047,"name":"Spanplattenschraube 6x90mm","nr":"82.1020.60090","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14048,"name":"Spanplattenschraube 6x100mm","nr":"82.1020.60100","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14049,"name":"Spanplattenschraube 6x110mm","nr":"82.1020.60110","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14050,"name":"Spanplattenschraube 6x120mm","nr":"82.1020.60120","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14051,"name":"Spanplattenschraube 6x130mm","nr":"82.1020.60130","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14052,"name":"Spanplattenschraube 6x140mm","nr":"82.1020.60140","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14053,"name":"Spanplattenschraube 6x150mm","nr":"82.1020.60150","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14054,"name":"Spanplattenschraube 6x160mm","nr":"82.1020.60160","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14055,"name":"Spanplattenschraube 6x180mm","nr":"82.1020.60180","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14056,"name":"Spanplattenschraube 6x200mm","nr":"82.1020.60200","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50},{"id":14057,"name":"Spanplattenschraube 6x220mm","nr":"82.1020.60220","kat":"Spanplattenschrauben","einheit":"Stk","bestand":0,"min":50}];
+  spanplattenArtikel.forEach(a => {
+    const exists = state.artikel.some(x => x.nr === a.nr);
+    if (!exists) state.artikel.push(a);
+  });
+  state._spanplattenschraubenMigriert = true;
+  save();
+}
+
+// Einmalige Migration: Top-Roc und Rafix mit Kopf TX Artikel importieren
+function migrationTopRocRafixTX() {
+  if (!state.artikel) state.artikel = [];
+  if (state._topRocRafixTXMigriert) return;
+  const weitereSchrauben = [{"id":15001,"name":"Top-Roc 6x60mm","nr":"82.5010.60060","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15002,"name":"Top-Roc 6x80mm","nr":"82.5010.60080","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15003,"name":"Top-Roc 6x100mm","nr":"82.5010.60100","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15004,"name":"Top-Roc 6x120mm","nr":"82.5010.60120","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15005,"name":"Top-Roc 6x150mm","nr":"82.5010.60150","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15006,"name":"Top-Roc 6x180mm","nr":"82.5010.60180","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15007,"name":"Top-Roc 6x200mm","nr":"82.5010.60200","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15008,"name":"Top-Roc 6x230mm","nr":"82.5010.60230","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15009,"name":"Top-Roc 6x250mm","nr":"82.5010.60250","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15010,"name":"Top-Roc 6x300mm","nr":"82.5010.60300","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15011,"name":"Top-Roc 6x350mm","nr":"82.5010.60350","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":3},{"id":15012,"name":"Top-Roc 6x400mm","nr":"82.5010.60400","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":3},{"id":15013,"name":"Top-Roc 6x450mm","nr":"82.5010.60450","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":3},{"id":15014,"name":"Top-Roc 6x500mm","nr":"82.5010.60500","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":3},{"id":15015,"name":"Top-Roc 6x600mm","nr":"82.5010.60600","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":3}].concat([{"id":15101,"name":"Rafix mit Kopf TX 7.5x42mm","nr":"82.5405.75042","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15102,"name":"Rafix mit Kopf TX 7.5x52mm","nr":"82.5405.75052","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15103,"name":"Rafix mit Kopf TX 7.5x62mm","nr":"82.5405.75062","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15104,"name":"Rafix mit Kopf TX 7.5x72mm","nr":"82.5405.75072","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15105,"name":"Rafix mit Kopf TX 7.5x82mm","nr":"82.5405.75082","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15106,"name":"Rafix mit Kopf TX 7.5x92mm","nr":"82.5405.75092","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":20},{"id":15107,"name":"Rafix mit Kopf TX 7.5x100mm","nr":"82.5405.75100","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15108,"name":"Rafix mit Kopf TX 7.5x112mm","nr":"82.5405.75112","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15109,"name":"Rafix mit Kopf TX 7.5x120mm","nr":"82.5405.75120","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15110,"name":"Rafix mit Kopf TX 7.5x132mm","nr":"82.5405.75132","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":10},{"id":15111,"name":"Rafix mit Kopf TX 7.5x152mm","nr":"82.5405.75152","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15112,"name":"Rafix mit Kopf TX 7.5x182mm","nr":"82.5405.75182","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15113,"name":"Rafix mit Kopf TX 7.5x212mm","nr":"82.5405.75212","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15114,"name":"Rafix mit Kopf TX 7.5x252mm","nr":"82.5405.75252","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15115,"name":"Rafix mit Kopf TX 7.5x302mm","nr":"82.5405.75302","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5}]);
+  weitereSchrauben.forEach(a => {
+    const exists = state.artikel.some(x => x.nr === a.nr);
+    if (!exists) state.artikel.push(a);
+  });
+  state._topRocRafixTXMigriert = true;
+  save();
+}
+
+// Einmalige Migration: Rafix ohne Kopf 252/302mm ergänzen
+function migrationRafixOhneKopfErweiterung() {
+  if (!state.artikel) state.artikel = [];
+  if (state._rafixOhneKopfErgaenztMigriert) return;
+  const ergaenzung = [{"id":15201,"name":"Rafix ohne Kopf 252mm","nr":"82.5416.75252","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5},{"id":15202,"name":"Rafix ohne Kopf 302mm","nr":"82.5416.75302","kat":"Schrauben & Befestigung","einheit":"Stk","bestand":0,"min":5}];
+  ergaenzung.forEach(a => {
+    const exists = state.artikel.some(x => x.nr === a.nr);
+    if (!exists) state.artikel.push(a);
+  });
+  state._rafixOhneKopfErgaenztMigriert = true;
+  save();
+}
+
+// Einmalige Migration: Kategorien korrigieren (Klebeband -> Abdeckung, Lamello eigene Sparte)
+function migrationKategorienKorrektur() {
+  if (!state.artikel) state.artikel = [];
+  if (state._kategorienKorrekturMigriert) return;
+  const korrekturen = {"81.7106.0911":"Abdeckung & Schutz","80.1351.0000":"Lamello","80.1351.0010":"Lamello","80.1351.0020":"Lamello"};
+  state.artikel.forEach(a => { if (korrekturen[a.nr]) a.kat = korrekturen[a.nr]; });
+  state._kategorienKorrekturMigriert = true;
+  save();
+}
+
+// Zentrale Kategorie-Zuordnung anhand des Artikelnamens
+function klassifiziereKategorie(name, nr, altKat) {
+  if (!name) return altKat;
+  const n = name.toLowerCase();
+  if (n.startsWith('kunststoffdübel') || n.startsWith('holzdübel')) return 'Dübel';
+  if (n.startsWith('rafix mit kopf')) return 'Rafix mit Kopf';
+  if (n.startsWith('rafix ohne kopf')) return 'Rafix ohne Kopf';
+  if (n.startsWith('top-roc')) return 'Top Roc';
+  if (n.startsWith('linsenkopf') || n.startsWith('spax') || n.startsWith('spanplattenschraube') || n.startsWith('schraube ')) return 'Schrauben';
+  if (n.startsWith('verbindungsplättchen lamello')) return 'Lamello';
+  if (n.includes('silikon')) return 'Silikon';
+  if (n.includes('acryl') || n.startsWith('montageklebstoff')) return 'Kleber';
+  if (n.startsWith('doppelseitiges klebeband') || n.startsWith('abdeckband')) return 'Klebeband';
+  if (n.startsWith('abdeckvlies') || n.startsWith('glättespachteln')) return 'Sonstiges';
+  return altKat;
+}
+
+// Einmalige Migration: Kategorien gemäss neuer Struktur reorganisieren
+// (Silikon, Kleber, Dübel, Schrauben, Top Roc, Rafix mit Kopf, Rafix ohne Kopf, Klebeband, Lamello, Sonstiges)
+function migrationKategorienReorganisation() {
+  if (!state.artikel) state.artikel = [];
+  if (state._kategorienReorganisationMigriert) return;
+  state.artikel.forEach(a => { a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
+  state._kategorienReorganisationMigriert = true;
   save();
 }
 
@@ -1312,6 +1394,11 @@ function load() {
   migrationSdsBohrer();
   migrationHssBohrer();
   migrationKlebstoffeEtc();
+  migrationSpanplattenschrauben();
+  migrationTopRocRafixTX();
+  migrationRafixOhneKopfErweiterung();
+  migrationKategorienKorrektur();
+  migrationKategorienReorganisation();
   fahrzeugManuelleResetPruefen();
   initLoginScreen();
 }
@@ -1592,10 +1679,25 @@ function updateBestand(id, delta) {
 let filterText = '';
 function filterArtikel(val) { filterText = val.toLowerCase(); renderArtikelTable(); }
 
+let filterKat = '';
+function filterArtikelKat(val) { filterKat = val; renderArtikelTable(); }
+
+function renderKatFilterOptions() {
+  const sel = document.getElementById('art-kat-filter');
+  if (!sel) return;
+  const kats = Array.from(new Set(state.artikel.map(a => a.kat).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const vorher = sel.value;
+  sel.innerHTML = '<option value="">Alle Kategorien</option>' + kats.map(k => `<option value="${k}">${k}</option>`).join('');
+  if (kats.includes(vorher)) sel.value = vorher;
+  else filterKat = '';
+}
+
 function renderArtikelTable() {
+  renderKatFilterOptions();
   const wrap = document.getElementById('artikel-table-wrap');
   const list = state.artikel.filter(a =>
-    !filterText || a.name.toLowerCase().includes(filterText) || a.kat.toLowerCase().includes(filterText)
+    (!filterText || a.name.toLowerCase().includes(filterText) || a.kat.toLowerCase().includes(filterText)) &&
+    (!filterKat || a.kat === filterKat)
   );
   if (!list.length) { wrap.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
   wrap.innerHTML = `<table>
@@ -1988,9 +2090,20 @@ let cart = []; // [{artikelId, menge}]
 
 function renderBestellungDropdowns() {
   renderFahrzeugDropdowns();
+  const katSel = document.getElementById('best-artikel-kat');
+  const kats = Array.from(new Set(state.artikel.map(a => a.kat).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const vorherKat = katSel.value;
+  katSel.innerHTML = '<option value="">Alle Kategorien</option>' + kats.map(k => `<option value="${k}">${k}</option>`).join('');
+  if (kats.includes(vorherKat)) katSel.value = vorherKat;
+  renderBestellungArtikelDropdown();
+}
+
+function renderBestellungArtikelDropdown() {
+  const kat = document.getElementById('best-artikel-kat').value;
   const sel = document.getElementById('best-artikel');
+  const liste = kat ? state.artikel.filter(a => a.kat === kat) : state.artikel;
   sel.innerHTML = '<option value="">— Artikel wählen —</option>' +
-    state.artikel.map(a => `<option value="${a.id}">${a.name} (Lager: ${a.bestand} ${a.einheit})</option>`).join('');
+    liste.map(a => `<option value="${a.id}">${a.name} (Lager: ${a.bestand} ${a.einheit})</option>`).join('');
 }
 
 function addToCart() {
@@ -4682,6 +4795,7 @@ function startFirebaseListener() {
         }
 
         if (true) {
+          const lokalVorSync = state;
           state = remote;
           if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
           if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
@@ -4689,10 +4803,30 @@ function startFirebaseListener() {
           if (!Array.isArray(state.baustellen)) state.baustellen = [];
           if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
           if (!state.plan) state.plan = {};
+          // Merge: lokale Artikel/Fahrzeuge/Mitarbeiter/Werkzeug, die der Server (noch) nicht
+          // kennt (z.B. frisch durch eine Migration hinzugefügt), NICHT verlieren -
+          // ergänzen statt komplett überschreiben.
+          let mergeNeu = false;
+          const mergeByKey = (remoteArr, lokalArr, key) => {
+            const ergebnis = Array.isArray(remoteArr) ? remoteArr.map(x => ({...x})) : [];
+            const bekannt = new Set(ergebnis.map(x => x[key]));
+            (Array.isArray(lokalArr) ? lokalArr : []).forEach(x => {
+              if (x[key] !== undefined && !bekannt.has(x[key])) {
+                ergebnis.push({...x}); bekannt.add(x[key]); mergeNeu = true;
+              }
+            });
+            return ergebnis;
+          };
+          state.artikel = mergeByKey(state.artikel, lokalVorSync.artikel, 'nr');
+          state.fahrzeuge = mergeByKey(state.fahrzeuge, lokalVorSync.fahrzeuge, 'id');
+          state.mitarbeiter = mergeByKey(state.mitarbeiter, lokalVorSync.mitarbeiter, 'id');
+          state.werkzeug = mergeByKey(state.werkzeug, lokalVorSync.werkzeug, 'id');
+          state.baustellen = mergeByKey(state.baustellen, lokalVorSync.baustellen, 'id');
           safeStorage.setItem('lagertool', JSON.stringify(state));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
           showSyncIndicator('↓ Sync');
+          if (mergeNeu) { save(); } // lokale Ergänzungen direkt zurück auf den Server schreiben
         }
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
@@ -5080,6 +5214,7 @@ const PETERHANS_ARTIKEL = [
   {id:10187,name:'Spax Senkkopf 4.5x80',nr:'82.1020.45080',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:20},
   {id:10188,name:'Spax Senkkopf 5x30',nr:'82.1020.50030',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
 ];
+PETERHANS_ARTIKEL.forEach(a => { a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
 
 const STANDARD_FAHRZEUGE = [
   {id:20001, name:'B1', monteur:'Jonas Krakau'},
@@ -5149,10 +5284,14 @@ function loadDefaultArtikel() {
   if (!state.fahrzeuge) state.fahrzeuge = [];
   if (!state.mitarbeiter) state.mitarbeiter = [];
   if (!state.werkzeug) state.werkzeug = [];
-  if (state.artikel.length === 0) {
-    state.artikel = PETERHANS_ARTIKEL.map(a => ({...a}));
+  let neuHinzu = 0;
+  PETERHANS_ARTIKEL.forEach(a => {
+    const exists = state.artikel.some(x => x.nr === a.nr);
+    if (!exists) { state.artikel.push({...a}); neuHinzu++; }
+  });
+  if (neuHinzu > 0) {
     save();
-    toast('Peterhans Artikel geladen', PETERHANS_ARTIKEL.length + ' Artikel importiert', '📦');
+    toast('Peterhans Artikel geladen', neuHinzu + ' Artikel importiert', '📦');
   }
   if (state.fahrzeuge.length === 0) {
     state.fahrzeuge = STANDARD_FAHRZEUGE.map(f => ({...f}));
