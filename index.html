@@ -417,11 +417,17 @@
       <div><label>Artikelname *</label><input type="text" id="art-name" placeholder="z.B. Schrauben M6"></div>
       <div><label>Kategorie</label>
         <select id="art-kat">
-          <option selected="selected">Schrauben &amp; Befestigung</option>
-          <option>Werkzeug &amp; Bits</option>
-          <option>Kleber &amp; Dichtstoffe</option>
-          <option>Elektro</option>
-          <option>Profile &amp; Schienen</option>
+          <option selected="selected">Schrauben</option>
+          <option>Dübel</option>
+          <option>Top Roc</option>
+          <option>Rafix mit Kopf</option>
+          <option>Rafix ohne Kopf</option>
+          <option>Lamello</option>
+          <option>HSS-Bohrer</option>
+          <option>SDS-Bohrer</option>
+          <option>Silikon</option>
+          <option>Kleber</option>
+          <option>Klebeband</option>
           <option>Sonstiges</option>
         </select>
       </div>
@@ -819,7 +825,54 @@
   </div>
 </div>
 
-<!-- BAUSTELLE MODAL -->
+<!-- ARTIKEL MODAL -->
+<div class="modal-overlay" id="art-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title" id="art-modal-title">Artikel bearbeiten</div>
+      <button class="modal-close" onclick="closeArtModal()">✕</button>
+    </div>
+    <input type="hidden" id="art-modal-id">
+    <div class="form-row cols-1">
+      <div><label>Artikelname *</label><input type="text" id="art-modal-name"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>Kategorie</label>
+        <select id="art-modal-kat">
+          <option>Schrauben</option>
+          <option>Dübel</option>
+          <option>Top Roc</option>
+          <option>Rafix mit Kopf</option>
+          <option>Rafix ohne Kopf</option>
+          <option>Lamello</option>
+          <option>HSS-Bohrer</option>
+          <option>SDS-Bohrer</option>
+          <option>Silikon</option>
+          <option>Kleber</option>
+          <option>Klebeband</option>
+          <option>Sonstiges</option>
+        </select>
+      </div>
+      <div><label>Einheit</label>
+        <select id="art-modal-einheit">
+          <option>Stk</option><option>Pack</option><option>Box</option><option>m</option><option>kg</option><option>Liter</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>Aktueller Bestand</label><input type="number" id="art-modal-bestand" min="0"></div>
+      <div><label>Meldebestand (Warnung ab)</label><input type="number" id="art-modal-min" min="0"></div>
+    </div>
+    <div class="form-row cols-1">
+      <div><label>Artikel-Nr.</label><input type="text" id="art-modal-nr"></div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-danger btn-sm" id="art-modal-delete-btn" onclick="deleteArtikelAusModal()" style="margin-right:auto">🗑 Löschen</button>
+      <button class="btn btn-secondary" onclick="closeArtModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveArtModal()">💾 Speichern</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="bs-modal">
   <div class="modal" style="max-width:520px">
     <div class="modal-header">
@@ -1676,6 +1729,51 @@ function updateBestand(id, delta) {
   save(); renderArtikelTable(); renderStats();
 }
 
+function showArtModal(id) {
+  const a = state.artikel.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('art-modal-title').textContent = 'Artikel bearbeiten';
+  document.getElementById('art-modal-id').value = a.id;
+  document.getElementById('art-modal-name').value = a.name || '';
+  const katSel = document.getElementById('art-modal-kat');
+  if (a.kat && ![...katSel.options].some(o => o.value === a.kat)) {
+    katSel.insertAdjacentHTML('beforeend', `<option>${a.kat}</option>`);
+  }
+  katSel.value = a.kat || 'Schrauben';
+  document.getElementById('art-modal-einheit').value = a.einheit || 'Stk';
+  document.getElementById('art-modal-bestand').value = a.bestand ?? 0;
+  document.getElementById('art-modal-min').value = a.min ?? 0;
+  document.getElementById('art-modal-nr').value = a.nr || '';
+  document.getElementById('art-modal').classList.add('open');
+}
+
+function closeArtModal() {
+  document.getElementById('art-modal').classList.remove('open');
+}
+
+function saveArtModal() {
+  const id = parseInt(document.getElementById('art-modal-id').value);
+  const a = state.artikel.find(x => x.id === id);
+  if (!a) return;
+  const name = document.getElementById('art-modal-name').value.trim();
+  if (!name) return toast('Fehler', 'Bitte Artikelname eingeben', '⚠️');
+  a.name = name;
+  a.kat = document.getElementById('art-modal-kat').value;
+  a.einheit = document.getElementById('art-modal-einheit').value;
+  a.bestand = Math.max(0, parseInt(document.getElementById('art-modal-bestand').value) || 0);
+  a.min = Math.max(0, parseInt(document.getElementById('art-modal-min').value) || 0);
+  a.nr = document.getElementById('art-modal-nr').value.trim();
+  save(); renderAll();
+  closeArtModal();
+  toast('Gespeichert', name, '✅');
+}
+
+function deleteArtikelAusModal() {
+  const id = parseInt(document.getElementById('art-modal-id').value);
+  closeArtModal();
+  deleteArtikel(id);
+}
+
 let filterText = '';
 function filterArtikel(val) { filterText = val.toLowerCase(); renderArtikelTable(); }
 
@@ -1712,13 +1810,13 @@ function renderArtikelTable() {
         ? `<span class="badge badge-yellow">⚠ Niedrig</span>`
         : `<span class="badge badge-green">✓ OK</span>`;
       const color = zero ? '#e8574b' : low ? '#e8b84b' : '#4be88a';
-      return `<tr>
+      return `<tr onclick="showArtModal(${a.id})" style="cursor:pointer">
         <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${a.nr || '—'}</td>
         <td><div style="font-weight:600">${a.name}</div><div style="font-size:11px;color:var(--muted)">${a.einheit}</div></td>
         <td style="font-size:12px;color:var(--muted)">${a.kat}</td>
         <td>
           <div style="display:flex;align-items:center;gap:8px">
-            <div class="qty-control">
+            <div class="qty-control" onclick="event.stopPropagation()">
               <button class="qty-btn" onclick="updateBestand(${a.id},-1)">−</button>
               <span class="qty-val">${a.bestand}</span>
               <button class="qty-btn" onclick="updateBestand(${a.id},1)">+</button>
@@ -1727,7 +1825,10 @@ function renderArtikelTable() {
           <div class="stock-bar" style="margin-top:5px"><div class="stock-fill" style="width:${pct}%;background:${color}"></div></div>
         </td>
         <td>${badge}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="deleteArtikel(${a.id})">Löschen</button></td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn btn-secondary btn-sm" onclick="showArtModal(${a.id})">✏️ Bearbeiten</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteArtikel(${a.id})">Löschen</button>
+        </td>
       </tr>`;
     }).join('')}</tbody>
   </table>`;
