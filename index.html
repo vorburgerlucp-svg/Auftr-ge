@@ -1828,17 +1828,32 @@ function save() {
   state._ts = Date.now();
   const json = JSON.stringify(state);
   safeStorage.setItem('lagertool', json);
-  // Firebase-Write erst NACHDEM wir mindestens einmal Firebase-Daten empfangen haben.
-  // Verhindert, dass ein leerer Anfangs-State (vor dem ersten Sync) die echten
-  // Firebase-Daten überschreibt.
+  // Firebase-Write: nur schlanke Daten (ohne base64-Dokumente/Fotos).
+  // Fahrzeug-Docs und Mitarbeiter-Fotos bleiben nur im localStorage,
+  // da Firebase ein 10MB-Limit hat und die Docs allein ~29MB ausmachen.
   if (dbRef && hasReceivedFirebaseSync) {
     try {
       suppressListener = true;
-      pendingSavePromise = dbRef.set(json).then(() => showSyncIndicator('↑ Sync'))
+      const slimJson = JSON.stringify(stripLargeData(state));
+      pendingSavePromise = dbRef.set(slimJson).then(() => showSyncIndicator('↑ Sync'))
         .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
         .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
     } catch(e) { suppressListener = false; }
   }
+}
+
+// Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
+// Firebase bekommt nur die schlanken Nutzdaten (~72 KB statt ~29 MB).
+function stripLargeData(s) {
+  const copy = JSON.parse(JSON.stringify(s));
+  (copy.fahrzeuge||[]).forEach(f => {
+    f.docs = (f.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+  });
+  (copy.mitarbeiter||[]).forEach(m => {
+    if (m.foto) m.foto = '_localOnly';
+    m.docs = (m.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+  });
+  return copy;
 }
 
 // Jeden Freitag 12:00 werden manuelle Fahrzeug-Zuweisungen zurückgesetzt
@@ -5269,6 +5284,23 @@ function startFirebaseListener() {
           state.mitarbeiter = mergeByKey(state.mitarbeiter, lokalVorSync.mitarbeiter, 'id');
           state.werkzeug = mergeByKey(state.werkzeug, lokalVorSync.werkzeug, 'id');
           state.baustellen = mergeByKey(state.baustellen, lokalVorSync.baustellen, 'id');
+
+          // Lokale Dokumente/Fotos (base64) zurückholen: Firebase hat nur Platzhalter
+          // (_localOnly), die echten Daten sind nur im localStorage vorhanden.
+          (state.fahrzeuge||[]).forEach(f => {
+            const lokal = (lokalVorSync.fahrzeuge||[]).find(lf => lf.id === f.id);
+            if (lokal && Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) {
+              f.docs = lokal.docs;
+            }
+          });
+          (state.mitarbeiter||[]).forEach(m => {
+            const lokal = (lokalVorSync.mitarbeiter||[]).find(lm => lm.id === m.id);
+            if (lokal) {
+              if (lokal.foto && lokal.foto !== '_localOnly') m.foto = lokal.foto;
+              if (Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) m.docs = lokal.docs;
+            }
+          });
+
           // Nach jedem Merge erneut auf Duplikate prüfen (z.B. wenn zwei Geräte gleichzeitig
           // dieselbe Person neu angelegt haben) und Fahrzeug-Zuordnung per ID nachziehen.
           const entferntBeimSync = mitarbeiterDeduplizieren();
@@ -5506,7 +5538,8 @@ function importData(e) {
       if (dbRef) {
         toast('Import', 'Daten geladen – wird zu Firebase geschrieben…', '⏳');
         suppressListener = true;
-        dbRef.set(json)
+        const slimJson = JSON.stringify(stripLargeData(state));
+        dbRef.set(slimJson)
           .then(() => {
             toast('Import OK', 'Daten geladen und zu Firebase gespeichert', '✅');
             showSyncIndicator('↑ Import Sync OK');
@@ -6328,7 +6361,8 @@ function forceSave() {
     btn.textContent = '⏳ Speichern…';
     btn.style.opacity = '0.6';
     suppressListener = true;
-    dbRef.set(json)
+    const slimJson = JSON.stringify(stripLargeData(state));
+    dbRef.set(slimJson)
       .then(() => {
         btn.innerHTML = '✅ Gespeichert!';
         btn.style.background = 'var(--green,#4be88a)';
