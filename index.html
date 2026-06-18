@@ -369,8 +369,15 @@
   <div style="background:var(--card, #1a1d24);border:1px solid var(--border, #2a2d35);border-radius:12px;padding:32px;width:340px;max-width:90vw;">
     <div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:20px;">⬡ LagerTool Login</div>
     <div style="margin-bottom:14px;">
-      <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">Name auswählen</label>
-      <select id="login-name" style="width:100%;padding:10px;font-size:14px;"></select>
+      <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">Name eingeben oder auswählen</label>
+      <div style="position:relative">
+        <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
+          style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
+          onfocus="this.select(); loginPickerOpen()" onclick="loginPickerOpen()"
+          oninput="document.getElementById('login-name-id').value=''; loginPickerOpen('input')">
+        <input type="hidden" id="login-name-id" value="">
+        <div id="login-picker" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--card,#1c1f26);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35);margin-top:4px"></div>
+      </div>
     </div>
     <div style="margin-bottom:14px;">
       <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">PIN eingeben</label>
@@ -664,7 +671,14 @@
     <input type="hidden" id="fzg-modal-id">
     <div class="form-row cols-2">
       <div><label>Fahrzeug-Nr. *</label><input type="text" id="fzg-modal-name" placeholder="z.B. B1"></div>
-      <div><label>Monteur *</label><input type="text" id="fzg-modal-monteur" placeholder="z.B. Stefan M."></div>
+      <div style="position:relative">
+        <label>Monteur *</label>
+        <input type="text" id="fzg-modal-monteur" placeholder="Klicken oder tippen zum Suchen…" autocomplete="off"
+          onfocus="this.select(); fzgMonteurPickerOpen()" onclick="fzgMonteurPickerOpen()"
+          oninput="document.getElementById('fzg-modal-monteur-id').value=''; fzgMonteurPickerOpen('input')">>
+        <input type="hidden" id="fzg-modal-monteur-id" value="">
+        <div id="fzg-monteur-picker" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:var(--card,#1c1f26);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35);margin-top:4px"></div>
+      </div>
     </div>
     <div class="form-row cols-2">
       <div><label>Kontrollschild</label><input type="text" id="fzg-modal-schild" placeholder="z.B. LU 296895"></div>
@@ -685,8 +699,12 @@
     </div>
     <hr class="divider">
     <div class="card-title">📄 Dokumente & Fotos</div>
-    <div class="doc-upload-area" onclick="document.getElementById('fzg-doc-input').click()">
-      📎 Foto oder PDF hochladen (Fahrzeugausweis, Versicherung, etc.)
+    <div class="doc-upload-area" id="fzg-doc-drop-zone"
+      onclick="document.getElementById('fzg-doc-input').click()"
+      ondragover="event.preventDefault(); this.style.borderColor='var(--accent2)'; this.style.background='rgba(59,130,246,.08)'"
+      ondragleave="this.style.borderColor=''; this.style.background=''"
+      ondrop="event.preventDefault(); this.style.borderColor=''; this.style.background=''; handleDocDrop(event)">
+      📎 Foto oder PDF hierher ziehen oder klicken zum Hochladen
     </div>
     <input type="file" id="fzg-doc-input" accept="image/*,application/pdf" multiple style="display:none" onchange="handleDocUpload(event)">
     <div class="doc-preview-grid" id="fzg-doc-preview"></div>
@@ -809,7 +827,11 @@
     </div>
     <hr class="divider">
     <div class="card-title">📁 Dokumente</div>
-    <div class="doc-upload-area" onclick="document.getElementById('ma-doc-input').click()">
+    <div class="doc-upload-area"
+      onclick="document.getElementById('ma-doc-input').click()"
+      ondragover="event.preventDefault(); this.style.borderColor='var(--accent2)'; this.style.background='rgba(59,130,246,.08)'"
+      ondragleave="this.style.borderColor=''; this.style.background=''"
+      ondrop="event.preventDefault(); this.style.borderColor=''; this.style.background=''; handleMaDocDrop(event)">
       📎 Dokumente hochladen (Ausweis, Vertrag, Zertifikat, etc.)
     </div>
     <input type="file" id="ma-doc-input" accept="image/*,application/pdf" multiple style="display:none" onchange="handleMaDoc(event)">
@@ -1444,6 +1466,9 @@ function load() {
   if (!state.config.absender) state.config.absender = 'Montage Welt LagerTool';
   migrationZollikon();
   migrationMitarbeiterPins();
+  mitarbeiterDeduplizieren();
+  migrationFahrzeugMonteurId();
+  migrationKontrollschilderRestore();
   migrationSdsBohrer();
   migrationHssBohrer();
   migrationKlebstoffeEtc();
@@ -1454,6 +1479,78 @@ function load() {
   migrationKategorienReorganisation();
   fahrzeugManuelleResetPruefen();
   initLoginScreen();
+}
+
+// Entfernt doppelte Mitarbeiter (gleicher Vor-/Nachname), behält den ältesten Eintrag (kleinste ID).
+// Vor dem Löschen werden ausgefüllte Felder der jüngeren Duplikate in den behaltenen Eintrag übernommen,
+// damit keine zwischenzeitlich erfassten Daten (Tel, Foto, Bewertungen, Dokumente …) verloren gehen.
+// Läuft idempotent bei jedem Start und nach jedem Firebase-Sync, damit künftige Race-Conditions
+// (z.B. zwei Geräte starten gleichzeitig vor dem ersten Sync) sich automatisch selbst heilen.
+function mitarbeiterDeduplizieren() {
+  if (!Array.isArray(state.mitarbeiter) || state.mitarbeiter.length < 2) return 0;
+  const gruppen = new Map();
+  state.mitarbeiter.forEach(m => {
+    const key = (m.vorname||'').trim().toLowerCase() + '|' + (m.nachname||'').trim().toLowerCase();
+    if (!gruppen.has(key)) gruppen.set(key, []);
+    gruppen.get(key).push(m);
+  });
+  let entfernt = 0;
+  const ergebnis = [];
+  gruppen.forEach(eintraege => {
+    if (eintraege.length === 1) { ergebnis.push(eintraege[0]); return; }
+    eintraege.sort((a,b) => a.id - b.id);
+    const behalten = eintraege[0];
+    eintraege.slice(1).forEach(dup => {
+      Object.keys(dup).forEach(k => {
+        if (k === 'id') return;
+        const wert = dup[k];
+        const leer = wert === undefined || wert === null || wert === '' ||
+          (Array.isArray(wert) && wert.length === 0) ||
+          (typeof wert === 'object' && wert !== null && Object.keys(wert).length === 0);
+        const aktuellLeer = behalten[k] === undefined || behalten[k] === null || behalten[k] === '' ||
+          (Array.isArray(behalten[k]) && behalten[k].length === 0);
+        if (!leer && aktuellLeer) behalten[k] = wert;
+      });
+      entfernt++;
+    });
+    ergebnis.push(behalten);
+  });
+  if (entfernt > 0) {
+    state.mitarbeiter = ergebnis;
+    console.log(`[LagerTool] ${entfernt} doppelte Mitarbeiter-Einträge entfernt`);
+  }
+  return entfernt;
+}
+
+// Verknüpft bestehende Fahrzeuge (Alt-Datensätze mit reinem Freitext-Monteurnamen)
+// einmalig fest mit der Mitarbeiter-ID, sofern der Name exakt und eindeutig passt.
+function migrationFahrzeugMonteurId() {
+  if (!Array.isArray(state.fahrzeuge)) return;
+  state.fahrzeuge.forEach(f => {
+    if (f.monteurId !== undefined && f.monteurId !== null) return;
+    if (!f.monteur) { f.monteurId = null; return; }
+    const name = f.monteur.trim().toLowerCase();
+    const treffer = (state.mitarbeiter||[]).filter(m => (m.vorname+' '+m.nachname).trim().toLowerCase() === name);
+    f.monteurId = treffer.length === 1 ? treffer[0].id : null;
+  });
+}
+
+// Einmalige Migration: Kontrollschilder wiederherstellen, die durch den Sync-Bug verloren gingen.
+// Quelle: Backup-Export lagertool-sync-2026-06-18.json
+function migrationKontrollschilderRestore() {
+  if (state._kontrollschilderRestored) return;
+  const bekannt = {
+    'B1':'LU 290390','B2':'LU295295','B3':'LU295584','B4':'LU296144','B5':'LU297708',
+    'B6':'LU296859','B7':'LU297709','B9':'LU297639','B10':'LU297640','B11':'LU297806',
+    'B12':'LU297801','B13':'LU230927','B14':'LU251142','B15':'LU284643','B16':'LU213513',
+    'B17':'LU284701','B18':'LU231168','B19':'LU281787','B20':'AG431942','T100':'LU212991'
+  };
+  let count = 0;
+  (state.fahrzeuge||[]).forEach(f => {
+    if (!f.schild && bekannt[f.name]) { f.schild = bekannt[f.name]; count++; }
+  });
+  state._kontrollschilderRestored = true;
+  if (count > 0) console.log(`[LagerTool] ${count} Kontrollschilder aus Backup wiederhergestellt`);
 }
 
 // ============================================================
@@ -1517,23 +1614,17 @@ function migrationMitarbeiterPins() {
   }
 
   // PINs für Zollikon-Team setzen falls noch nicht vorhanden
+  // NUR für bestehende Mitarbeiter – legt KEINE neuen an (Temporäre Monteure entfernt)
   const pinMap = {
     'Mitteregger Christian': { pin: '3885', rolle: 'leiter' },
-    'Dubs Gilles': { pin: '7883', rolle: 'monteur' },
-    'Themporär 2': { pin: '1633', rolle: 'monteur' },
-    'Temporär Zollikon': { pin: '1852', rolle: 'monteur' }
+    'Dubs Gilles': { pin: '7883', rolle: 'monteur' }
   };
   Object.entries(pinMap).forEach(([name, info]) => {
-    const [vorname, ...rest] = name.split(' ');
-    const nachname = rest.join(' ');
     let m = state.mitarbeiter.find(x =>
       (x.vorname + ' ' + x.nachname).trim() === name ||
       (x.nachname + ' ' + x.vorname).trim() === name
     );
-    if (!m) {
-      m = { id: Date.now() + Math.floor(Math.random()*10000), vorname, nachname, funktion: info.rolle };
-      state.mitarbeiter.push(m);
-    }
+    if (!m) return; // Mitarbeiter existiert nicht → NICHTS tun
     if (!m.pin) m.pin = info.pin;
     if (!m.rolle) m.rolle = info.rolle;
   });
@@ -1544,15 +1635,6 @@ function migrationMitarbeiterPins() {
 let currentLoginUser = null;
 
 function initLoginScreen() {
-  const sel = document.getElementById('login-name');
-  sel.innerHTML = '<option value="">-- Name wählen --</option>';
-  (state.mitarbeiter||[]).forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.vorname + ' ' + (m.nachname||'') + (m.admin ? ' 👑' : m.rolle==='leiter' ? ' 👷' : '');
-    sel.appendChild(opt);
-  });
-
   // Bereits eingeloggt? (sessionStorage)
   let savedLogin = null;
   try { savedLogin = sessionStorage.getItem('lagertool_login'); } catch(e) {}
@@ -1569,8 +1651,46 @@ function initLoginScreen() {
   });
 }
 
+function loginPickerOpen(mode) {
+  const q = mode === 'input'
+    ? document.getElementById('login-name').value.trim().toLowerCase()
+    : '';
+  const list = (state.mitarbeiter||[])
+    .slice()
+    .sort((a,b)=>(a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
+    .filter(m => !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q));
+  const html = list.map(m => {
+    const name = m.vorname + ' ' + (m.nachname||'');
+    const rolle = m.admin ? ' 👑' : m.rolle==='leiter' ? ' 👷' : '';
+    return `<div onclick="loginPickerSelect(${m.id}, '${name.replace(/'/g, "\\'")}')"
+      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:14px"
+      onmouseover="this.style.background='var(--hover,#262a33)'" onmouseout="this.style.background=''">
+      ${name}${rolle}
+    </div>`;
+  }).join('') || '<div style="padding:10px;color:var(--muted);font-size:13px">Keine Mitarbeiter gefunden</div>';
+  const picker = document.getElementById('login-picker');
+  picker.innerHTML = html;
+  picker.style.display = 'block';
+}
+
+function loginPickerSelect(maId, name) {
+  document.getElementById('login-name').value = name;
+  document.getElementById('login-name-id').value = maId;
+  document.getElementById('login-picker').style.display = 'none';
+  document.getElementById('login-pin').focus();
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('login-picker');
+  if (!picker) return;
+  const input = document.getElementById('login-name');
+  if (e.target !== picker && e.target !== input && !picker.contains(e.target)) {
+    picker.style.display = 'none';
+  }
+});
+
 function doLogin() {
-  const id = parseInt(document.getElementById('login-name').value);
+  const id = parseInt(document.getElementById('login-name-id').value);
   const pin = document.getElementById('login-pin').value.trim();
   const errEl = document.getElementById('login-error');
 
@@ -1618,7 +1738,15 @@ function finishLogin() {
   setTimeout(updateMeldungenBadge, 100);
 }
 
-function doLogout() {
+let pendingSavePromise = null;
+async function doLogout() {
+  // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten,
+  // damit der Reload keine frischen Änderungen "abschneidet" (Datenverlust-Bug).
+  try {
+    if (pendingSavePromise) {
+      await Promise.race([pendingSavePromise, new Promise(r => setTimeout(r, 2500))]);
+    }
+  } catch(e) {}
   try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
   location.reload();
 }
@@ -1629,9 +1757,9 @@ function save() {
   if (dbRef) {
     try {
       suppressListener = true;
-      dbRef.set(json).then(() => showSyncIndicator('↑ Sync'))
+      pendingSavePromise = dbRef.set(json).then(() => showSyncIndicator('↑ Sync'))
         .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
-        .finally(() => setTimeout(() => { suppressListener = false; }, 500));
+        .finally(() => { setTimeout(() => { suppressListener = false; }, 500); pendingSavePromise = null; });
     } catch(e) { suppressListener = false; }
   }
 }
@@ -1853,6 +1981,8 @@ function showFzgModal(id) {
   document.getElementById('fzg-modal-id').value = id || '';
   document.getElementById('fzg-modal-name').value = f?.name || '';
   document.getElementById('fzg-modal-monteur').value = f?.monteur || '';
+  document.getElementById('fzg-modal-monteur-id').value = f?.monteurId ?? '';
+  document.getElementById('fzg-monteur-picker').style.display = 'none';
   document.getElementById('fzg-modal-schild').value = f?.schild || '';
   document.getElementById('fzg-modal-marke').value = f?.marke || '';
   document.getElementById('fzg-modal-park').value = f?.park || 'nein';
@@ -1873,14 +2003,70 @@ function closeFzgModal() {
   tempDocs = []; tempService = []; tempWz = [];
 }
 
+// ── Monteur-Picker im Fahrzeug-Modal: Klick zeigt alle Monteure, Tippen filtert ──
+let fzgMonteurPickerForceAll = false;
+function fzgMonteurPickerOpen(filterMode) {
+  // filterMode === 'input' → nur wenn der User tatsächlich tippt wird gefiltert
+  // bei einfachem Klick (oder erstmaligem Öffnen) → ALLE zeigen
+  const q = filterMode === 'input'
+    ? document.getElementById('fzg-modal-monteur').value.trim().toLowerCase()
+    : '';
+  const aktuellesFzgId = parseInt(document.getElementById('fzg-modal-id').value) || null;
+  const list = (state.mitarbeiter||[])
+    .slice()
+    .sort((a,b)=>(a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
+    .filter(m => !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q));
+
+  const html = list.map(m => {
+    const name = m.vorname + ' ' + m.nachname;
+    const belegtBei = findFahrzeugFuerMitarbeiterId(m.id, aktuellesFzgId);
+    const gesperrt = !!belegtBei;
+    return `<div onclick="${gesperrt ? '' : `fzgMonteurPickerSelect(${m.id}, '${name.replace(/'/g, "\\'")}')`}"
+      style="padding:8px 12px;cursor:${gesperrt?'not-allowed':'pointer'};opacity:${gesperrt?'0.45':'1'};display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border)"
+      ${gesperrt?'':`onmouseover="this.style.background='var(--hover,#262a33)'" onmouseout="this.style.background=''"`}>
+      <span>${name}</span>
+      ${gesperrt ? `<span style="font-size:11px;color:var(--muted)">🔒 ${belegtBei.name}</span>` : ''}
+    </div>`;
+  }).join('') || `<div style="padding:10px;color:var(--muted);font-size:13px">Keine Mitarbeiter gefunden</div>`;
+
+  const picker = document.getElementById('fzg-monteur-picker');
+  picker.innerHTML = html;
+  picker.style.display = 'block';
+}
+
+function fzgMonteurPickerSelect(maId, name) {
+  document.getElementById('fzg-modal-monteur').value = name;
+  document.getElementById('fzg-modal-monteur-id').value = maId;
+  document.getElementById('fzg-monteur-picker').style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('fzg-monteur-picker');
+  if (!picker) return;
+  const input = document.getElementById('fzg-modal-monteur');
+  if (e.target !== picker && e.target !== input && !picker.contains(e.target)) {
+    picker.style.display = 'none';
+  }
+});
+
+
 function saveFzgModal() {
   const name = document.getElementById('fzg-modal-name').value.trim();
   const monteur = document.getElementById('fzg-modal-monteur').value.trim();
+  const monteurIdRaw = document.getElementById('fzg-modal-monteur-id').value;
+  const monteurId = monteurIdRaw !== '' ? parseInt(monteurIdRaw) : null;
   if (!name || !monteur) return toast('Fehler', 'Fahrzeug-Nr. und Monteur pflichtfeld', '⚠️');
   const id = parseInt(document.getElementById('fzg-modal-id').value) || Date.now();
+  // Sperre: dieser Monteur darf nicht schon einem anderen Fahrzeug zugewiesen sein
+  if (monteurId !== null) {
+    const belegtBei = findFahrzeugFuerMitarbeiterId(monteurId, id);
+    if (belegtBei) {
+      return toast('Fahrzeug bereits vergeben', monteur + ' hat bereits ' + belegtBei.name + ' zugewiesen', '🔒');
+    }
+  }
   const alt = state.fahrzeuge.find(f=>f.id===id);
   const data = {
-    id, name, monteur,
+    id, name, monteur, monteurId,
     schild: document.getElementById('fzg-modal-schild').value.trim(),
     marke: document.getElementById('fzg-modal-marke').value.trim(),
     park: document.getElementById('fzg-modal-park').value,
@@ -1921,6 +2107,19 @@ function saveFzgModal() {
 
 function handleDocUpload(e) {
   const files = Array.from(e.target.files);
+  processDocFiles(files);
+  e.target.value = '';
+}
+
+function handleDocDrop(e) {
+  const files = Array.from(e.dataTransfer.files).filter(f =>
+    f.type.startsWith('image/') || f.type === 'application/pdf'
+  );
+  if (!files.length) return toast('Fehler', 'Nur Bilder und PDFs erlaubt', '⚠️');
+  processDocFiles(files);
+}
+
+function processDocFiles(files) {
   files.forEach(file => {
     const reader = new FileReader();
     reader.onload = ev => {
@@ -1929,7 +2128,6 @@ function handleDocUpload(e) {
     };
     reader.readAsDataURL(file);
   });
-  e.target.value = '';
 }
 
 function renderDocPreview() {
@@ -2154,7 +2352,7 @@ function addFahrzeug() {
   const name = document.getElementById('fzg-name').value.trim();
   const monteur = document.getElementById('fzg-monteur').value.trim();
   if (!name || !monteur) return toast('Fehler', 'Bitte alle Felder ausfüllen', '⚠️');
-  state.fahrzeuge.push({ id: Date.now(), name, monteur });
+  state.fahrzeuge.push({ id: Date.now(), name, monteur, monteurId: null });
   save(); renderAll();
   document.getElementById('fzg-name').value = '';
   document.getElementById('fzg-monteur').value = '';
@@ -2355,11 +2553,22 @@ function getMaFahrzeug(m) {
     const byHint = state.fahrzeuge.find(f => f.name === m.fahrzeugHint);
     if (byHint) return byHint;
   }
-  const fullName = (m.vorname + ' ' + (m.nachname||'')).trim();
+  // Feste Zuordnung über Mitarbeiter-ID (zuverlässig, kein Textvergleich)
+  const byId = state.fahrzeuge.find(f => f.monteurId === m.id);
+  if (byId) return byId;
+  // Fallback nur für Alt-Datensätze, die noch keine monteurId haben:
+  // exakter Namensvergleich statt Fuzzy-includes(), um Fehlzuordnungen
+  // bei ähnlichen/doppelten Namen zu vermeiden.
+  const fullName = (m.vorname + ' ' + (m.nachname||'')).trim().toLowerCase();
   return state.fahrzeuge.find(f =>
-    f.monteur && (f.monteur.toLowerCase().includes((m.nachname||'').toLowerCase()) ||
-    f.monteur.toLowerCase().includes(fullName.toLowerCase()))
+    !f.monteurId && f.monteur && f.monteur.trim().toLowerCase() === fullName
   ) || null;
+}
+
+// Prüft, ob ein Mitarbeiter (über monteurId) bereits ein anderes Fahrzeug fest zugewiesen hat.
+// excludeFzgId: das Fahrzeug, das gerade bearbeitet wird, wird bei der Prüfung ausgenommen.
+function findFahrzeugFuerMitarbeiterId(maId, excludeFzgId) {
+  return state.fahrzeuge.find(f => f.monteurId === maId && f.id !== excludeFzgId) || null;
 }
 
 function renderMitarbeiterPage() {
@@ -2468,7 +2677,19 @@ function handleMaFoto(e) {
 let tempMaDocs = [];
 
 function handleMaDoc(e) {
-  const files = Array.from(e.target.files);
+  processMaDocFiles(Array.from(e.target.files));
+  e.target.value = '';
+}
+
+function handleMaDocDrop(e) {
+  const files = Array.from(e.dataTransfer.files).filter(f =>
+    f.type.startsWith('image/') || f.type === 'application/pdf'
+  );
+  if (!files.length) return toast('Fehler', 'Nur Bilder und PDFs erlaubt', '⚠️');
+  processMaDocFiles(files);
+}
+
+function processMaDocFiles(files) {
   files.forEach(file => {
     const reader = new FileReader();
     reader.onload = ev => {
@@ -2477,7 +2698,6 @@ function handleMaDoc(e) {
     };
     reader.readAsDataURL(file);
   });
-  e.target.value = '';
 }
 
 function renderMaDocPreview() {
@@ -2533,8 +2753,23 @@ function deleteMa() {
   const id = parseInt(document.getElementById('ma-modal-id').value);
   if (!confirm('Mitarbeiter löschen?')) return;
   state.mitarbeiter = state.mitarbeiter.filter(m => m.id !== id);
+
+  // Fahrzeug-Zuordnung lösen, falls dieser Mitarbeiter fest einem Fahrzeug zugewiesen war
+  (state.fahrzeuge||[]).forEach(f => {
+    if (f.monteurId === id) { f.monteurId = null; f.monteur = ''; }
+  });
+
+  // Alle Wochenplan-Einträge dieses Mitarbeiters entfernen (Status + Zuweisungen, über alle Tage)
+  Object.keys(state.plan||{}).forEach(ds => {
+    const tag = state.plan[ds];
+    if (!tag) return;
+    delete tag['ma' + id + '_' + ds];
+    delete tag['status_ma' + id];
+    Object.keys(tag).forEach(k => { if (tag[k] && tag[k].maId === id) delete tag[k]; });
+  });
+
   save(); closeMaModal(); renderMitarbeiterPage();
-  toast('Gelöscht', '', '🗑');
+  toast('Gelöscht', 'Mitarbeiter, Fahrzeug-Zuordnung und Wochenplan-Einträge entfernt', '🗑');
 }
 
 // ── WERKZEUG IM FAHRZEUG-MODAL ─────────────────────────
@@ -4895,6 +5130,20 @@ function startFirebaseListener() {
           return;
         }
 
+        // SCHUTZ gegen Race-Condition (z.B. Logout direkt nach dem Speichern, bevor der
+        // eigene Firebase-Write angekommen ist): Wenn der lokale Stand NEUER ist als der
+        // gerade eingehende Remote-Stand, ist dieser Remote-Stand veraltet (z.B. ein Echo
+        // eines noch nicht abgeschlossenen Writes) - NICHT anwenden, sonst gehen frische
+        // lokale Änderungen (z.B. im Wochenplan) verloren. Stattdessen den eigenen,
+        // neueren Stand erneut hochschreiben, damit Firebase aufholt.
+        if (state._ts && remote._ts && remote._ts < state._ts) {
+          console.warn('[Firebase] eingehender State ist älter als der lokale Stand - wird ignoriert, lokaler Stand wird erneut gesendet');
+          showSyncIndicator('⚠️ Sync übersprungen (veraltet)');
+          firebaseReady = true;
+          save();
+          return;
+        }
+
         if (true) {
           const lokalVorSync = state;
           state = remote;
@@ -4923,11 +5172,16 @@ function startFirebaseListener() {
           state.mitarbeiter = mergeByKey(state.mitarbeiter, lokalVorSync.mitarbeiter, 'id');
           state.werkzeug = mergeByKey(state.werkzeug, lokalVorSync.werkzeug, 'id');
           state.baustellen = mergeByKey(state.baustellen, lokalVorSync.baustellen, 'id');
+          // Nach jedem Merge erneut auf Duplikate prüfen (z.B. wenn zwei Geräte gleichzeitig
+          // dieselbe Person neu angelegt haben) und Fahrzeug-Zuordnung per ID nachziehen.
+          const entferntBeimSync = mitarbeiterDeduplizieren();
+          migrationFahrzeugMonteurId();
+          if (entferntBeimSync > 0) mergeNeu = true;
           safeStorage.setItem('lagertool', JSON.stringify(state));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
           showSyncIndicator('↓ Sync');
-          if (mergeNeu) { save(); } // lokale Ergänzungen direkt zurück auf den Server schreiben
+          if (mergeNeu) { save(); } // lokale Ergänzungen/Bereinigungen direkt zurück auf den Server schreiben
         }
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
