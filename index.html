@@ -1647,11 +1647,12 @@ function migrationMitarbeiterPins() {
     (m.nachname||'').trim().toLowerCase() === 'vorburger'
   );
   if (!admin) {
-    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '0804', admin: true };
+    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '0804', admin: true, entwickler: true };
     state.mitarbeiter.push(admin);
   } else {
     if (!admin.pin) admin.pin = '0804';
     if (!admin.admin) admin.admin = true;
+    admin.entwickler = true;
   }
 
   // PINs für Zollikon-Team setzen falls noch nicht vorhanden
@@ -1760,19 +1761,42 @@ function finishLogin() {
   // Eingeloggten Namen im Header anzeigen
   const logo = document.querySelector('.logo');
   if (logo) {
-    const rolle = currentLoginUser.admin ? '👑 Admin' : currentLoginUser.rolle === 'leiter' ? '👷 Leiter' : '🔧 Monteur';
+    const rolle = currentLoginUser.entwickler ? '🛠️ Entwickler' : currentLoginUser.admin ? '👑 Admin' : currentLoginUser.rolle === 'leiter' ? '👷 Leiter' : '🔧 Monteur';
     logo.innerHTML = '⬡ LagerTool <span style="font-size:11px;color:var(--muted,#8a8f98);font-weight:400;margin-left:8px;">' + currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'') + ' · ' + rolle + '</span> <button class="btn btn-secondary btn-sm" style="margin-left:10px;font-size:11px;" onclick="doLogout()">Logout</button>';
   }
 
-  // Nicht-Admins: eingeschränkte Navigation
-  if (!currentLoginUser.admin) {
+  // ── Rollenbasierte Navigation ──
+  const istEntwickler = !!currentLoginUser.entwickler;
+  const istAdmin = !!currentLoginUser.admin;
+  const istLeiter = currentLoginUser.rolle === 'leiter' || currentLoginUser.funktion === 'leiter';
+
+  if (!istAdmin) {
+    // Leiter: Wochenplan, Baustellen-Status, Meldungen, Bestellung
+    // Monteur: Bestellung, Baustellen-Status
+    const erlaubt = istLeiter
+      ? ['Wochenplan', '📊 Baustellen-Status', 'Meldungen', 'Bestellung']
+      : ['Bestellung', '📊 Baustellen-Status'];
     document.querySelectorAll('.nav-btn').forEach(btn => {
       const txt = btn.textContent.trim();
-      const erlaubt = ['Wochenplan', '📊 Baustellen-Status', 'Meldungen'].some(t => txt.includes(t));
-      if (!erlaubt) btn.style.display = 'none';
+      if (!erlaubt.some(t => txt.includes(t))) btn.style.display = 'none';
     });
-    // Direkt zu Baustellen-Status springen
-    showPage('baustatus');
+    showPage(istLeiter ? 'baustatus' : 'bestellung');
+  }
+
+  // Bewertungs-Tab: nur für Leiter, Admin, Entwickler – nicht für Monteur
+  if (!istLeiter && !istAdmin) {
+    const bewTab = document.querySelector('#baustatus-tabs button[onclick*="bewertung"]');
+    if (bewTab) bewTab.style.display = 'none';
+  }
+
+  // Sync, Einstellungen, Speichern-Button: NUR für Entwickler
+  if (!istEntwickler) {
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+      const txt = btn.textContent.trim();
+      if (txt.includes('Sync') || txt.includes('⚙️')) btn.style.display = 'none';
+    });
+    const saveBtn = document.getElementById('btn-force-save');
+    if (saveBtn) saveBtn.style.display = 'none';
   }
 
   renderAll();
@@ -1867,7 +1891,10 @@ function showPage(id) {
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
   if (id === 'meldungen') renderMeldungen();
-  if (id === 'einstellungen') renderEinstellungen();
+  if (id === 'einstellungen') {
+    if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
+    renderEinstellungen();
+  }
 }
 
 function renderEinstellungen() {
@@ -2521,40 +2548,49 @@ function removeFromCart(id) {
 }
 
 async function submitBestellung() {
-  const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
-  if (!fzgId) return toast('Fehler', 'Bitte Fahrzeug auswählen', '⚠️');
-  if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
+  try {
+    const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
+    if (!fzgId) return toast('Fehler', 'Bitte Fahrzeug auswählen', '⚠️');
+    if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
 
-  const fzg = state.fahrzeuge.find(f => f.id === fzgId);
-  const items = cart.map(c => {
-    const a = state.artikel.find(x => x.id === c.artikelId);
-    const inStock = a.bestand >= c.menge;
-    return { name: a.name, menge: c.menge, einheit: a.einheit, inStock };
-  });
+    const fzg = state.fahrzeuge.find(f => f.id === fzgId);
+    if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden', '⚠️');
+    const items = cart.map(c => {
+      const a = state.artikel.find(x => x.id === c.artikelId);
+      if (!a) return { name: '(Unbekannt)', menge: c.menge, einheit: 'Stk', inStock: false };
+      const inStock = (a.bestand || 0) >= c.menge;
+      return { name: a.name, menge: c.menge, einheit: a.einheit || 'Stk', inStock };
+    });
 
-  const order = {
-    id: Date.now(),
-    datum: new Date().toLocaleString('de-CH'),
-    fahrzeug: fzg.name,
-    monteur: fzg.monteur,
-    bemerkung: document.getElementById('best-bemerkung').value,
-    items
-  };
-  state.orders.unshift(order);
+    const order = {
+      id: Date.now(),
+      datum: new Date().toLocaleString('de-CH'),
+      fahrzeug: fzg.name,
+      monteur: fzg.monteur,
+      bemerkung: document.getElementById('best-bemerkung').value,
+      items
+    };
+    if (!Array.isArray(state.orders)) state.orders = [];
+    state.orders.unshift(order);
 
-  // Lagerbestand reduzieren für verfügbare Artikel
-  cart.forEach(c => {
-    const a = state.artikel.find(x => x.id === c.artikelId);
-    if (a && a.bestand >= c.menge) a.bestand -= c.menge;
-  });
+    // Lagerbestand reduzieren für verfügbare Artikel
+    cart.forEach(c => {
+      const a = state.artikel.find(x => x.id === c.artikelId);
+      if (a && (a.bestand || 0) >= c.menge) a.bestand -= c.menge;
+    });
 
-  save(); renderAll();
-  sendNotification(order);
-  cart = [];
-  renderCart();
-  document.getElementById('best-bemerkung').value = '';
-  document.getElementById('best-fahrzeug').value = '';
-  toast('Bestellung gesendet!', `${items.length} Artikel für ${fzg.name}`, '📤');
+    save(); renderAll();
+    toast('Bestellung gesendet!', `${items.length} Artikel für ${fzg.name}`, '📤');
+    // E-Mail-Benachrichtigung im Hintergrund (Fehler blockiert nicht die Bestellung)
+    sendNotification(order).catch(e => console.warn('E-Mail fehlgeschlagen:', e));
+    cart = [];
+    renderCart();
+    document.getElementById('best-bemerkung').value = '';
+    document.getElementById('best-fahrzeug').value = '';
+  } catch(err) {
+    console.error('Bestellung Fehler:', err);
+    toast('Fehler', 'Bestellung konnte nicht verarbeitet werden: ' + err.message, '❌');
+  }
 }
 
 async function sendNotification(order) {
@@ -5375,6 +5411,7 @@ function exportFzgHistorie() {
 
 // ── SYNC FÜR MONTEUR-APP ────────────────────────────────
 function officeSyncExport() {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   const data = safeStorage.getItem('lagertool');
   if (!data) return toast('Fehler','Keine Daten','⚠️');
   // Speichere unter einem zweiten Key den die Monteur-App auch lesen kann
@@ -5436,17 +5473,19 @@ function updateMeldungenBadge(){
 
 // ── EXPORT / IMPORT ────────────────────────────────────
 function exportData() {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'lagertool-backup.json'; a.click();
 }
 function importData(e) {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   const file = e.target.files[0]; if (!file) return;
   const r = new FileReader();
-  r.onload = ev => { try { state = JSON.parse(ev.target.result); save(); renderAll(); toast('Import OK', 'Daten geladen', '✅'); } catch { toast('Fehler', 'Ungültige Datei', '⚠️'); } };
+  r.onload = ev => { try { state = JSON.parse(ev.target.result); hasReceivedFirebaseSync = true; save(); renderAll(); toast('Import OK', 'Daten geladen', '✅'); } catch { toast('Fehler', 'Ungültige Datei', '⚠️'); } };
   r.readAsText(file);
 }
-function clearAll() { state = { artikel: [], fahrzeuge: [], orders: [], werkzeug: [], mitarbeiter: [], baustellen: [], plan: {}, config: { email: '', absender: '' } }; save(); renderAll(); }
+function clearAll() { if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); state = { artikel: [], fahrzeuge: [], orders: [], werkzeug: [], mitarbeiter: [], baustellen: [], plan: {}, config: { email: '', absender: '' } }; save(); renderAll(); }
 
 // ── TOAST ──────────────────────────────────────────────
 function toast(title, msg, icon = '✅') {
@@ -5694,6 +5733,9 @@ function loadDefaultArtikel() {
   if (!state.fahrzeuge) state.fahrzeuge = [];
   if (!state.mitarbeiter) state.mitarbeiter = [];
   if (!state.werkzeug) state.werkzeug = [];
+  // Einmalig: Default-Artikel nur beim allerersten Start laden.
+  // Danach NIE wieder, damit gelöschte Artikel nicht wiederkommen.
+  if (state._defaultsLoaded) return;
   let neuHinzu = 0;
   PETERHANS_ARTIKEL.forEach(a => {
     const exists = state.artikel.some(x => x.nr === a.nr);
@@ -5715,6 +5757,7 @@ function loadDefaultArtikel() {
   }
   if (!state.baustellen) state.baustellen = [];
   if (!state.plan) state.plan = {};
+  state._defaultsLoaded = true;
 }
 
 // ── INIT ───────────────────────────────────────────────
@@ -6227,6 +6270,42 @@ function printBaustatus(bauId) {
   win.document.close();
 }
 
+</script>
+
+<button id="btn-force-save" onclick="forceSave()"
+  style="position:fixed;bottom:20px;right:24px;z-index:9998;background:var(--green,#4be88a);color:#0f1117;border:none;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);display:flex;align-items:center;gap:6px"
+  title="Änderungen jetzt zu Firebase speichern">
+  💾 Speichern
+</button>
+<script>
+function forceSave() {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
+  state._ts = Date.now();
+  const json = JSON.stringify(state);
+  safeStorage.setItem('lagertool', json);
+  if (dbRef) {
+    const btn = document.getElementById('btn-force-save');
+    btn.textContent = '⏳ Speichern…';
+    btn.style.opacity = '0.6';
+    suppressListener = true;
+    dbRef.set(json)
+      .then(() => {
+        btn.innerHTML = '✅ Gespeichert!';
+        btn.style.background = 'var(--green,#4be88a)';
+        showSyncIndicator('↑ Sync OK');
+        setTimeout(() => { btn.innerHTML = '💾 Speichern'; btn.style.opacity = '1'; }, 2000);
+      })
+      .catch(e => {
+        console.error('Firebase write error', e);
+        btn.innerHTML = '❌ Fehler!';
+        btn.style.background = 'var(--red,#e8574b)';
+        setTimeout(() => { btn.innerHTML = '💾 Speichern'; btn.style.opacity = '1'; btn.style.background = 'var(--green,#4be88a)'; }, 3000);
+      })
+      .finally(() => setTimeout(() => { suppressListener = false; }, 500));
+  } else {
+    toast('Offline', 'Nur lokal gespeichert (Firebase nicht verbunden)', '⚠️');
+  }
+}
 </script>
 
 
