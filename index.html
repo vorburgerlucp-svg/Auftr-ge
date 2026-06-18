@@ -2548,49 +2548,46 @@ function removeFromCart(id) {
 }
 
 async function submitBestellung() {
-  try {
-    const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
-    if (!fzgId) return toast('Fehler', 'Bitte Fahrzeug auswählen', '⚠️');
-    if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
+  const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
+  if (!fzgId) return toast('Fehler', 'Bitte Fahrzeug auswählen', '⚠️');
+  if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
 
-    const fzg = state.fahrzeuge.find(f => f.id === fzgId);
-    if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden', '⚠️');
-    const items = cart.map(c => {
-      const a = state.artikel.find(x => x.id === c.artikelId);
-      if (!a) return { name: '(Unbekannt)', menge: c.menge, einheit: 'Stk', inStock: false };
-      const inStock = (a.bestand || 0) >= c.menge;
-      return { name: a.name, menge: c.menge, einheit: a.einheit || 'Stk', inStock };
-    });
+  const fzg = state.fahrzeuge.find(f => f.id === fzgId);
+  if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden (ID: ' + fzgId + ')', '⚠️');
 
-    const order = {
-      id: Date.now(),
-      datum: new Date().toLocaleString('de-CH'),
-      fahrzeug: fzg.name,
-      monteur: fzg.monteur,
-      bemerkung: document.getElementById('best-bemerkung').value,
-      items
-    };
-    if (!Array.isArray(state.orders)) state.orders = [];
-    state.orders.unshift(order);
-
-    // Lagerbestand reduzieren für verfügbare Artikel
-    cart.forEach(c => {
-      const a = state.artikel.find(x => x.id === c.artikelId);
-      if (a && (a.bestand || 0) >= c.menge) a.bestand -= c.menge;
-    });
-
-    save(); renderAll();
-    toast('Bestellung gesendet!', `${items.length} Artikel für ${fzg.name}`, '📤');
-    // E-Mail-Benachrichtigung im Hintergrund (Fehler blockiert nicht die Bestellung)
-    sendNotification(order).catch(e => console.warn('E-Mail fehlgeschlagen:', e));
-    cart = [];
-    renderCart();
-    document.getElementById('best-bemerkung').value = '';
-    document.getElementById('best-fahrzeug').value = '';
-  } catch(err) {
-    console.error('Bestellung Fehler:', err);
-    toast('Fehler', 'Bestellung konnte nicht verarbeitet werden: ' + err.message, '❌');
+  const items = [];
+  for (const c of cart) {
+    const a = state.artikel.find(x => x.id === c.artikelId);
+    if (!a) { items.push({ name: '(Unbekannt)', menge: c.menge, einheit: 'Stk', inStock: false }); continue; }
+    items.push({ name: a.name, menge: c.menge, einheit: a.einheit || 'Stk', inStock: (a.bestand || 0) >= c.menge });
   }
+
+  const order = {
+    id: Date.now(),
+    datum: new Date().toLocaleString('de-CH'),
+    fahrzeug: fzg.name,
+    monteur: fzg.monteur || '',
+    bemerkung: document.getElementById('best-bemerkung')?.value || '',
+    items
+  };
+  if (!Array.isArray(state.orders)) state.orders = [];
+  state.orders.unshift(order);
+
+  // Lagerbestand reduzieren
+  cart.forEach(c => {
+    const a = state.artikel.find(x => x.id === c.artikelId);
+    if (a && (a.bestand || 0) >= c.menge) a.bestand -= c.menge;
+  });
+
+  cart = [];
+  save();
+  renderBestellungDropdowns();
+  renderCart();
+  if (document.getElementById('best-bemerkung')) document.getElementById('best-bemerkung').value = '';
+  toast('Bestellung gesendet!', items.length + ' Artikel für ' + fzg.name, '📤');
+
+  // E-Mail im Hintergrund
+  try { await sendNotification(order); } catch(e) { console.warn('E-Mail fehlgeschlagen:', e); }
 }
 
 async function sendNotification(order) {
