@@ -15,6 +15,7 @@
   // Firebase Config (Projekt: wochenplanung-6b50a)
   let firebaseReady = false;
   let suppressListener = false;
+  let hasReceivedFirebaseSync = false;
   let dbRef = null;
 
   function showSyncIndicator(text) {
@@ -400,6 +401,7 @@
     <button class="nav-btn" onclick="showPage('werkzeug')">Werkzeug</button>
     <button class="nav-btn" onclick="showPage('bestellung')">Bestellung</button>
     <button class="nav-btn" onclick="officeSyncExport()" title="Daten für Monteur-App exportieren">📱 Sync</button>
+    <button class="nav-btn" onclick="showPage('einstellungen')">⚙️</button>
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
       Meldungen<span id="meldungen-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center">0</span>
     </button>
@@ -659,6 +661,45 @@
   <h2>🔔 Meldungen</h2>
   <p class="subtitle">Benachrichtigungen von Monteuren — quittieren um zu schliessen</p>
   <div id="meldungen-liste"></div>
+</div>
+
+<div id="page-einstellungen" class="page">
+  <h2>⚙️ Einstellungen</h2>
+  <p class="subtitle">Backup, Import & Konfiguration</p>
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:12px">📦 Backup & Import</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <button class="btn btn-primary" onclick="exportData()">⬇ Backup herunterladen (JSON)</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('import-file-input').click()">⬆ Backup importieren (JSON)</button>
+      <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+    <div style="font-size:12px;color:var(--muted)">Export speichert den kompletten Datenbestand (Artikel, Mitarbeiter, Fahrzeuge, Wochenplan). Import überschreibt den aktuellen Stand.</div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:12px">📧 E-Mail Konfiguration</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><label>Empfänger-E-Mail</label><input type="email" id="cfg-email" placeholder="lvorburger@montage-welt.ch"></div>
+      <div><label>Absender-Name</label><input type="text" id="cfg-absender" placeholder="Montage Welt LagerTool"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="saveConfig()">Speichern</button>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:12px">🔥 Firebase</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><label>Database URL</label><input type="text" id="cfg-fb-url" placeholder="https://....firebaseio.com"></div>
+      <div><label>API Key</label><input type="text" id="cfg-fb-apikey" placeholder="AIza..."></div>
+      <div><label>Project ID</label><input type="text" id="cfg-fb-projectid" placeholder="wochenplanung-..."></div>
+      <div><label>App ID (optional)</label><input type="text" id="cfg-fb-appid" placeholder="1:0:web:0"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-secondary btn-sm" onclick="saveFirebaseConfig()">Speichern</button>
+      <button class="btn btn-primary btn-sm" onclick="applyFirebaseConfig()">Verbinden</button>
+    </div>
+  </div>
+  <div class="card" style="border-color:var(--red)">
+    <div style="font-weight:700;margin-bottom:12px;color:var(--red)">⚠️ Gefahrenzone</div>
+    <button class="btn btn-secondary btn-sm" style="border-color:var(--red);color:var(--red)" onclick="if(confirm('ALLE Daten löschen? Nicht rückgängig!')) clearAll()">Alle Daten löschen</button>
+  </div>
 </div>
 
 <!-- FAHRZEUG MODAL -->
@@ -1754,7 +1795,10 @@ function save() {
   state._ts = Date.now();
   const json = JSON.stringify(state);
   safeStorage.setItem('lagertool', json);
-  if (dbRef) {
+  // Firebase-Write erst NACHDEM wir mindestens einmal Firebase-Daten empfangen haben.
+  // Verhindert, dass ein leerer Anfangs-State (vor dem ersten Sync) die echten
+  // Firebase-Daten überschreibt.
+  if (dbRef && hasReceivedFirebaseSync) {
     try {
       suppressListener = true;
       pendingSavePromise = dbRef.set(json).then(() => showSyncIndicator('↑ Sync'))
@@ -1823,6 +1867,18 @@ function showPage(id) {
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
   if (id === 'meldungen') renderMeldungen();
+  if (id === 'einstellungen') renderEinstellungen();
+}
+
+function renderEinstellungen() {
+  const c = state.config || {};
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.value = val || ''; };
+  el('cfg-email', c.email);
+  el('cfg-absender', c.absender);
+  el('cfg-fb-url', c.fbUrl);
+  el('cfg-fb-apikey', c.fbApiKey);
+  el('cfg-fb-projectid', c.fbProjectId);
+  el('cfg-fb-appid', c.fbAppId);
 }
 
 // ── ARTIKEL ────────────────────────────────────────────
@@ -5130,19 +5186,18 @@ function startFirebaseListener() {
           return;
         }
 
-        // SCHUTZ gegen Race-Condition (z.B. Logout direkt nach dem Speichern, bevor der
-        // eigene Firebase-Write angekommen ist): Wenn der lokale Stand NEUER ist als der
-        // gerade eingehende Remote-Stand, ist dieser Remote-Stand veraltet (z.B. ein Echo
-        // eines noch nicht abgeschlossenen Writes) - NICHT anwenden, sonst gehen frische
-        // lokale Änderungen (z.B. im Wochenplan) verloren. Stattdessen den eigenen,
-        // neueren Stand erneut hochschreiben, damit Firebase aufholt.
-        if (state._ts && remote._ts && remote._ts < state._ts) {
+        // SCHUTZ gegen Race-Condition: Nur aktiv NACHDEM wir mindestens einmal
+        // erfolgreich Firebase-Daten empfangen haben. Beim allerersten Laden darf
+        // der Remote-Stand NIEMALS blockiert werden, auch wenn eine Migration
+        // zwischenzeitlich save() aufgerufen hat (sonst leerer State überschreibt alles).
+        if (hasReceivedFirebaseSync && state._ts && remote._ts && remote._ts < state._ts) {
           console.warn('[Firebase] eingehender State ist älter als der lokale Stand - wird ignoriert, lokaler Stand wird erneut gesendet');
           showSyncIndicator('⚠️ Sync übersprungen (veraltet)');
           firebaseReady = true;
           save();
           return;
         }
+        hasReceivedFirebaseSync = true;
 
         if (true) {
           const lokalVorSync = state;
