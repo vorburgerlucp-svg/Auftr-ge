@@ -1520,6 +1520,8 @@ function load() {
   migrationKategorienReorganisation();
   fahrzeugManuelleResetPruefen();
   initLoginScreen();
+  // Dokumente (Fotos, PDFs) aus IndexedDB nachladen (async, rendert nach wenn fertig)
+  loadDocsFromIDB(state).then(() => { renderAll(); }).catch(() => {});
 }
 
 // Entfernt doppelte Mitarbeiter (gleicher Vor-/Nachname), behält den ältesten Eintrag (kleinste ID).
@@ -1826,20 +1828,67 @@ async function doLogout() {
 }
 function save() {
   state._ts = Date.now();
-  const json = JSON.stringify(state);
-  safeStorage.setItem('lagertool', json);
-  // Firebase-Write: nur schlanke Daten (ohne base64-Dokumente/Fotos).
-  // Fahrzeug-Docs und Mitarbeiter-Fotos bleiben nur im localStorage,
-  // da Firebase ein 10MB-Limit hat und die Docs allein ~29MB ausmachen.
+  // localStorage: nur schlanke Daten (ohne base64-Docs) – localStorage hat ~5MB Limit,
+  // die Docs allein sind ~29MB. Docs werden separat in IndexedDB gespeichert.
+  const slimState = stripLargeData(state);
+  const slimJson = JSON.stringify(slimState);
+  safeStorage.setItem('lagertool', slimJson);
+  saveDocsToIDB(state);
+  // Firebase: gleiche schlanke Daten
   if (dbRef && hasReceivedFirebaseSync) {
     try {
       suppressListener = true;
-      const slimJson = JSON.stringify(stripLargeData(state));
       pendingSavePromise = dbRef.set(slimJson).then(() => showSyncIndicator('↑ Sync'))
         .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
         .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
     } catch(e) { suppressListener = false; }
   }
+}
+
+// ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
+function openDocsDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('lagertool_docs', 1);
+    req.onupgradeneeded = e => { e.target.result.createObjectStore('docs'); };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+async function saveDocsToIDB(s) {
+  try {
+    const db = await openDocsDB();
+    const tx = db.transaction('docs', 'readwrite');
+    const store = tx.objectStore('docs');
+    // Fahrzeug-Docs
+    (s.fahrzeuge||[]).forEach(f => {
+      if (f.docs?.some(d => d.data)) store.put(f.docs, 'fzg_' + f.id);
+    });
+    // Mitarbeiter-Docs + Fotos
+    (s.mitarbeiter||[]).forEach(m => {
+      if (m.foto && m.foto !== '_localOnly') store.put(m.foto, 'foto_' + m.id);
+      if (m.docs?.some(d => d.data)) store.put(m.docs, 'ma_' + m.id);
+    });
+  } catch(e) { console.warn('IndexedDB write error:', e); }
+}
+
+async function loadDocsFromIDB(s) {
+  try {
+    const db = await openDocsDB();
+    const tx = db.transaction('docs', 'readonly');
+    const store = tx.objectStore('docs');
+    const get = key => new Promise(r => { const req = store.get(key); req.onsuccess = () => r(req.result); req.onerror = () => r(null); });
+    for (const f of (s.fahrzeuge||[])) {
+      const docs = await get('fzg_' + f.id);
+      if (docs) f.docs = docs;
+    }
+    for (const m of (s.mitarbeiter||[])) {
+      const foto = await get('foto_' + m.id);
+      if (foto) m.foto = foto;
+      const docs = await get('ma_' + m.id);
+      if (docs) m.docs = docs;
+    }
+  } catch(e) { console.warn('IndexedDB read error:', e); }
 }
 
 // Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
@@ -5477,8 +5526,10 @@ function importData(e) {
       state = JSON.parse(ev.target.result);
       state._ts = Date.now();
       hasReceivedFirebaseSync = true;
-      const json = JSON.stringify(state);
-      safeStorage.setItem('lagertool', json);
+      // Schlanke Daten nach localStorage (72KB statt 29MB), Docs nach IndexedDB
+      const slimJson = JSON.stringify(stripLargeData(state));
+      safeStorage.setItem('lagertool', slimJson);
+      saveDocsToIDB(state);
       renderAll();
 
       if (dbRef) {
