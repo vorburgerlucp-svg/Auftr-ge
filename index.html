@@ -5205,58 +5205,27 @@ function startFirebaseListener() {
     dbRef = _db.ref('lagertool');
     console.log('[Firebase] dbRef set, adding listener...');
     dbRef.on('value', (snapshot) => {
-      console.log('[Firebase] value event received');
-      if (suppressListener) return;
+      if (suppressListener) { suppressListener = false; firebaseReady = true; return; }
       const data = snapshot.val();
-      if (!data) { console.log('[Firebase] data is null/empty'); return; }
+      if (!data) { firebaseReady = true; hasReceivedFirebaseSync = true; return; }
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
-        console.log('[Firebase] value received, applying');
 
-        // SCHUTZ: nur übernehmen wenn der State plausibel vollständig ist.
-        // Verhindert dass ein fehlerhaft/teilweise geschriebener Firebase-Knoten
-        // (z.B. durch ein externes Skript) den lokalen State zerstört.
-        const istPlausibel = remote && typeof remote === 'object' &&
-          Array.isArray(remote.mitarbeiter) !== false && // mitarbeiter darf fehlen, aber wenn da, Array
-          (remote.mitarbeiter === undefined || Array.isArray(remote.mitarbeiter)) &&
-          (remote.fahrzeuge === undefined || Array.isArray(remote.fahrzeuge)) &&
-          (remote.artikel === undefined || Array.isArray(remote.artikel));
+        // EINFACHE STRATEGIE: localStorage ist IMMER die Quelle der Wahrheit.
+        // Firebase-Daten nur übernehmen wenn lokal NICHTS vorhanden ist
+        // (z.B. erster Aufruf auf einem neuen Gerät/Browser).
+        const lokalHatDaten = (state.mitarbeiter?.length > 5) || (state.artikel?.length > 10);
 
-        // Zusätzlich: wenn der LOKALE State bereits mehr Mitarbeiter/Fahrzeuge/Artikel
-        // hat als der eingehende Remote-State, und Remote diese Felder komplett vermissen
-        // lässt, ist das verdächtig (möglicher Datenverlust) - dann NICHT überschreiben.
-        const lokalHatDaten = (state.mitarbeiter?.length > 0) || (state.fahrzeuge?.length > 0) || (state.artikel?.length > 0);
-        const remoteIstLeer = !remote.mitarbeiter?.length && !remote.fahrzeuge?.length && !remote.artikel?.length;
-
-        if (lokalHatDaten && remoteIstLeer) {
-          console.warn('[Firebase] WARNUNG: eingehender State wirkt unvollständig (keine Mitarbeiter/Fahrzeuge/Artikel) - lokale Daten werden NICHT überschrieben');
-          showSyncIndicator('⚠️ Sync blockiert (Datenschutz)');
-          toast('Sync-Warnung', 'Server-Daten wirken unvollständig - lokale Daten geschützt', '⚠️');
+        if (lokalHatDaten) {
+          // Lokal hat bereits Daten → Firebase ignorieren, lokalen Stand hochschieben
+          console.log('[Firebase] Lokale Daten vorhanden (' + (state.mitarbeiter?.length||0) + ' MA, ' + (state.artikel?.length||0) + ' Art) – Firebase wird mit lokalem Stand überschrieben');
+          hasReceivedFirebaseSync = true;
           firebaseReady = true;
-          return;
-        }
-
-        if (!istPlausibel) {
-          console.warn('[Firebase] WARNUNG: eingehender State hat unerwartete Struktur - wird ignoriert');
-          showSyncIndicator('⚠️ Sync blockiert (Struktur)');
-          firebaseReady = true;
-          return;
-        }
-
-        // SCHUTZ gegen Race-Condition: Nur aktiv NACHDEM wir mindestens einmal
-        // erfolgreich Firebase-Daten empfangen haben. Beim allerersten Laden darf
-        // der Remote-Stand NIEMALS blockiert werden, auch wenn eine Migration
-        // zwischenzeitlich save() aufgerufen hat (sonst leerer State überschreibt alles).
-        if (hasReceivedFirebaseSync && state._ts && remote._ts && remote._ts < state._ts) {
-          console.warn('[Firebase] eingehender State ist älter als der lokale Stand - wird ignoriert, lokaler Stand wird erneut gesendet');
-          showSyncIndicator('⚠️ Sync übersprungen (veraltet)');
-          firebaseReady = true;
-          save();
-          return;
-        }
-        hasReceivedFirebaseSync = true;
-
-        if (true) {
+          save(); // schiebt lokalen Stand (slim) zu Firebase
+          showSyncIndicator('↑ Lokal → Firebase');
+        } else {
+          // Lokal leer → Firebase-Daten übernehmen (Ersteinrichtung auf neuem Gerät)
+          console.log('[Firebase] Lokale Daten leer – übernehme Firebase-Daten');
           const lokalVorSync = state;
           state = remote;
           if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
@@ -5265,33 +5234,11 @@ function startFirebaseListener() {
           if (!Array.isArray(state.baustellen)) state.baustellen = [];
           if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
           if (!state.plan) state.plan = {};
-          // Merge: lokale Artikel/Fahrzeuge/Mitarbeiter/Werkzeug, die der Server (noch) nicht
-          // kennt (z.B. frisch durch eine Migration hinzugefügt), NICHT verlieren -
-          // ergänzen statt komplett überschreiben.
-          let mergeNeu = false;
-          const mergeByKey = (remoteArr, lokalArr, key) => {
-            const ergebnis = Array.isArray(remoteArr) ? remoteArr.map(x => ({...x})) : [];
-            const bekannt = new Set(ergebnis.map(x => x[key]));
-            (Array.isArray(lokalArr) ? lokalArr : []).forEach(x => {
-              if (x[key] !== undefined && !bekannt.has(x[key])) {
-                ergebnis.push({...x}); bekannt.add(x[key]); mergeNeu = true;
-              }
-            });
-            return ergebnis;
-          };
-          state.artikel = mergeByKey(state.artikel, lokalVorSync.artikel, 'nr');
-          state.fahrzeuge = mergeByKey(state.fahrzeuge, lokalVorSync.fahrzeuge, 'id');
-          state.mitarbeiter = mergeByKey(state.mitarbeiter, lokalVorSync.mitarbeiter, 'id');
-          state.werkzeug = mergeByKey(state.werkzeug, lokalVorSync.werkzeug, 'id');
-          state.baustellen = mergeByKey(state.baustellen, lokalVorSync.baustellen, 'id');
 
-          // Lokale Dokumente/Fotos (base64) zurückholen: Firebase hat nur Platzhalter
-          // (_localOnly), die echten Daten sind nur im localStorage vorhanden.
+          // Lokale Dokumente/Fotos (base64) zurückholen
           (state.fahrzeuge||[]).forEach(f => {
             const lokal = (lokalVorSync.fahrzeuge||[]).find(lf => lf.id === f.id);
-            if (lokal && Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) {
-              f.docs = lokal.docs;
-            }
+            if (lokal && Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) f.docs = lokal.docs;
           });
           (state.mitarbeiter||[]).forEach(m => {
             const lokal = (lokalVorSync.mitarbeiter||[]).find(lm => lm.id === m.id);
@@ -5301,23 +5248,22 @@ function startFirebaseListener() {
             }
           });
 
-          // Nach jedem Merge erneut auf Duplikate prüfen (z.B. wenn zwei Geräte gleichzeitig
-          // dieselbe Person neu angelegt haben) und Fahrzeug-Zuordnung per ID nachziehen.
-          const entferntBeimSync = mitarbeiterDeduplizieren();
+          mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
-          if (entferntBeimSync > 0) mergeNeu = true;
+          hasReceivedFirebaseSync = true;
           safeStorage.setItem('lagertool', JSON.stringify(state));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
-          // Falls Login-Screen noch offen: Picker mit aktuellen Mitarbeitern aktualisieren
-          const loginScreen = document.getElementById('login-screen');
-          if (loginScreen && loginScreen.style.display !== 'none') {
-            const picker = document.getElementById('login-picker');
-            if (picker && picker.style.display !== 'none') loginPickerOpen();
-          }
-          showSyncIndicator('↓ Sync');
-          if (mergeNeu) { save(); } // lokale Ergänzungen/Bereinigungen direkt zurück auf den Server schreiben
+          showSyncIndicator('↓ Firebase → Lokal');
         }
+
+        // Falls Login-Screen noch offen: Picker aktualisieren
+        const loginScreen = document.getElementById('login-screen');
+        if (loginScreen && loginScreen.style.display !== 'none') {
+          const picker = document.getElementById('login-picker');
+          if (picker && picker.style.display !== 'none') loginPickerOpen();
+        }
+
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
     }, (err) => {
