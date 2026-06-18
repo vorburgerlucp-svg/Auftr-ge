@@ -1836,7 +1836,7 @@ function save() {
       suppressListener = true;
       pendingSavePromise = dbRef.set(json).then(() => showSyncIndicator('↑ Sync'))
         .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
-        .finally(() => { setTimeout(() => { suppressListener = false; }, 500); pendingSavePromise = null; });
+        .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
     } catch(e) { suppressListener = false; }
   }
 }
@@ -5277,6 +5277,12 @@ function startFirebaseListener() {
           safeStorage.setItem('lagertool', JSON.stringify(state));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
+          // Falls Login-Screen noch offen: Picker mit aktuellen Mitarbeitern aktualisieren
+          const loginScreen = document.getElementById('login-screen');
+          if (loginScreen && loginScreen.style.display !== 'none') {
+            const picker = document.getElementById('login-picker');
+            if (picker && picker.style.display !== 'none') loginPickerOpen();
+          }
           showSyncIndicator('↓ Sync');
           if (mergeNeu) { save(); } // lokale Ergänzungen/Bereinigungen direkt zurück auf den Server schreiben
         }
@@ -5488,7 +5494,35 @@ function importData(e) {
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   const file = e.target.files[0]; if (!file) return;
   const r = new FileReader();
-  r.onload = ev => { try { state = JSON.parse(ev.target.result); hasReceivedFirebaseSync = true; save(); renderAll(); toast('Import OK', 'Daten geladen', '✅'); } catch { toast('Fehler', 'Ungültige Datei', '⚠️'); } };
+  r.onload = ev => {
+    try {
+      state = JSON.parse(ev.target.result);
+      state._ts = Date.now();
+      hasReceivedFirebaseSync = true;
+      const json = JSON.stringify(state);
+      safeStorage.setItem('lagertool', json);
+      renderAll();
+
+      if (dbRef) {
+        toast('Import', 'Daten geladen – wird zu Firebase geschrieben…', '⏳');
+        suppressListener = true;
+        dbRef.set(json)
+          .then(() => {
+            toast('Import OK', 'Daten geladen und zu Firebase gespeichert', '✅');
+            showSyncIndicator('↑ Import Sync OK');
+          })
+          .catch(err => {
+            console.error('Import Firebase write error:', err);
+            toast('Teilweise OK', 'Lokal gespeichert, Firebase-Fehler: ' + err.message, '⚠️');
+          })
+          .finally(() => setTimeout(() => { suppressListener = false; }, 3000));
+      } else {
+        toast('Import OK', 'Lokal gespeichert (Firebase nicht verbunden)', '✅');
+      }
+    } catch(err) {
+      toast('Fehler', 'Ungültige Datei: ' + err.message, '⚠️');
+    }
+  };
   r.readAsText(file);
 }
 function clearAll() { if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); state = { artikel: [], fahrzeuge: [], orders: [], werkzeug: [], mitarbeiter: [], baustellen: [], plan: {}, config: { email: '', absender: '' } }; save(); renderAll(); }
@@ -6307,7 +6341,7 @@ function forceSave() {
         btn.style.background = 'var(--red,#e8574b)';
         setTimeout(() => { btn.innerHTML = '💾 Speichern'; btn.style.opacity = '1'; btn.style.background = 'var(--green,#4be88a)'; }, 3000);
       })
-      .finally(() => setTimeout(() => { suppressListener = false; }, 500));
+      .finally(() => setTimeout(() => { suppressListener = false; }, 2000));
   } else {
     toast('Offline', 'Nur lokal gespeichert (Firebase nicht verbunden)', '⚠️');
   }
