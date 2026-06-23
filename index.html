@@ -659,7 +659,7 @@
         </div>
       </div>
       <!-- Kategorie-Pillen -->
-      <div id="best-kat-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+      <div id="best-kat-pills" style="display:flex;flex-wrap:nowrap;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none"></div>
     </div>
 
     <!-- Artikel-Grid -->
@@ -747,6 +747,16 @@
   <div class="card" style="border-color:var(--red)">
     <div style="font-weight:700;margin-bottom:12px;color:var(--red)">⚠️ Gefahrenzone</div>
     <button class="btn btn-secondary btn-sm" style="border-color:var(--red);color:var(--red)" onclick="if(confirm('ALLE Daten löschen? Nicht rückgängig!')) clearAll()">Alle Daten löschen</button>
+  </div>
+  <!-- KATEGORIEN-MANAGER: nur für Entwickler -->
+  <div class="card" id="kat-manager-card" style="margin-bottom:16px;display:none">
+    <div style="font-weight:700;margin-bottom:12px">🏷️ Kategorien-Management</div>
+    <div id="kat-manager-list" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input type="text" id="kat-new-name" placeholder="Neue Kategorie..." style="flex:1" onkeydown="if(event.key==='Enter') katAdd()">
+      <button class="btn btn-primary btn-sm" onclick="katAdd()">+ Hinzufügen</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Reihenfolge gilt für Bestellung-Pillen. Umbenennen pflegt alle Artikel mit.</div>
   </div>
 </div>
 
@@ -1112,17 +1122,13 @@
     <div id="bs-tasks-list"></div>
     <button class="btn btn-secondary btn-sm" onclick="bsModalAddTask()" style="margin-top:6px">+ Position hinzufügen</button>
     <div class="form-row cols-1">
-      <div><label>🔧 Montage-Typ</label>
-        <select id="bs-montage-typ">
-          <option value="">— Typ wählen —</option>
-          <option value="Küchenmontage">🍳 Küchenmontage</option>
-          <option value="Fenstermontage">🪟 Fenstermontage</option>
-          <option value="Ladenbau">🏪 Ladenbau</option>
-          <option value="Sanitär">🚿 Sanitär</option>
-          <option value="Badplatten">🪵 Badplatten</option>
-          <option value="Innenausbau">🏠 Innenausbau</option>
-          <option value="Hochwertiger Innenausbau">✨ Hochwertiger Innenausbau</option>
-        </select>
+      <div><label>👷 Chef-Monteur (Zugriff auf KVP & Bewertung)</label>
+        <div style="position:relative">
+          <input type="text" id="bs-chefMonteur" placeholder="Monteur suchen…" autocomplete="off"
+            data-hidden-id="bs-chefMonteur-id"
+            onfocus="spOpen(this,'ma')" onclick="spOpen(this,'ma')" oninput="spFilter(this)">
+          <input type="hidden" id="bs-chefMonteur-id" value="">
+        </div>
       </div>
     </div>
     <hr class="divider">
@@ -1478,7 +1484,21 @@ function migrationRafixOhneKopfErweiterung() {
   save();
 }
 
-// Einmalige Migration: Kategorien korrigieren (Klebeband -> Abdeckung, Lamello eigene Sparte)
+// Migration: state.kategorien aus vorhandenen Artikel-Kats aufbauen (einmalig + idempotent)
+function migrationKategorienAufbauen() {
+  const katsImArtikel = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))];
+  if (!Array.isArray(state.kategorien)) state.kategorien = [];
+  // Neue Kats hinzufügen die noch nicht in state.kategorien sind
+  katsImArtikel.forEach(k => {
+    if (!state.kategorien.some(x => x.name === k)) {
+      state.kategorien.push({ id: 'kat_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: k, order: state.kategorien.length });
+    }
+  });
+  // Reihenfolge normalisieren
+  state.kategorien.forEach((k,i) => k.order = i);
+}
+
+
 function migrationKategorienKorrektur() {
   if (!state.artikel) state.artikel = [];
   if (state._kategorienKorrekturMigriert) return;
@@ -1573,6 +1593,7 @@ function load() {
   if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
   if (!state.plan) state.plan = {};
   if (!state.config) state.config = {};
+  if (!Array.isArray(state.kategorien)) state.kategorien = [];
   if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
   if (!state.config.absender) state.config.absender = 'Montage Welt LagerTool';
   migrationZollikon();
@@ -1588,6 +1609,7 @@ function load() {
   migrationRafixOhneKopfErweiterung();
   migrationKategorienKorrektur();
   migrationKategorienReorganisation();
+  migrationKategorienAufbauen();
   fahrzeugManuelleResetPruefen();
   initLoginScreen();
   // Dokumente (Fotos, PDFs) aus IndexedDB nachladen (async, rendert nach wenn fertig)
@@ -1927,10 +1949,13 @@ function finishLogin() {
     showPage(istLeiter ? 'baustatus' : 'bestellung');
   }
 
-  // Bewertungs-Tab: nur für Leiter, Admin, Entwickler – nicht für Monteur
-  if (!istLeiter && !istAdmin) {
+  // Bewertungs-Tab: nur für Leiter, Admin, Entwickler, Chef-Monteur – nicht für normale Monteure
+  const istChefMonteur = (state.baustellen||[]).some(b => b.chefMonteurId === currentLoginUser?.id);
+  if (!istLeiter && !istAdmin && !istChefMonteur) {
     const bewTab = document.querySelector('#baustatus-tabs button[onclick*="bewertung"]');
     if (bewTab) bewTab.style.display = 'none';
+    const kvpTab = document.querySelector('#baustatus-tabs button[onclick*="kvp"]');
+    if (kvpTab) kvpTab.style.display = 'none';
   }
 
   // Sync, Einstellungen, Speichern-Button: NUR für Entwickler
@@ -2077,7 +2102,7 @@ function fahrzeugManuelleResetPruefen() {
     }
   }
 }
-function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdowns(); renderHistory(); renderFzgSettings(); renderWerkzeugDropdowns(); renderFahrzeugePage(); }
+function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdowns(); renderHistory(); renderFzgSettings(); renderWerkzeugDropdowns(); renderFahrzeugePage(); renderKatSelects(); }
 
 // ── NAVIGATION ─────────────────────────────────────────
 function showPage(id) {
@@ -2114,6 +2139,16 @@ function renderEinstellungen() {
   el('cfg-fb-appid', c.fbAppId);
   // Claude API Key aus localStorage (NICHT in state/Firebase, bleibt lokal)
   el('cfg-claude-apikey', localStorage.getItem('lagertool_claude_key') || '');
+  // Kategorien-Manager: nur für Entwickler
+  const katCard = document.getElementById('kat-manager-card');
+  if (katCard) {
+    if (currentLoginUser?.entwickler) {
+      katCard.style.display = '';
+      renderKatManager();
+    } else {
+      katCard.style.display = 'none';
+    }
+  }
 }
 
 function saveClaudeApiKey() {
@@ -2122,7 +2157,115 @@ function saveClaudeApiKey() {
   else { localStorage.removeItem('lagertool_claude_key'); toast('Entfernt', 'API Key gelöscht', '🗑'); }
 }
 
-// ── ARTIKEL ────────────────────────────────────────────
+// ── KATEGORIEN-MANAGEMENT (nur Entwickler) ─────────────────────────────────
+function renderKatManager() {
+  const el = document.getElementById('kat-manager-list');
+  if (!el) return;
+  if (!Array.isArray(state.kategorien)) state.kategorien = [];
+  const sorted = [...state.kategorien].sort((a,b) => a.order - b.order);
+  if (!sorted.length) { el.innerHTML = '<div style="color:var(--muted);font-size:13px">Keine Kategorien. Erst Artikel anlegen oder Kategorie hinzufügen.</div>'; return; }
+  el.innerHTML = sorted.map((k,i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <button onclick="katMoveUp('${k.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1" ${i===0?'disabled':''}>▲</button>
+        <button onclick="katMoveDown('${k.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:10px;padding:0;line-height:1" ${i===sorted.length-1?'disabled':''}>▼</button>
+      </div>
+      <span style="flex:1;font-size:13px" id="kat-label-${k.id}">${k.name}</span>
+      <span style="font-size:11px;color:var(--muted)">${(state.artikel||[]).filter(a=>a.kat===k.name).length} Artikel</span>
+      <button class="btn btn-secondary btn-sm" onclick="katStartRename('${k.id}')" style="font-size:11px;padding:2px 8px">✏️</button>
+      <button class="btn btn-secondary btn-sm" onclick="katDelete('${k.id}')" style="font-size:11px;padding:2px 8px;color:var(--red);border-color:var(--red)">🗑</button>
+    </div>`).join('');
+}
+
+function katMoveUp(id) {
+  const sorted = [...state.kategorien].sort((a,b) => a.order - b.order);
+  const idx = sorted.findIndex(k => k.id === id);
+  if (idx <= 0) return;
+  sorted[idx].order = idx - 1;
+  sorted[idx-1].order = idx;
+  save(); renderKatManager(); renderKatPills();
+}
+
+function katMoveDown(id) {
+  const sorted = [...state.kategorien].sort((a,b) => a.order - b.order);
+  const idx = sorted.findIndex(k => k.id === id);
+  if (idx < 0 || idx >= sorted.length - 1) return;
+  sorted[idx].order = idx + 1;
+  sorted[idx+1].order = idx;
+  save(); renderKatManager(); renderKatPills();
+}
+
+function katStartRename(id) {
+  const k = state.kategorien.find(x => x.id === id);
+  if (!k) return;
+  const label = document.getElementById('kat-label-' + id);
+  if (!label) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = k.name;
+  input.style.cssText = 'flex:1;font-size:13px;padding:2px 6px;border:1px solid var(--accent2);border-radius:4px;background:var(--bg);color:var(--text);width:100%';
+  const confirmBtn = document.createElement('button');
+  confirmBtn.textContent = '✓';
+  confirmBtn.className = 'btn btn-primary btn-sm';
+  confirmBtn.style.cssText = 'font-size:11px;padding:2px 8px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '✕';
+  cancelBtn.className = 'btn btn-secondary btn-sm';
+  cancelBtn.style.cssText = 'font-size:11px;padding:2px 8px';
+  const doRename = () => {
+    const newName = input.value.trim();
+    if (!newName || newName === k.name) { renderKatManager(); return; }
+    if (state.kategorien.some(x => x.name === newName && x.id !== id)) {
+      toast('Fehler', 'Kategorie "' + newName + '" existiert bereits', '⚠️'); return;
+    }
+    // Alle Artikel mitpflegen
+    (state.artikel||[]).forEach(a => { if (a.kat === k.name) a.kat = newName; });
+    k.name = newName;
+    save(); renderKatManager(); renderKatPills(); renderArtikelTable();
+    toast('Umbenannt', newName, '✅');
+  };
+  confirmBtn.onclick = doRename;
+  cancelBtn.onclick = () => renderKatManager();
+  input.onkeydown = e => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') renderKatManager(); };
+  const row = label.parentElement;
+  label.replaceWith(input);
+  // Replace rename/delete buttons with confirm/cancel
+  const btns = row.querySelectorAll('button:not([style*="▲"]):not([style*="▼"])');
+  btns.forEach(b => b.remove());
+  row.appendChild(confirmBtn);
+  row.appendChild(cancelBtn);
+  input.focus(); input.select();
+}
+
+function katDelete(id) {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
+  const k = state.kategorien.find(x => x.id === id);
+  if (!k) return;
+  const count = (state.artikel||[]).filter(a => a.kat === k.name).length;
+  const msg = count > 0
+    ? `Kategorie "${k.name}" löschen?\n${count} Artikel erhalten dann keine Kategorie.`
+    : `Kategorie "${k.name}" löschen?`;
+  if (!confirm(msg)) return;
+  state.kategorien = state.kategorien.filter(x => x.id !== id);
+  // Reihenfolge normalisieren
+  [...state.kategorien].sort((a,b) => a.order - b.order).forEach((k,i) => k.order = i);
+  save(); renderKatManager(); renderKatPills();
+  toast('Gelöscht', k.name, '🗑');
+}
+
+function katAdd() {
+  if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
+  const input = document.getElementById('kat-new-name');
+  const name = input?.value.trim();
+  if (!name) return toast('Fehler', 'Bitte Kategorie-Name eingeben', '⚠️');
+  if (state.kategorien.some(k => k.name === name)) return toast('Fehler', `"${name}" existiert bereits`, '⚠️');
+  state.kategorien.push({ id: 'kat_' + Date.now(), name, order: state.kategorien.length });
+  if (input) input.value = '';
+  save(); renderKatManager(); renderKatPills();
+  toast('Erstellt', name, '✅');
+}
+
+
 function addArtikel() {
   const name = document.getElementById('art-name').value.trim();
   const bestand = parseInt(document.getElementById('art-bestand').value) || 0;
@@ -2161,10 +2304,13 @@ function showArtModal(id) {
   document.getElementById('art-modal-id').value = a.id;
   document.getElementById('art-modal-name').value = a.name || '';
   const katSel = document.getElementById('art-modal-kat');
-  if (a.kat && ![...katSel.options].some(o => o.value === a.kat)) {
-    katSel.insertAdjacentHTML('beforeend', `<option>${a.kat}</option>`);
-  }
-  katSel.value = a.kat || 'Schrauben';
+  // Dynamisch aus state.kategorien befüllen
+  const sorted = (state.kategorien && state.kategorien.length)
+    ? [...state.kategorien].sort((x,y) => x.order - y.order).map(k => k.name)
+    : [...new Set((state.artikel||[]).map(x => x.kat).filter(Boolean))].sort();
+  katSel.innerHTML = sorted.map(k => `<option value="${k}">${k}</option>`).join('');
+  if (a.kat && !sorted.includes(a.kat)) katSel.insertAdjacentHTML('beforeend', `<option value="${a.kat}">${a.kat}</option>`);
+  katSel.value = a.kat || sorted[0] || '';
   document.getElementById('art-modal-einheit').value = a.einheit || 'Stk';
   document.getElementById('art-modal-bestand').value = a.bestand ?? 0;
   document.getElementById('art-modal-min').value = a.min ?? 0;
@@ -2205,10 +2351,28 @@ function filterArtikel(val) { filterText = val.toLowerCase(); renderArtikelTable
 let filterKat = '';
 function filterArtikelKat(val) { filterKat = val; renderArtikelTable(); }
 
+// Befüllt alle Kategorie-Selects (Formular + Modal + Filter) aus state.kategorien
+function renderKatSelects() {
+  const sorted = (state.kategorien && state.kategorien.length)
+    ? [...state.kategorien].sort((a,b) => a.order - b.order).map(k => k.name)
+    : [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))].sort();
+  const optHtml = sorted.map(k => `<option value="${k}">${k}</option>`).join('');
+  // Formular-Select (Artikel hinzufügen)
+  const artKat = document.getElementById('art-kat');
+  if (artKat) { const cur = artKat.value; artKat.innerHTML = optHtml; if (sorted.includes(cur)) artKat.value = cur; }
+  // Modal-Select (Artikel bearbeiten) — nur wenn Modal geschlossen (kein .open)
+  const artModalKat = document.getElementById('art-modal-kat');
+  if (artModalKat && !document.getElementById('art-modal')?.classList.contains('open')) {
+    const cur = artModalKat.value; artModalKat.innerHTML = optHtml; if (sorted.includes(cur)) artModalKat.value = cur;
+  }
+}
+
 function renderKatFilterOptions() {
   const sel = document.getElementById('art-kat-filter');
   if (!sel) return;
-  const kats = Array.from(new Set(state.artikel.map(a => a.kat).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const kats = (state.kategorien && state.kategorien.length)
+    ? [...state.kategorien].sort((a,b) => a.order - b.order).map(k => k.name)
+    : Array.from(new Set(state.artikel.map(a => a.kat).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const vorher = sel.value;
   sel.innerHTML = '<option value="">Alle Kategorien</option>' + kats.map(k => `<option value="${k}">${k}</option>`).join('');
   if (kats.includes(vorher)) sel.value = vorher;
@@ -2662,9 +2826,17 @@ function renderBestellungDropdowns() {
 function renderKatPills() {
   const el = document.getElementById('best-kat-pills');
   if (!el) return;
-  const kats = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))].sort();
-  el.innerHTML = `<button class="badge ${!bestSelKat?'badge-green':''}" style="cursor:pointer;padding:4px 10px;font-size:12px" onclick="bestSelKat='';renderKatPills();renderArtikelGrid()">Alle</button>` +
-    kats.map(k => `<button class="badge ${bestSelKat===k?'badge-green':''}" style="cursor:pointer;padding:4px 10px;font-size:12px" onclick="bestSelKat='${k.replace(/'/g,"\\'")}';renderKatPills();renderArtikelGrid()">${k}</button>`).join('');
+  let kats;
+  if (state.kategorien && state.kategorien.length) {
+    kats = [...state.kategorien].sort((a,b) => a.order - b.order).map(k => k.name);
+  } else {
+    kats = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))].sort();
+  }
+  const baseStyle = 'cursor:pointer;padding:5px 13px;font-size:12px;font-weight:500;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);transition:all .15s;white-space:nowrap';
+  const activeStyle = 'cursor:pointer;padding:5px 13px;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--accent2);background:rgba(75,159,232,.12);color:var(--accent2);transition:all .15s;white-space:nowrap';
+  el.innerHTML =
+    `<button style="${!bestSelKat ? activeStyle : baseStyle}" onclick="bestSelKat='';renderKatPills();renderArtikelGrid()">Alle</button>` +
+    kats.map(k => `<button style="${bestSelKat===k ? activeStyle : baseStyle}" onclick="bestSelKat='${k.replace(/'/g,"\\'")}';renderKatPills();renderArtikelGrid()">${k}</button>`).join('');
 }
 
 function renderArtikelGrid() {
@@ -5163,6 +5335,10 @@ function showBsModal(id) {
   document.getElementById('bs-positionen').value = bs?.positionen||1;
   document.getElementById('bs-montageArt').value = bs?.montageArt||'';
   document.getElementById('bs-montageDetail').value = bs?.montageDetail||'';
+  // Chef-Monteur
+  const chefMa = bs?.chefMonteurId ? (state.mitarbeiter||[]).find(m=>m.id===bs.chefMonteurId) : null;
+  document.getElementById('bs-chefMonteur').value = chefMa ? chefMa.vorname+' '+(chefMa.nachname||'') : '';
+  document.getElementById('bs-chefMonteur-id').value = bs?.chefMonteurId||'';
   document.getElementById('bs-startzeit').value = bs?.startzeit||'';
   window._aktFahrtzeit = bs?.fahrtzeitMin ? {min:bs.fahrtzeitMin, str:bs.fahrtzeitStr} : null;
   const badge = document.getElementById('fahrtzeit-badge');
@@ -5297,10 +5473,11 @@ function saveBsModal() {
     positionen:parseInt(document.getElementById('bs-positionen').value)||1,
     montageArt:document.getElementById('bs-montageArt').value,
     montageDetail:document.getElementById('bs-montageDetail').value.trim(),
+    chefMonteurId:parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
     startzeit:document.getElementById('bs-startzeit').value.trim(),
     fahrtzeitMin: window._aktFahrtzeit?.min || null,
     fahrtzeitStr: window._aktFahrtzeit?.str || null,
-    montageTyp:document.getElementById('bs-montage-typ').value,
+    montageTyp:document.getElementById('bs-montageArt').value,
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
     apEmail:document.getElementById('bs-ap-email').value.trim(),
@@ -5837,7 +6014,9 @@ function startFirebaseListener() {
     dbRef = _db.ref('lagertool');
     console.log('[Firebase] dbRef set, adding listener...');
     dbRef.on('value', (snapshot) => {
-      if (suppressListener) { suppressListener = false; firebaseReady = true; return; }
+      // suppressListener bleibt true bis der Timeout es zurücksetzt.
+      // NICHT hier auf false setzen, sonst kommt das Echo durch!
+      if (suppressListener) { firebaseReady = true; return; }
       const data = snapshot.val();
       if (!data) { firebaseReady = true; hasReceivedFirebaseSync = true; return; }
       try {
@@ -6529,6 +6708,7 @@ function renderBaustatusStatus() {
   let baustellen = state.baustellen || [];
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = currentLoginUser?.rolle === 'leiter' || currentLoginUser?.funktion === 'leiter';
+  const istChefMonteurFn = (bau) => bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
 
   // Monteure sehen nur Baustellen, auf denen sie gearbeitet haben oder zugewiesen sind
   if (!istAdmin && !istLeiter && currentLoginUser) {
@@ -6610,7 +6790,19 @@ function renderBaustatusStatus() {
         '</optgroup>' : '');
 
       html += '<tr style="border-bottom:1px solid var(--border);">' +
-        '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') + '</td>' +
+        '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') +
+          // Monteur-Stunden-Detail mit Lösch-Buttons
+          (Object.keys(t.monteurHours||{}).length ? '<div style="margin-top:3px">' +
+            Object.entries(t.monteurHours).map(([n,h]) =>
+              '<span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--muted);margin-right:6px;background:var(--surface2);padding:1px 6px;border-radius:8px">' +
+                n + ': ' + h + 'h' +
+                (istAdmin || istLeiter || istChefMonteurFn(bau) || (currentLoginUser && n.toLowerCase().includes((currentLoginUser.nachname||'###').toLowerCase()))
+                  ? ' <button onclick="bsDeleteStunden(' + bau.id + ',\'' + t.id + '\',\'' + n.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Stunden löschen">✕</button>'
+                  : '') +
+              '</span>'
+            ).join('') +
+          '</div>' : '') +
+        '</td>' +
         '<td style="padding:5px 4px;text-align:right;color:var(--muted);white-space:nowrap;">' + t.hours.toFixed(1) + 'h</td>' +
         '<td style="padding:5px 4px;text-align:right;color:#2563eb;white-space:nowrap;">' + tIst.toFixed(1) + 'h</td>' +
         '<td style="padding:5px 4px;width:60px;"><div style="background:var(--bg-2);border-radius:3px;height:6px;overflow:hidden;"><div style="background:' + (ueber?'#dc2626':'#2563eb') + ';width:' + Math.min(tPct,100) + '%;height:100%;"></div></div></td>' +
@@ -6635,6 +6827,20 @@ function renderBaustatusStatus() {
   });
 
   document.getElementById('baustatus-content').innerHTML = html;
+}
+
+// Stunden eines Monteurs auf einer Task löschen
+function bsDeleteStunden(bauId, taskId, monteurName) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau) return;
+  const task = (bau.tasks||[]).find(t => t.id === taskId);
+  if (!task || !task.monteurHours || !task.monteurHours[monteurName]) return;
+  const stunden = task.monteurHours[monteurName];
+  if (!confirm(monteurName + ': ' + stunden + 'h auf "' + task.name + '" löschen?')) return;
+  delete task.monteurHours[monteurName];
+  save();
+  renderBaustatusStatus();
+  toast('Stunden gelöscht', monteurName + ' · ' + stunden + 'h', '🗑');
 }
 
 // Stunden buchen
