@@ -1052,6 +1052,23 @@
       <div><label>Name *</label><input type="text" id="bs-name" placeholder="wird automatisch generiert"></div>
       <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Fust AG" oninput="generiereNameAusKundeOrt()"></div>
     </div>
+    <div class="form-row cols-2">
+      <div><label>Art der Montage</label>
+        <select id="bs-montageArt">
+          <option value="">— wählen —</option>
+          <option value="Küchenmontage">Küchenmontage</option>
+          <option value="Türenmontage">Türenmontage</option>
+          <option value="Fenstermontage">Fenstermontage</option>
+          <option value="Schreinermontage">Schreinermontage</option>
+          <option value="Innenausbau">Innenausbau</option>
+          <option value="Ladenbau">Ladenbau</option>
+          <option value="Demontage">Demontage</option>
+          <option value="Reparatur">Reparatur</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </div>
+      <div><label>Montage-Beschreibung</label><input type="text" id="bs-montageDetail" placeholder="z.B. 15 Türen EG+OG"></div>
+    </div>
     <div class="form-row cols-1">
       <div><label>📍 Adresse</label>
         <div style="display:flex;gap:6px;align-items:center">
@@ -5144,6 +5161,8 @@ function showBsModal(id) {
   document.getElementById('bs-von').value = bs?.von||'';
   document.getElementById('bs-bis').value = bs?.bis||'';
   document.getElementById('bs-positionen').value = bs?.positionen||1;
+  document.getElementById('bs-montageArt').value = bs?.montageArt||'';
+  document.getElementById('bs-montageDetail').value = bs?.montageDetail||'';
   document.getElementById('bs-startzeit').value = bs?.startzeit||'';
   window._aktFahrtzeit = bs?.fahrtzeitMin ? {min:bs.fahrtzeitMin, str:bs.fahrtzeitStr} : null;
   const badge = document.getElementById('fahrtzeit-badge');
@@ -5276,6 +5295,8 @@ function saveBsModal() {
     von:document.getElementById('bs-von').value,
     bis:document.getElementById('bs-bis').value,
     positionen:parseInt(document.getElementById('bs-positionen').value)||1,
+    montageArt:document.getElementById('bs-montageArt').value,
+    montageDetail:document.getElementById('bs-montageDetail').value.trim(),
     startzeit:document.getElementById('bs-startzeit').value.trim(),
     fahrtzeitMin: window._aktFahrtzeit?.min || null,
     fahrtzeitStr: window._aktFahrtzeit?.str || null,
@@ -6505,13 +6526,35 @@ function renderBaustatus() {
 // TAB 1: STATUS (Soll/Ist Übersicht + Task-Eingabe)
 // ============================================================
 function renderBaustatusStatus() {
-  const baustellen = state.baustellen || [];
-  let html = '<div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">' +
-    '<button class="btn btn-primary" onclick="showBsModal(null)">+ Neue Baustelle anlegen</button>' +
-  '</div>';
+  let baustellen = state.baustellen || [];
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = currentLoginUser?.rolle === 'leiter' || currentLoginUser?.funktion === 'leiter';
+
+  // Monteure sehen nur Baustellen, auf denen sie gearbeitet haben oder zugewiesen sind
+  if (!istAdmin && !istLeiter && currentLoginUser) {
+    const meinName = (currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'')).trim();
+    baustellen = baustellen.filter(bau => {
+      // Prüfe ob Monteur Stunden auf einer Task hat
+      const hatStunden = (bau.tasks||[]).some(t =>
+        t.monteurHours && Object.keys(t.monteurHours).some(k => k.toLowerCase().includes(currentLoginUser.nachname?.toLowerCase()||'###'))
+      );
+      // Prüfe ob Monteur im Wochenplan zugewiesen ist
+      const hatZuweisung = Object.values(state.plan||{}).some(tag =>
+        Object.values(tag||{}).some(e => e.maId === currentLoginUser.id && e.bsId === bau.id)
+      );
+      return hatStunden || hatZuweisung;
+    });
+  }
+
+  let html = '';
+  if (istAdmin || istLeiter) {
+    html += '<div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">' +
+      '<button class="btn btn-primary" onclick="showBsModal(null)">+ Neue Baustelle anlegen</button></div>';
+  }
 
   if (baustellen.length === 0) {
-    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Noch keine Baustellen vorhanden. Klicke oben auf "+ Neue Baustelle anlegen".</div>';
+    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">' +
+      (istAdmin ? 'Noch keine Baustellen vorhanden.' : 'Keine Baustellen für dich gefunden.') + '</div>';
     document.getElementById('baustatus-content').innerHTML = html;
     return;
   }
@@ -6520,12 +6563,16 @@ function renderBaustatusStatus() {
     const tasks = bau.tasks || [];
     const { soll, ist, pct, verfuegbar } = bsSollIst(bau);
     const aktiv = bsIsAktiv(bau);
+    const montageInfo = [bau.montageArt, bau.montageDetail].filter(Boolean).join(' – ');
 
     html += '<div class="card" style="margin-bottom:1rem;border-left:4px solid ' + (aktiv?'#2563eb':'#9ca3af') + ';padding:14px;">' +
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
         '<div style="cursor:pointer" onclick="showBsModal(' + bau.id + ')">' +
           '<div style="font-size:15px;font-weight:700;">' + (aktiv?'🏗️':'🔒') + ' ' + (bau.name||'–') + ' <span style="font-size:11px;color:var(--muted);font-weight:400">✏️</span></div>' +
-          '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' + (bau.kunde||'') + (bau.von?(' · '+bau.von+' – '+(bau.bis||'')):'') + '</div>' +
+          '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' +
+            (bau.kunde||'') + (bau.von?(' · '+bau.von+' – '+(bau.bis||'')):'') +
+            (montageInfo ? ' · <span style="color:var(--accent2)">' + montageInfo + '</span>' : '') +
+          '</div>' +
         '</div>';
 
     if (tasks.length === 0) {
