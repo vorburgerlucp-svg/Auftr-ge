@@ -6,6 +6,9 @@
 <title>Fahrzeug-Inventar &amp; Lagerverwaltung</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 <script>if (typeof emailjs !== 'undefined') { try { emailjs.init('uEjZ4g6QkqHfSFjQ_'); } catch(e) { console.warn('EmailJS init fehlgeschlagen:', e); } } else { console.warn('EmailJS Script nicht geladen - Bestellungen per Mail funktionieren nicht ohne Internetverbindung'); }</script>
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -301,6 +304,22 @@
     transition: border .2s; color: var(--muted); font-size: 13px;
   }
   .doc-upload-area:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* SEARCHABLE PICKER */
+  .sp-dropdown {
+    display:none; position:absolute; z-index:60; top:100%; left:0; right:0;
+    max-height:220px; overflow-y:auto; background:var(--card,#1c1f26);
+    border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,.35); margin-top:4px;
+  }
+  .sp-dropdown.open { display:block; }
+  .sp-item {
+    padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);
+    font-size:14px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .sp-item:hover { background:var(--hover,#262a33); }
+  .sp-item.disabled { opacity:0.4; cursor:not-allowed; }
+  .sp-item.disabled:hover { background:none; }
   .doc-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; margin-top: 12px; }
   .doc-preview-item { position: relative; }
   .doc-preview-item img { width: 100%; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
@@ -374,10 +393,10 @@
       <div style="position:relative">
         <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
           style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
-          onfocus="this.select(); loginPickerOpen()" onclick="loginPickerOpen()"
-          oninput="document.getElementById('login-name-id').value=''; loginPickerOpen('input')">
+          data-hidden-id="login-name-id"
+          onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
+          oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
         <input type="hidden" id="login-name-id" value="">
-        <div id="login-picker" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--card,#1c1f26);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35);margin-top:4px"></div>
       </div>
     </div>
     <div style="margin-bottom:14px;">
@@ -484,6 +503,8 @@
       <button class="btn btn-secondary btn-sm" onclick="showBlockModal()">📅 Block einfügen</button>
       <button class="btn btn-secondary btn-sm" onclick="autoAssign()">🤖 Auto-Zuweisung</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wp-excel-upload').click()">⬆ Import (Excel/PDF)</button>
+      <input type="file" id="wp-excel-upload" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="wpFileImport(event)">
     </div>
     <!-- Baustellen Legende -->
     <div id="wp-legende" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px"></div>
@@ -615,45 +636,63 @@
 <!-- ============ BESTELLUNG ============ -->
 <div id="page-bestellung" class="page">
   <h2>Fahrzeug-Bestellung</h2>
-  <p class="subtitle">Artikel für ein Fahrzeug anfordern – Lager wird automatisch geprüft</p>
+  <p class="subtitle">Artikel anfordern – Lager wird automatisch geprüft</p>
 
-  <div class="card">
-    <div class="card-title">Bestellung aufgeben</div>
-    <div class="form-row cols-2">
-      <div>
-        <label>Fahrzeug / Monteur *</label>
-        <select id="best-fahrzeug"><option value="" selected="selected">— Fahrzeug wählen —</option></select>
+  <div class="tabs" style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+    <button class="nav-btn active" onclick="switchBestTab('bestellen')">🛒 Bestellen</button>
+    <button class="nav-btn" onclick="switchBestTab('offen')">📋 Offen <span id="best-offen-count" class="badge badge-red" style="font-size:10px;padding:2px 6px;margin-left:4px;display:none">0</span></button>
+    <button class="nav-btn" onclick="switchBestTab('geliefert')">✅ Geliefert</button>
+    <button class="nav-btn" onclick="switchBestTab('jahresbericht')">📊 Kontrolle</button>
+  </div>
+
+  <!-- TAB: BESTELLEN -->
+  <div id="best-tab-bestellen">
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+        <div style="flex:1;min-width:200px">
+          <label>Fahrzeug / Monteur *</label>
+          <select id="best-fahrzeug"><option value="">— Fahrzeug wählen —</option></select>
+        </div>
+        <div style="flex:2;min-width:250px">
+          <label>🔍 Artikel suchen</label>
+          <input type="text" id="best-search" placeholder="Name oder Nr. eingeben…" oninput="renderArtikelGrid()">
+        </div>
       </div>
-      <div>
-        <label>Artikel suchen &amp; hinzufügen</label>
-        <div style="display:flex;gap:8px">
-          <select id="best-artikel-kat" style="max-width:170px" onchange="renderBestellungArtikelDropdown()">
-            <option value="">Alle Kategorien</option>
-          </select>
-          <select id="best-artikel" style="flex:1">
-            <option value="" selected="selected">— Artikel wählen —</option>
-          </select>
-          <button class="btn btn-secondary btn-sm" onclick="addToCart()" style="white-space:nowrap">+ Hinzufügen</button>
+      <!-- Kategorie-Pillen -->
+      <div id="best-kat-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+    </div>
+
+    <!-- Artikel-Grid -->
+    <div id="best-artikel-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:16px"></div>
+
+    <!-- Warenkorb -->
+    <div id="best-cart-wrap" style="display:none">
+      <div class="card">
+        <div class="card-title">🛒 Warenkorb</div>
+        <div id="best-cart-items"></div>
+        <div style="display:flex;gap:10px;align-items:end;margin-top:12px;flex-wrap:wrap">
+          <div style="flex:1"><label>Bemerkung</label><input type="text" id="best-bemerkung" placeholder="Optional…"></div>
+          <button class="btn btn-primary" onclick="submitBestellung()">📤 Bestellung absenden</button>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Warenkorb -->
-    <div id="cart-empty" class="empty" style="padding:20px">Noch keine Artikel hinzugefügt</div>
-    <div id="cart-items" style="display:none"></div>
+  <!-- TAB: OFFEN -->
+  <div id="best-tab-offen" style="display:none"><div id="orders-offen-list"></div></div>
 
-    <div id="cart-summary" style="display:none">
-      <hr class="divider">
-      <div class="summary-box">
-        <div class="card-title" style="margin-bottom:12px">Zusammenfassung</div>
-        <div id="summary-rows"></div>
-      </div>
-      <div class="flex-row" style="margin-top:16px">
-        <div><label>Bemerkung</label><input type="text" id="best-bemerkung" placeholder="Optional..." style="width:300px"></div>
-        <div class="spacer"></div>
-        <button class="btn btn-primary" onclick="submitBestellung()">📤 Bestellung absenden</button>
+  <!-- TAB: GELIEFERT -->
+  <div id="best-tab-geliefert" style="display:none"><div id="orders-geliefert-list"></div></div>
+
+  <!-- TAB: KONTROLLE / JAHRESBERICHT -->
+  <div id="best-tab-jahresbericht" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div><label>Fahrzeug</label><select id="jb-fahrzeug" onchange="renderJahresbericht()"><option value="">Alle</option></select></div>
+        <div><label>Jahr</label><select id="jb-jahr" onchange="renderJahresbericht()"></select></div>
       </div>
     </div>
+    <div id="jahresbericht-content"></div>
   </div>
 </div>
 
@@ -674,6 +713,15 @@
       <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importData(event)">
     </div>
     <div style="font-size:12px;color:var(--muted)">Export speichert den kompletten Datenbestand (Artikel, Mitarbeiter, Fahrzeuge, Wochenplan). Import überschreibt den aktuellen Stand.</div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:12px">🤖 Claude API (für PDF-Scan Import)</div>
+    <div style="margin-bottom:10px">
+      <label>Anthropic API Key</label>
+      <input type="password" id="cfg-claude-apikey" placeholder="sk-ant-..." style="width:100%">
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="saveClaudeApiKey()">Speichern</button>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Wird benötigt um gescannte PDFs (Bilder) als Wochenplan zu importieren. Key wird nur lokal gespeichert.</div>
   </div>
   <div class="card" style="margin-bottom:16px">
     <div style="font-weight:700;margin-bottom:12px">📧 E-Mail Konfiguration</div>
@@ -715,10 +763,10 @@
       <div style="position:relative">
         <label>Monteur *</label>
         <input type="text" id="fzg-modal-monteur" placeholder="Klicken oder tippen zum Suchen…" autocomplete="off"
-          onfocus="this.select(); fzgMonteurPickerOpen()" onclick="fzgMonteurPickerOpen()"
-          oninput="document.getElementById('fzg-modal-monteur-id').value=''; fzgMonteurPickerOpen('input')">>
+          data-hidden-id="fzg-modal-monteur-id"
+          onfocus="fzgMonteurPickerOpen()" onclick="fzgMonteurPickerOpen()"
+          oninput="document.getElementById('fzg-modal-monteur-id').value=''; spFilter(this, {excludeFzgId: document.getElementById('fzg-modal-id').value})">
         <input type="hidden" id="fzg-modal-monteur-id" value="">
-        <div id="fzg-monteur-picker" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:var(--card,#1c1f26);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35);margin-top:4px"></div>
       </div>
     </div>
     <div class="form-row cols-2">
@@ -794,6 +842,7 @@
     <div id="modal-wz-list"></div>
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeFzgModal()">Abbrechen</button>
+      <button class="btn btn-secondary" id="fzg-delete-btn" style="color:var(--red);border-color:var(--red)" onclick="deleteFahrzeug()">🗑 Löschen</button>
       <button class="btn btn-primary" onclick="saveFzgModal()">💾 Speichern</button>
     </div>
   </div>
@@ -1199,9 +1248,12 @@
     <!-- Status-Monteur (bei Status-Wahl) -->
     <div id="block-status-monteur-wrap" style="display:none;margin-bottom:14px">
       <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px">Monteur *</label>
-      <select id="block-status-monteur" style="margin-top:6px">
-        <option value="">— Monteur wählen —</option>
-      </select>
+      <div style="position:relative;margin-top:6px">
+        <input type="text" id="block-status-monteur" placeholder="Monteur suchen…" autocomplete="off"
+          data-hidden-id="block-status-monteur-id"
+          onfocus="spOpen(this,'ma')" onclick="spOpen(this,'ma')" oninput="spFilter(this)">
+        <input type="hidden" id="block-status-monteur-id" value="">
+      </div>
     </div>
 
     <div style="margin-bottom:14px">
@@ -1695,43 +1747,106 @@ function initLoginScreen() {
   });
 }
 
-function loginPickerOpen(mode) {
-  const q = mode === 'input'
-    ? document.getElementById('login-name').value.trim().toLowerCase()
-    : '';
+// ══════════════════════════════════════════════════════════════
+// UNIVERSELLER SUCH-PICKER — ein System für alle Mitarbeiter-Auswahlen
+// Nutzung: <input onfocus="spOpen(this, 'ma', callback)" oninput="spFilter(this)">
+// ══════════════════════════════════════════════════════════════
+let spActiveInput = null;
+let spCallback = null;
+
+function spOpen(inputEl, type, callbackFn, opts) {
+  spActiveInput = inputEl;
+  if (callbackFn) spCallback = callbackFn;
+  let dd = inputEl.parentElement.querySelector('.sp-dropdown');
+  if (!dd) {
+    dd = document.createElement('div');
+    dd.className = 'sp-dropdown';
+    inputEl.parentElement.style.position = 'relative';
+    inputEl.parentElement.appendChild(dd);
+  }
+  const wasOpen = dd.classList.contains('open');
+  spRender(inputEl, dd, '', opts);
+  dd.classList.add('open');
+  if (!wasOpen) inputEl.select(); // Nur beim ersten Öffnen Text selektieren
+}
+
+function spFilter(inputEl, opts) {
+  const dd = inputEl.parentElement.querySelector('.sp-dropdown');
+  if (!dd) return;
+  const q = inputEl.value.trim().toLowerCase();
+  spRender(inputEl, dd, q, opts);
+  // Hidden-ID zurücksetzen wenn getippt wird
+  const hiddenId = inputEl.dataset.hiddenId;
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = ''; }
+}
+
+function spRender(inputEl, dd, query, opts) {
+  opts = opts || {};
+  const excludeFzgId = opts.excludeFzgId ? parseInt(opts.excludeFzgId) : null;
   const list = (state.mitarbeiter||[])
     .slice()
-    .sort((a,b)=>(a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
-    .filter(m => !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q));
-  const html = list.map(m => {
+    .sort((a,b) => (a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
+    .filter(m => {
+      if (!m.vorname && !m.nachname) return false;
+      if (!query) return true;
+      return (m.vorname+' '+m.nachname).toLowerCase().includes(query) ||
+             (m.nachname+' '+m.vorname).toLowerCase().includes(query);
+    });
+
+  dd.innerHTML = list.map(m => {
     const name = m.vorname + ' ' + (m.nachname||'');
     const rolle = m.admin ? ' 👑' : m.rolle==='leiter' ? ' 👷' : '';
-    return `<div onclick="loginPickerSelect(${m.id}, '${name.replace(/'/g, "\\'")}')"
-      style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:14px"
-      onmouseover="this.style.background='var(--hover,#262a33)'" onmouseout="this.style.background=''">
-      ${name}${rolle}
+    // Fahrzeug-Sperre prüfen
+    let gesperrt = false, sperrText = '';
+    if (excludeFzgId !== null) {
+      const belegtBei = findFahrzeugFuerMitarbeiterId(m.id, excludeFzgId);
+      if (belegtBei) { gesperrt = true; sperrText = '🔒 ' + belegtBei.name; }
+    }
+    return `<div class="sp-item${gesperrt?' disabled':''}" ${gesperrt?'':`onclick="spSelect(${m.id}, '${name.replace(/'/g,"\\'")}')"`}>
+      <span>${name}${rolle}</span>
+      ${sperrText ? `<span style="font-size:11px;color:var(--muted)">${sperrText}</span>` : ''}
     </div>`;
-  }).join('') || '<div style="padding:10px;color:var(--muted);font-size:13px">Keine Mitarbeiter gefunden</div>';
-  const picker = document.getElementById('login-picker');
-  picker.innerHTML = html;
-  picker.style.display = 'block';
+  }).join('') || '<div class="sp-item disabled"><span>Keine Mitarbeiter gefunden</span></div>';
 }
 
-function loginPickerSelect(maId, name) {
-  document.getElementById('login-name').value = name;
-  document.getElementById('login-name-id').value = maId;
-  document.getElementById('login-picker').style.display = 'none';
-  document.getElementById('login-pin').focus();
+function spSelect(maId, name) {
+  if (!spActiveInput) return;
+  spActiveInput.value = name;
+  // Hidden-ID setzen
+  const hiddenId = spActiveInput.dataset.hiddenId;
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = maId; }
+  // Dropdown schliessen
+  const dd = spActiveInput.parentElement.querySelector('.sp-dropdown');
+  if (dd) dd.classList.remove('open');
+  if (spCallback) spCallback(maId, name);
+  spActiveInput = null;
 }
 
-document.addEventListener('click', (e) => {
-  const picker = document.getElementById('login-picker');
-  if (!picker) return;
-  const input = document.getElementById('login-name');
-  if (e.target !== picker && e.target !== input && !picker.contains(e.target)) {
-    picker.style.display = 'none';
-  }
+// Globaler Click-Handler: Picker schliessen bei Klick ausserhalb
+document.addEventListener('click', e => {
+  document.querySelectorAll('.sp-dropdown.open').forEach(dd => {
+    const parent = dd.parentElement;
+    if (!parent.contains(e.target)) dd.classList.remove('open');
+  });
 });
+
+// ── LOGIN PICKER (nutzt universellen Picker) ──
+function loginPickerOpen() {
+  const input = document.getElementById('login-name');
+  spOpen(input, 'ma', (maId, name) => {
+    document.getElementById('login-name-id').value = maId;
+    document.getElementById('login-pin').focus();
+  });
+}
+
+// ── FAHRZEUG-MODAL PICKER (nutzt universellen Picker) ──
+function fzgMonteurPickerOpen() {
+  const input = document.getElementById('fzg-modal-monteur');
+  const fzgId = document.getElementById('fzg-modal-id').value;
+  spOpen(input, 'ma', (maId, name) => {
+    document.getElementById('fzg-modal-monteur-id').value = maId;
+  }, { excludeFzgId: fzgId });
+}
 
 function doLogin() {
   const id = parseInt(document.getElementById('login-name-id').value);
@@ -1957,7 +2072,7 @@ function showPage(id) {
     const btn = [...document.querySelectorAll('.nav-btn')].find(b => (b.getAttribute('onclick')||'').includes("'" + id + "'"));
     if (btn) btn.classList.add('active');
   }
-  if (id === 'bestellung') renderBestellungDropdowns();
+  if (id === 'bestellung') { renderBestellungDropdowns(); updateOffenCount(); }
   if (id === 'fahrzeuge') renderFahrzeugePage();
   if (id === 'werkzeug') { renderWerkzeugDropdowns(); renderWerkzeugPage(); }
   if (id === 'mitarbeiter') renderMitarbeiterPage();
@@ -1979,6 +2094,14 @@ function renderEinstellungen() {
   el('cfg-fb-apikey', c.fbApiKey);
   el('cfg-fb-projectid', c.fbProjectId);
   el('cfg-fb-appid', c.fbAppId);
+  // Claude API Key aus localStorage (NICHT in state/Firebase, bleibt lokal)
+  el('cfg-claude-apikey', localStorage.getItem('lagertool_claude_key') || '');
+}
+
+function saveClaudeApiKey() {
+  const key = document.getElementById('cfg-claude-apikey')?.value.trim() || '';
+  if (key) { localStorage.setItem('lagertool_claude_key', key); toast('Gespeichert', 'API Key lokal gespeichert', '✅'); }
+  else { localStorage.removeItem('lagertool_claude_key'); toast('Entfernt', 'API Key gelöscht', '🗑'); }
 }
 
 // ── ARTIKEL ────────────────────────────────────────────
@@ -2134,11 +2257,15 @@ function showFzgModal(id) {
   const modal = document.getElementById('fzg-modal');
   const f = id ? state.fahrzeuge.find(x => x.id === id) : null;
   document.getElementById('fzg-modal-title').textContent = f ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug';
+  const delBtn = document.getElementById('fzg-delete-btn');
+  if (delBtn) delBtn.style.display = f ? '' : 'none';
   document.getElementById('fzg-modal-id').value = id || '';
   document.getElementById('fzg-modal-name').value = f?.name || '';
   document.getElementById('fzg-modal-monteur').value = f?.monteur || '';
   document.getElementById('fzg-modal-monteur-id').value = f?.monteurId ?? '';
-  document.getElementById('fzg-monteur-picker').style.display = 'none';
+  // Allfällig offenen Picker schliessen
+  const dd = document.getElementById('fzg-modal-monteur')?.parentElement?.querySelector('.sp-dropdown');
+  if (dd) dd.classList.remove('open');
   document.getElementById('fzg-modal-schild').value = f?.schild || '';
   document.getElementById('fzg-modal-marke').value = f?.marke || '';
   document.getElementById('fzg-modal-park').value = f?.park || 'nein';
@@ -2159,52 +2286,7 @@ function closeFzgModal() {
   tempDocs = []; tempService = []; tempWz = [];
 }
 
-// ── Monteur-Picker im Fahrzeug-Modal: Klick zeigt alle Monteure, Tippen filtert ──
-let fzgMonteurPickerForceAll = false;
-function fzgMonteurPickerOpen(filterMode) {
-  // filterMode === 'input' → nur wenn der User tatsächlich tippt wird gefiltert
-  // bei einfachem Klick (oder erstmaligem Öffnen) → ALLE zeigen
-  const q = filterMode === 'input'
-    ? document.getElementById('fzg-modal-monteur').value.trim().toLowerCase()
-    : '';
-  const aktuellesFzgId = parseInt(document.getElementById('fzg-modal-id').value) || null;
-  const list = (state.mitarbeiter||[])
-    .slice()
-    .sort((a,b)=>(a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
-    .filter(m => !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q));
-
-  const html = list.map(m => {
-    const name = m.vorname + ' ' + m.nachname;
-    const belegtBei = findFahrzeugFuerMitarbeiterId(m.id, aktuellesFzgId);
-    const gesperrt = !!belegtBei;
-    return `<div onclick="${gesperrt ? '' : `fzgMonteurPickerSelect(${m.id}, '${name.replace(/'/g, "\\'")}')`}"
-      style="padding:8px 12px;cursor:${gesperrt?'not-allowed':'pointer'};opacity:${gesperrt?'0.45':'1'};display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border)"
-      ${gesperrt?'':`onmouseover="this.style.background='var(--hover,#262a33)'" onmouseout="this.style.background=''"`}>
-      <span>${name}</span>
-      ${gesperrt ? `<span style="font-size:11px;color:var(--muted)">🔒 ${belegtBei.name}</span>` : ''}
-    </div>`;
-  }).join('') || `<div style="padding:10px;color:var(--muted);font-size:13px">Keine Mitarbeiter gefunden</div>`;
-
-  const picker = document.getElementById('fzg-monteur-picker');
-  picker.innerHTML = html;
-  picker.style.display = 'block';
-}
-
-function fzgMonteurPickerSelect(maId, name) {
-  document.getElementById('fzg-modal-monteur').value = name;
-  document.getElementById('fzg-modal-monteur-id').value = maId;
-  document.getElementById('fzg-monteur-picker').style.display = 'none';
-}
-
-document.addEventListener('click', (e) => {
-  const picker = document.getElementById('fzg-monteur-picker');
-  if (!picker) return;
-  const input = document.getElementById('fzg-modal-monteur');
-  if (e.target !== picker && e.target !== input && !picker.contains(e.target)) {
-    picker.style.display = 'none';
-  }
-});
-
+// (Monteur-Picker im Fahrzeug-Modal: jetzt über universellen spOpen/spFilter)
 
 function saveFzgModal() {
   const name = document.getElementById('fzg-modal-name').value.trim();
@@ -2542,83 +2624,96 @@ function deleteFahrzeug(id) {
 
 // ── BESTELLUNG ─────────────────────────────────────────
 let cart = []; // [{artikelId, menge}]
+let bestSelKat = '';
 
 function renderBestellungDropdowns() {
   renderFahrzeugDropdowns();
-  const katSel = document.getElementById('best-artikel-kat');
-  const kats = Array.from(new Set(state.artikel.map(a => a.kat).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  const vorherKat = katSel.value;
-  katSel.innerHTML = '<option value="">Alle Kategorien</option>' + kats.map(k => `<option value="${k}">${k}</option>`).join('');
-  if (kats.includes(vorherKat)) katSel.value = vorherKat;
-  renderBestellungArtikelDropdown();
+  const sel = document.getElementById('best-fahrzeug');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Fahrzeug wählen —</option>' +
+    state.fahrzeuge.map(f => `<option value="${f.id}">${f.name} (${f.monteur||'frei'})</option>`).join('');
+  if (!cur && currentLoginUser && !currentLoginUser.admin) {
+    const meinFzg = getMaFahrzeug(currentLoginUser);
+    if (meinFzg) sel.value = meinFzg.id;
+  } else if (cur) sel.value = cur;
+  renderKatPills();
+  renderArtikelGrid();
+  renderBestCart();
 }
 
-function renderBestellungArtikelDropdown() {
-  const kat = document.getElementById('best-artikel-kat').value;
-  const sel = document.getElementById('best-artikel');
-  const liste = kat ? state.artikel.filter(a => a.kat === kat) : state.artikel;
-  sel.innerHTML = '<option value="">— Artikel wählen —</option>' +
-    liste.map(a => `<option value="${a.id}">${a.name} (Lager: ${a.bestand} ${a.einheit})</option>`).join('');
+function renderKatPills() {
+  const el = document.getElementById('best-kat-pills');
+  if (!el) return;
+  const kats = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))].sort();
+  el.innerHTML = `<button class="badge ${!bestSelKat?'badge-green':''}" style="cursor:pointer;padding:4px 10px;font-size:12px" onclick="bestSelKat='';renderKatPills();renderArtikelGrid()">Alle</button>` +
+    kats.map(k => `<button class="badge ${bestSelKat===k?'badge-green':''}" style="cursor:pointer;padding:4px 10px;font-size:12px" onclick="bestSelKat='${k.replace(/'/g,"\\'")}';renderKatPills();renderArtikelGrid()">${k}</button>`).join('');
 }
 
-function addToCart() {
-  const artId = parseInt(document.getElementById('best-artikel').value);
-  if (!artId) return;
-  if (cart.find(c => c.artikelId === artId)) return toast('Hinweis', 'Artikel bereits in der Bestellung', 'ℹ️');
-  cart.push({ artikelId: artId, menge: 1 });
-  renderCart();
-}
+function renderArtikelGrid() {
+  const el = document.getElementById('best-artikel-grid');
+  if (!el) return;
+  const q = (document.getElementById('best-search')?.value||'').trim().toLowerCase();
+  let liste = (state.artikel||[]).filter(a => {
+    if (bestSelKat && a.kat !== bestSelKat) return false;
+    if (q && !(a.name||'').toLowerCase().includes(q) && !(a.nr||'').toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b) => (a.kat||'').localeCompare(b.kat||'') || (a.name||'').localeCompare(b.name||''));
 
-function renderCart() {
-  const wrap = document.getElementById('cart-items');
-  const empty = document.getElementById('cart-empty');
-  const summary = document.getElementById('cart-summary');
-  if (!cart.length) {
-    wrap.style.display = 'none'; empty.style.display = ''; summary.style.display = 'none'; return;
-  }
-  empty.style.display = 'none'; wrap.style.display = ''; summary.style.display = '';
-  wrap.innerHTML = cart.map(c => {
-    const a = state.artikel.find(x => x.id === c.artikelId);
-    if (!a) return '';
-    const inStock = a.bestand >= c.menge;
-    const badge = inStock
-      ? `<span class="badge badge-green">✓ Lager vorhanden</span>`
-      : `<span class="badge badge-red">✗ Muss bestellt werden</span>`;
-    return `<div class="order-item">
-      <div class="order-item-name">
-        <div style="font-weight:600">${a.name}</div>
-        <div style="font-size:11px;color:var(--muted)">${a.kat} · ${a.einheit}</div>
+  if (!liste.length) { el.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
+  el.innerHTML = liste.map(a => {
+    const imCart = cart.find(c => c.artikelId === a.id);
+    const bg = imCart ? 'border-color:var(--green);background:rgba(75,232,138,.06)' : '';
+    return `<div class="card" style="padding:10px;${bg};cursor:pointer" onclick="toggleCart(${a.id})">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+        <div>
+          <div style="font-weight:600;font-size:13px">${a.name}</div>
+          <div style="font-size:11px;color:var(--muted)">${a.kat||''} · ${a.nr||''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:12px;color:var(--muted)">Lager: ${a.bestand||0}</div>
+          ${imCart ? `<div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+            <button onclick="event.stopPropagation();changeCartQty(${a.id},-1)" style="width:24px;height:24px;font-size:14px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer">−</button>
+            <span style="font-weight:700;min-width:24px;text-align:center">${imCart.menge}</span>
+            <button onclick="event.stopPropagation();changeCartQty(${a.id},1)" style="width:24px;height:24px;font-size:14px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer">+</button>
+          </div>` : '<div style="font-size:11px;color:var(--accent2);margin-top:4px">+ Hinzufügen</div>'}
+        </div>
       </div>
-      <div class="order-item-status">${badge}</div>
-      <div class="qty-control">
-        <button class="qty-btn" onclick="changeCartQty(${a.id},-1)">−</button>
-        <span class="qty-val">${c.menge}</span>
-        <button class="qty-btn" onclick="changeCartQty(${a.id},1)">+</button>
-      </div>
-      <button class="btn btn-danger btn-sm" onclick="removeFromCart(${a.id})">✕</button>
     </div>`;
   }).join('');
+}
 
-  // Summary
-  const fromStock = cart.filter(c => { const a = state.artikel.find(x => x.id === c.artikelId); return a && a.bestand >= c.menge; });
-  const toOrder = cart.filter(c => { const a = state.artikel.find(x => x.id === c.artikelId); return !a || a.bestand < c.menge; });
-  document.getElementById('summary-rows').innerHTML = `
-    <div class="summary-row"><span>Artikel total</span><span style="font-family:var(--mono)">${cart.length}</span></div>
-    <div class="summary-row"><span>Aus Lager verfügbar</span><span style="color:var(--green);font-family:var(--mono)">${fromStock.length}</span></div>
-    <div class="summary-row"><span>Muss bestellt werden</span><span style="color:var(--red);font-family:var(--mono)">${toOrder.length}</span></div>`;
+function toggleCart(artId) {
+  const idx = cart.findIndex(c => c.artikelId === artId);
+  if (idx >= 0) { cart.splice(idx, 1); } else { cart.push({ artikelId: artId, menge: 1 }); }
+  renderArtikelGrid();
+  renderBestCart();
 }
 
 function changeCartQty(id, delta) {
   const c = cart.find(x => x.artikelId === id);
   if (!c) return;
   c.menge = Math.max(1, c.menge + delta);
-  renderCart();
+  renderArtikelGrid();
+  renderBestCart();
 }
 
-function removeFromCart(id) {
-  cart = cart.filter(c => c.artikelId !== id);
-  renderCart();
+function renderBestCart() {
+  const wrap = document.getElementById('best-cart-wrap');
+  if (!wrap) return;
+  if (!cart.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  document.getElementById('best-cart-items').innerHTML =
+    cart.map(c => {
+      const a = state.artikel.find(x => x.id === c.artikelId);
+      if (!a) return '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+        <div><span style="font-weight:600">${a.name}</span> <span style="color:var(--muted);font-size:12px">× ${c.menge} ${a.einheit||'Stk'}</span></div>
+        <button onclick="toggleCart(${a.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>
+      </div>`;
+    }).join('');
 }
+
+function removeFromCart(id) { toggleCart(id); }
 
 async function submitBestellung() {
   const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
@@ -2641,6 +2736,7 @@ async function submitBestellung() {
     fahrzeug: fzg.name,
     monteur: fzg.monteur || '',
     bemerkung: document.getElementById('best-bemerkung')?.value || '',
+    status: 'offen',
     items
   };
   if (!Array.isArray(state.orders)) state.orders = [];
@@ -2655,12 +2751,191 @@ async function submitBestellung() {
   cart = [];
   save();
   renderBestellungDropdowns();
-  renderCart();
   if (document.getElementById('best-bemerkung')) document.getElementById('best-bemerkung').value = '';
   toast('Bestellung gesendet!', items.length + ' Artikel für ' + fzg.name, '📤');
 
   // E-Mail im Hintergrund
   try { await sendNotification(order); } catch(e) { console.warn('E-Mail fehlgeschlagen:', e); }
+}
+
+// ── Bestellungs-Tabs ──
+function switchBestTab(tab) {
+  ['bestellen','offen','geliefert','jahresbericht'].forEach(t => {
+    const el = document.getElementById('best-tab-' + t);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('#page-bestellung > .tabs .nav-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase().includes(tab === 'jahresbericht' ? 'jahres' : tab === 'bestellen' ? 'bestell' : tab));
+  });
+  if (tab === 'offen') renderOrderList('offen');
+  if (tab === 'geliefert') renderOrderList('geliefert');
+  if (tab === 'jahresbericht') { renderJahresberichtDropdowns(); renderJahresbericht(); }
+  updateOffenCount();
+}
+
+function updateOffenCount() {
+  const n = (state.orders||[]).filter(o => o.status !== 'geliefert').length;
+  const badge = document.getElementById('best-offen-count');
+  if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline' : 'none'; }
+}
+
+function renderOrderList(filter) {
+  const elId = filter === 'geliefert' ? 'orders-geliefert-list' : 'orders-offen-list';
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const orders = (state.orders||[]).filter(o =>
+    filter === 'geliefert' ? o.status === 'geliefert' : o.status !== 'geliefert'
+  );
+  if (!orders.length) { el.innerHTML = `<div class="empty">${filter === 'geliefert' ? 'Keine gelieferten Bestellungen' : 'Keine offenen Bestellungen'}</div>`; return; }
+  el.innerHTML = orders.map(o => {
+    const statusBtn = o.status === 'geliefert'
+      ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'offen')">↩ Zurück auf Offen</button>`
+      : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'geliefert')">✅ Als geliefert markieren</button>`;
+    const deleteBtn = `<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation(); deleteOrder(${o.id})">🗑</button>`;
+    return `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:700">${o.fahrzeug} · ${o.monteur||''}</div>
+          <div style="font-size:12px;color:var(--muted)">${o.datum}${o.bemerkung ? ' · ' + o.bemerkung : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px">${statusBtn}${deleteBtn}</div>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+        ${(o.items||[]).map(i => `<span class="badge ${i.inStock ? 'badge-green' : 'badge-red'}">${i.name} × ${i.menge}</span>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleOrderStatus(orderId, newStatus) {
+  const o = (state.orders||[]).find(x => x.id === orderId);
+  if (!o) return;
+  o.status = newStatus;
+  if (newStatus === 'geliefert') o.geliefertDatum = new Date().toLocaleString('de-CH');
+  save();
+  renderOrderList('offen');
+  renderOrderList('geliefert');
+  updateOffenCount();
+  toast(newStatus === 'geliefert' ? 'Geliefert' : 'Zurückgesetzt', o.fahrzeug, newStatus === 'geliefert' ? '✅' : '↩');
+}
+
+function deleteOrder(orderId) {
+  if (!confirm('Bestellung löschen?')) return;
+  state.orders = (state.orders||[]).filter(x => x.id !== orderId);
+  save();
+  renderOrderList('offen');
+  renderOrderList('geliefert');
+  updateOffenCount();
+  toast('Gelöscht', '', '🗑');
+}
+
+// ── Jahresbericht pro Fahrzeug ──
+function renderJahresberichtDropdowns() {
+  const sel = document.getElementById('jb-fahrzeug');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Alle Fahrzeuge</option>' +
+    state.fahrzeuge.map(f => `<option value="${f.name}">${f.name} (${f.monteur||''})</option>`).join('');
+  sel.value = cur;
+
+  const jahrSel = document.getElementById('jb-jahr');
+  if (!jahrSel) return;
+  const curJ = jahrSel.value;
+  const jahre = [...new Set((state.orders||[]).map(o => {
+    try { const m = o.datum.match(/(\d{4})/); return m ? m[1] : null; } catch { return null; }
+  }).filter(Boolean))].sort().reverse();
+  if (!jahre.length) jahre.push(new Date().getFullYear().toString());
+  jahrSel.innerHTML = jahre.map(j => `<option value="${j}">${j}</option>`).join('');
+  jahrSel.value = curJ || jahre[0];
+}
+
+function renderJahresbericht() {
+  const el = document.getElementById('jahresbericht-content');
+  if (!el) return;
+  const fzgFilter = document.getElementById('jb-fahrzeug')?.value || '';
+  const jahrFilter = document.getElementById('jb-jahr')?.value || new Date().getFullYear().toString();
+
+  const orders = (state.orders||[]).filter(o => {
+    if (fzgFilter && o.fahrzeug !== fzgFilter) return false;
+    try { return o.datum.includes(jahrFilter); } catch { return false; }
+  });
+
+  if (!orders.length) { el.innerHTML = '<div class="empty">Keine Bestellungen im gewählten Zeitraum</div>'; return; }
+
+  // Verrechnungs-Daten laden
+  if (!state.verrechnungen) state.verrechnungen = {};
+  const vKey = (fzg, art) => fzg + '||' + art + '||' + jahrFilter;
+
+  const perFzg = {};
+  orders.forEach(o => {
+    if (!perFzg[o.fahrzeug]) perFzg[o.fahrzeug] = { monteur: o.monteur, items: {}, count: 0 };
+    perFzg[o.fahrzeug].count++;
+    (o.items||[]).forEach(i => {
+      if (!perFzg[o.fahrzeug].items[i.name]) perFzg[o.fahrzeug].items[i.name] = { menge: 0, einheit: i.einheit||'Stk' };
+      perFzg[o.fahrzeug].items[i.name].menge += i.menge;
+    });
+  });
+
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+
+  el.innerHTML = Object.entries(perFzg).map(([fzg, data]) => {
+    const rows = Object.entries(data.items)
+      .sort((a,b) => b[1].menge - a[1].menge)
+      .map(([name, info]) => {
+        const key = vKey(fzg, name);
+        const verr = state.verrechnungen[key] || 0;
+        const offen = info.menge - verr;
+        return `<tr>
+          <td>${name}</td>
+          <td style="text-align:right;font-weight:700">${info.menge}</td>
+          <td>${info.einheit}</td>
+          ${istAdmin ? `<td style="text-align:right">
+            <input type="number" min="0" max="${info.menge}" value="${verr}" style="width:60px;text-align:right;padding:2px 4px;font-size:12px"
+              onchange="saveVerrechnung('${key.replace(/'/g,"\\'")}', parseInt(this.value)||0)">
+          </td>
+          <td style="text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen}</td>` : ''}
+        </tr>`;
+      }).join('');
+    const totalBestellt = Object.values(data.items).reduce((s,i) => s+i.menge, 0);
+    const totalVerr = Object.entries(data.items).reduce((s,[name]) => s + (state.verrechnungen[vKey(fzg,name)]||0), 0);
+    const totalOffen = totalBestellt - totalVerr;
+    return `<div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-weight:700">${fzg} · ${data.monteur||''} <span style="color:var(--muted);font-weight:400">(${data.count} Bestellungen)</span></div>
+        ${istAdmin ? `<div style="font-size:12px">
+          <span style="color:var(--green)">✅ ${totalVerr} verrechnet</span> · 
+          <span style="color:${totalOffen>0?'var(--red)':'var(--green)'}">📋 ${totalOffen} offen</span>
+        </div>` : ''}
+      </div>
+      <table style="width:100%;font-size:13px">
+        <thead><tr>
+          <th style="text-align:left">Artikel</th>
+          <th style="text-align:right">Bestellt</th>
+          <th>Einheit</th>
+          ${istAdmin ? '<th style="text-align:right">Verrechnet</th><th style="text-align:right">Offen</th>' : ''}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+}
+
+function saveVerrechnung(key, val) {
+  if (!state.verrechnungen) state.verrechnungen = {};
+  state.verrechnungen[key] = val;
+  save();
+  renderJahresbericht();
+}
+
+// ── Fahrzeug löschen ──
+function deleteFahrzeug() {
+  const id = parseInt(document.getElementById('fzg-modal-id').value);
+  const fzg = state.fahrzeuge.find(f => f.id === id);
+  if (!fzg) return;
+  if (!confirm('Fahrzeug "' + fzg.name + '" löschen? Zugewiesene Monteure werden freigegeben.')) return;
+  state.fahrzeuge = state.fahrzeuge.filter(f => f.id !== id);
+  save(); closeFzgModal(); renderFahrzeugePage(); renderFahrzeugDropdowns();
+  toast('Fahrzeug gelöscht', fzg.name, '🗑');
 }
 
 async function sendNotification(order) {
@@ -4187,6 +4462,250 @@ function statusHex(s){
 function wpCellClick(){}
 function wpStartMove(){}
 
+// ── Excel/PDF-Import für Wochenplan ──
+function wpFileImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+  if (file.name.toLowerCase().endsWith('.pdf')) {
+    wpPdfImport(file);
+  } else {
+    wpExcelImportFile(file);
+  }
+}
+
+function wpExcelImportFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      if (typeof XLSX === 'undefined') return toast('Fehler', 'Excel-Bibliothek nicht geladen', '❌');
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      parseWochenplanExcel(rows);
+    } catch(err) {
+      console.error('Excel Import Fehler:', err);
+      toast('Fehler', 'Excel konnte nicht gelesen werden: ' + err.message, '❌');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function wpPdfImport(file) {
+  try {
+    toast('PDF Import', 'Lese PDF…', '⏳');
+    const arrayBuf = await file.arrayBuffer();
+
+    // Erst versuchen: Text-PDF mit pdf.js
+    let hatText = false;
+    if (typeof pdfjsLib !== 'undefined') {
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuf) }).promise;
+        const page = await pdf.getPage(1);
+        const tc = await page.getTextContent();
+        const texte = tc.items.filter(i => i.str.trim());
+        hatText = texte.length > 20; // mindestens 20 Text-Elemente = echtes Text-PDF
+        if (hatText) {
+          // Text-PDF → Tabelle rekonstruieren wie bisher
+          const items = texte.map(i => ({ text: i.str.trim(), x: Math.round(i.transform[4]), y: Math.round(i.transform[5]) }));
+          items.sort((a, b) => b.y - a.y || a.x - b.x);
+          const pdfRows = []; let curRow = []; let lastY = null;
+          items.forEach(item => {
+            if (lastY === null || Math.abs(item.y - lastY) <= 4) curRow.push(item);
+            else { if (curRow.length) pdfRows.push(curRow.sort((a,b)=>a.x-b.x)); curRow = [item]; }
+            lastY = item.y;
+          });
+          if (curRow.length) pdfRows.push(curRow.sort((a,b)=>a.x-b.x));
+          const hIdx = pdfRows.findIndex(r => r.some(c => c.text.toLowerCase().includes('montag')));
+          if (hIdx >= 0) {
+            const hItems = pdfRows[hIdx];
+            const cb = hItems.map((h,i) => ({ text:h.text, xStart:h.x, xEnd:i<hItems.length-1?hItems[i+1].x-1:9999 }));
+            const getC = x => { for(let i=cb.length-1;i>=0;i--) if(x>=cb[i].xStart-10) return i; return 0; };
+            const tRows = pdfRows.map(row => { const cells=new Array(cb.length).fill(''); row.forEach(it=>{const ci=getC(it.x);cells[ci]=(cells[ci]?cells[ci]+' ':'')+it.text;}); return cells.map(c=>c.trim()); });
+            return parseWochenplanExcel(tRows);
+          }
+        }
+      } catch(e) { console.warn('pdf.js Textextraktion fehlgeschlagen:', e); }
+    }
+
+    // Scan-PDF → Claude Vision API
+    const apiKey = localStorage.getItem('lagertool_claude_key');
+    if (!apiKey) return toast('API Key benötigt', 'Gescanntes PDF erkannt. Bitte Claude API Key unter ⚙️ Einstellungen hinterlegen.', '🔑');
+
+    toast('PDF Import', 'Scan erkannt – sende an Claude Vision…', '🤖');
+    const base64 = btoa(new Uint8Array(arrayBuf).reduce((s, b) => s + String.fromCharCode(b), ''));
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+          { type: 'text', text: `Extrahiere die Tabelle aus diesem Wochenplan-PDF als JSON. Antworte NUR mit einem JSON-Array (keine Erklärung, kein Markdown).
+
+Format: Jede Zeile ist ein Array von Strings. Erste Zeile = Header.
+Spalten: Eintrittsdatum, Monteur, Fahrzeug, Startzeit, dann die Wochentage (Montag DD.MM, Dienstag DD.MM, etc.)
+
+Beispiel:
+[
+  ["Eintrittsdatum", "Monteur", "Fahrzeug", "Startzeit", "Montag 22.06", "Dienstag 23.06", "Mittwoch 24.06", "Donnerstag 25.06", "Freitag 26.06", "Samstag 27.06", "Sonntag 28.06"],
+  ["08.08.2025", "Luc Vorburger", "Tesla", "06:00 Uhr", "Büro", "Büro", "Büro", "Büro", "Büro", "", ""],
+  ...
+]
+
+Gib für jede Zeile der Tabelle die Werte an. Leere Zellen als leeren String "". Ignoriere Farben/Formatierung. Gib NUR das JSON aus.` }
+        ]}]
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error('Claude API Fehler:', err);
+      return toast('API Fehler', resp.status + ' – Prüfe API Key', '❌');
+    }
+
+    const data = await resp.json();
+    const text = data.content?.map(c => c.text || '').join('') || '';
+    const jsonStr = text.replace(/```json|```/g, '').trim();
+    const rows = JSON.parse(jsonStr);
+
+    if (!Array.isArray(rows) || rows.length < 2) return toast('Fehler', 'Claude konnte keine Tabelle extrahieren', '⚠️');
+    toast('PDF Import', rows.length - 1 + ' Zeilen erkannt – verarbeite…', '⏳');
+    parseWochenplanExcel(rows);
+
+  } catch(err) {
+    console.error('PDF Import Fehler:', err);
+    toast('Fehler', 'PDF-Import fehlgeschlagen: ' + err.message, '❌');
+  }
+}
+
+function parseWochenplanExcel(rows) {
+  // 1. Header-Zeile finden (enthält "Montag", "Dienstag" etc.)
+  let headerIdx = -1;
+  let tagSpalten = []; // [{col, datum}]
+  const tageNamen = ['montag','dienstag','mittwoch','donnerstag','freitag','samstag','sonntag'];
+
+  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+    const row = rows[r].map(c => String(c||'').toLowerCase().trim());
+    const montagCol = row.findIndex(c => c.includes('montag'));
+    if (montagCol >= 0) { headerIdx = r; break; }
+  }
+  if (headerIdx < 0) return toast('Fehler', 'Header-Zeile mit Wochentagen nicht gefunden', '⚠️');
+
+  const headerRow = rows[headerIdx].map(c => String(c||''));
+
+  // 2. Tages-Spalten + Datum extrahieren (z.B. "Montag 22.06" → 2025-06-22)
+  for (let c = 0; c < headerRow.length; c++) {
+    const h = headerRow[c].toLowerCase().trim();
+    const tagMatch = tageNamen.find(t => h.includes(t));
+    if (!tagMatch) continue;
+    // Datum aus Header extrahieren (Format: "Montag 22.06" oder "22.06")
+    const datumMatch = headerRow[c].match(/(\d{1,2})[\.\-\/](\d{1,2})/);
+    if (datumMatch) {
+      const tag = datumMatch[1].padStart(2, '0');
+      const monat = datumMatch[2].padStart(2, '0');
+      // Jahr ermitteln: aus KW-Info oder aktuelles Jahr
+      let jahr = new Date().getFullYear();
+      // KW-Spalte suchen für das Jahr
+      for (let cc = 0; cc < headerRow.length; cc++) {
+        const jm = headerRow[cc].match(/20\d{2}/);
+        if (jm) { jahr = parseInt(jm[0]); break; }
+      }
+      tagSpalten.push({ col: c, datum: `${jahr}-${monat}-${tag}` });
+    }
+  }
+
+  if (!tagSpalten.length) return toast('Fehler', 'Keine Datumsspalten erkannt', '⚠️');
+
+  // 3. Monteur-Spalte finden
+  const monteurCol = headerRow.findIndex(c => c.toLowerCase().includes('monteur'));
+  if (monteurCol < 0) return toast('Fehler', 'Spalte "Monteur" nicht gefunden', '⚠️');
+
+  // 4. Daten parsen
+  const statusWerte = ['urlaub','krank','frei','nbu','info folgt','bu','unentschuldigt','büro','ferien','urlaub termin'];
+  let eingetragen = 0;
+  let nichtGefunden = [];
+  const neueBaustellen = new Set();
+
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    const monteurName = String(row[monteurCol]||'').trim();
+    if (!monteurName) continue;
+
+    // Monteur im System finden (Fuzzy: Vorname Nachname oder Nachname Vorname)
+    const nameLC = monteurName.toLowerCase();
+    const ma = (state.mitarbeiter||[]).find(m => {
+      const vn = ((m.vorname||'')+' '+(m.nachname||'')).trim().toLowerCase();
+      const nv = ((m.nachname||'')+' '+(m.vorname||'')).trim().toLowerCase();
+      return vn === nameLC || nv === nameLC ||
+        nameLC.includes((m.nachname||'').toLowerCase()) && nameLC.includes((m.vorname||'').toLowerCase());
+    });
+    if (!ma) { if (!nichtGefunden.includes(monteurName)) nichtGefunden.push(monteurName); continue; }
+
+    // Für jeden Wochentag
+    tagSpalten.forEach(({ col, datum }) => {
+      const zelle = String(row[col]||'').trim();
+      if (!zelle) return;
+      const zelleLC = zelle.toLowerCase();
+
+      if (!state.plan[datum]) state.plan[datum] = {};
+      // Bestehenden Eintrag für diesen Monteur an diesem Tag löschen
+      Object.keys(state.plan[datum]).forEach(k => {
+        if (state.plan[datum][k]?.maId === ma.id) delete state.plan[datum][k];
+      });
+
+      // Status-Wert? (Urlaub, krank, etc.)
+      const istStatus = statusWerte.find(s => zelleLC.includes(s));
+      if (istStatus || zelleLC === 'büro') {
+        const statusName = zelleLC.includes('urlaub') ? 'Urlaub'
+          : zelleLC.includes('krank') ? 'Krank'
+          : zelleLC.includes('frei') || zelleLC.includes('ferien') ? 'Frei'
+          : zelleLC.includes('info folgt') ? 'Info folgt'
+          : zelleLC.includes('nbu') ? 'NBU'
+          : zelleLC.includes('bu') ? 'BU'
+          : zelleLC.includes('büro') ? 'Frei'
+          : 'Info folgt';
+        state.plan[datum]['status_ma' + ma.id] = {
+          maId: ma.id, status: statusName, farbeHex: statusHex(statusName), notiz: zelle
+        };
+        eingetragen++;
+      } else {
+        // Baustelle suchen oder anlegen
+        let bs = (state.baustellen||[]).find(b =>
+          b.name.toLowerCase() === zelleLC ||
+          b.name.toLowerCase().includes(zelleLC) ||
+          zelleLC.includes(b.name.toLowerCase())
+        );
+        if (!bs) {
+          bs = { id: Date.now() + Math.floor(Math.random()*10000), name: zelle, farbe: randomColor() };
+          if (!state.baustellen) state.baustellen = [];
+          state.baustellen.push(bs);
+          neueBaustellen.add(zelle);
+        }
+        state.plan[datum]['ma' + ma.id + '_' + datum] = {
+          maId: ma.id, bsId: bs.id, farbeHex: getHex(bs), notiz: ''
+        };
+        eingetragen++;
+      }
+    });
+  }
+
+  save();
+  renderWochenplan();
+
+  let msg = eingetragen + ' Einträge importiert';
+  if (neueBaustellen.size) msg += ', ' + neueBaustellen.size + ' neue Baustellen angelegt';
+  if (nichtGefunden.length) msg += '. Nicht gefunden: ' + nichtGefunden.join(', ');
+  toast('Excel Import', msg, eingetragen > 0 ? '✅' : '⚠️');
+}
+
+function randomColor() {
+  const colors = ['#1a6b3a','#6b1a1a','#1a3a6b','#6b5a1a','#4a1a6b','#1a6b6b','#6b3a1a','#3a1a6b','#1a6b4a','#6b1a4a'];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
 
 function renderWpLegende() {
   const el = document.getElementById('wp-legende');
@@ -4873,12 +5392,14 @@ function showBlockModal(preselMaId, preselDatum) {
     if(el){el.style.background='';el.style.color='';el.style.borderColor='';}
   });
 
-  // Status-Monteur Dropdown — vorselektierten Monteur markieren
-  const sel=document.getElementById('block-status-monteur');
-  sel.innerHTML='<option value="">— Monteur wählen —</option>'+
-    (state.mitarbeiter||[]).filter(m=>m.vorname).map(m=>
-      `<option value="${m.id}"${preselMaId&&m.id===parseInt(preselMaId)?' selected':''}>${m.vorname} ${m.nachname||''}</option>`
-    ).join('');
+  // Status-Monteur Input — vorselektierten Monteur setzen
+  const statusInput=document.getElementById('block-status-monteur');
+  const statusHidden=document.getElementById('block-status-monteur-id');
+  if (preselMaId) {
+    const preMa=(state.mitarbeiter||[]).find(m=>m.id===parseInt(preselMaId));
+    if(preMa){ statusInput.value=preMa.vorname+' '+(preMa.nachname||''); statusHidden.value=preMa.id; }
+    else { statusInput.value=''; statusHidden.value=''; }
+  } else { statusInput.value=''; statusHidden.value=''; }
 
   // Monteur-ID für Baustellen-Felder merken
   document.getElementById('block-modal').dataset.preselMaId = preselMaId||'';
@@ -4927,17 +5448,27 @@ function blockSelectBs(bsId) {
   });
   const bs=(state.baustellen||[]).find(b=>b.id===parseInt(bsId));
   if(!bs) return;
+
+  // Datum automatisch aus Baustelle übernehmen (Von/Bis)
+  if (bs.von) document.getElementById('block-von').value = bs.von;
+  if (bs.bis) document.getElementById('block-bis').value = bs.bis;
+  blockUpdatePreview();
+
   const n=bs.positionen||1;
   const monteure=(state.mitarbeiter||[]).filter(m=>m.vorname);
   const preselMaId=parseInt(document.getElementById('block-modal').dataset.preselMaId||0);
   document.getElementById('block-monteure-felder').innerHTML=
     Array.from({length:n},(_,i)=>{
-      const optsWithSel='<option value="">- leer -</option>'+
-        monteure.map(m=>'<option value="'+m.id+'"'+(i===0&&preselMaId&&m.id===preselMaId?' selected':'')+'>'+m.vorname+' '+(m.nachname||'')+'</option>').join('');
+      const presel = (i===0 && preselMaId) ? (state.mitarbeiter||[]).find(m=>m.id===preselMaId) : null;
+      const preselName = presel ? presel.vorname+' '+(presel.nachname||'') : '';
       return '<div style="display:flex;align-items:center;gap:8px">'+
         '<div style="font-size:11px;color:var(--muted);width:60px;flex-shrink:0">Pos. '+(i+1)+'</div>'+
-        '<select id="block-ma-'+i+'" style="flex:1">'+optsWithSel+'</select>'+
-        '</div>';
+        '<div style="flex:1;position:relative">'+
+        '<input type="text" id="block-ma-'+i+'" value="'+preselName+'" placeholder="Monteur suchen…" autocomplete="off" '+
+          'data-hidden-id="block-ma-id-'+i+'" '+
+          'onfocus="spOpen(this,\'ma\')" onclick="spOpen(this,\'ma\')" oninput="spFilter(this)">'+
+        '<input type="hidden" id="block-ma-id-'+i+'" value="'+(presel?presel.id:'')+'">'+
+        '</div></div>';
     }).join('');
   document.getElementById('block-monteure-wrap').style.display='block';
   document.getElementById('block-status-monteur-wrap').style.display='none';
@@ -4996,11 +5527,11 @@ function saveBlock() {
     const n=bs.positionen||1;
     const hex=getHex(bs);
 
-    // Monteure aus Dropdowns lesen (leere überspringen)
+    // Monteure aus Hidden-ID-Feldern lesen (leere überspringen)
     const maIds=[];
     for(let i=0;i<n;i++){
-      const sel=document.getElementById('block-ma-'+i);
-      if(sel && sel.value) maIds.push(parseInt(sel.value));
+      const hiddenId=document.getElementById('block-ma-id-'+i);
+      if(hiddenId && hiddenId.value) maIds.push(parseInt(hiddenId.value));
     }
     if(!maIds.length) return toast('Fehler','Bitte mindestens einen Monteur wählen','⚠️');
 
@@ -5024,7 +5555,7 @@ function saveBlock() {
 
   } else {
     // Status: einzelner Monteur
-    const maId=parseInt(document.getElementById('block-status-monteur').value);
+    const maId=parseInt(document.getElementById('block-status-monteur-id').value);
     if(!maId) return toast('Fehler','Bitte Monteur wählen','⚠️');
     const hex=statusHex(blockSelStatus);
     tage.forEach(ds=>{
@@ -5260,21 +5791,23 @@ function startFirebaseListener() {
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
 
-        // EINFACHE STRATEGIE: localStorage ist IMMER die Quelle der Wahrheit.
-        // Firebase-Daten nur übernehmen wenn lokal NICHTS vorhanden ist
-        // (z.B. erster Aufruf auf einem neuen Gerät/Browser).
+        // SYNC-STRATEGIE: Neuerer Timestamp gewinnt IMMER.
+        // Egal ob Entwickler, Admin oder Monteur – wer zuletzt gespeichert hat, 
+        // dessen Daten bleiben. Manuelles Überschreiben: 💾 Speichern-Button.
         const lokalHatDaten = (state.mitarbeiter?.length > 5) || (state.artikel?.length > 10);
+        const lokalIstNeuer = state._ts && remote._ts && state._ts > remote._ts;
+        const remoteIstLeer = !remote.mitarbeiter?.length && !remote.artikel?.length;
 
-        if (lokalHatDaten) {
-          // Lokal hat bereits Daten → Firebase ignorieren, lokalen Stand hochschieben
-          console.log('[Firebase] Lokale Daten vorhanden (' + (state.mitarbeiter?.length||0) + ' MA, ' + (state.artikel?.length||0) + ' Art) – Firebase wird mit lokalem Stand überschrieben');
+        if (lokalIstNeuer || (lokalHatDaten && remoteIstLeer)) {
+          console.log('[Firebase] Lokal gewinnt (ts:' + state._ts + ' > remote:' + remote._ts + ')');
           hasReceivedFirebaseSync = true;
           firebaseReady = true;
-          save(); // schiebt lokalen Stand (slim) zu Firebase
+          save();
           showSyncIndicator('↑ Lokal → Firebase');
         } else {
-          // Lokal leer → Firebase-Daten übernehmen (Ersteinrichtung auf neuem Gerät)
-          console.log('[Firebase] Lokale Daten leer – übernehme Firebase-Daten');
+          // Alle anderen (Admin, Leiter, Monteur) + Entwickler ohne lokale Daten:
+          // Firebase-Daten übernehmen
+          console.log('[Firebase] Server-Modus: Übernehme Firebase-Daten (' + (remote.mitarbeiter?.length||0) + ' MA, ' + (remote.artikel?.length||0) + ' Art)');
           const lokalVorSync = state;
           state = remote;
           if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
@@ -5309,8 +5842,9 @@ function startFirebaseListener() {
         // Falls Login-Screen noch offen: Picker aktualisieren
         const loginScreen = document.getElementById('login-screen');
         if (loginScreen && loginScreen.style.display !== 'none') {
-          const picker = document.getElementById('login-picker');
-          if (picker && picker.style.display !== 'none') loginPickerOpen();
+          const loginInput = document.getElementById('login-name');
+          const dd = loginInput?.parentElement?.querySelector('.sp-dropdown.open');
+          if (dd) loginPickerOpen();
         }
 
         firebaseReady = true;
