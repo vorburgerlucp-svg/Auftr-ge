@@ -2807,6 +2807,7 @@ function deleteFahrzeug(id) {
 // ── BESTELLUNG ─────────────────────────────────────────
 let cart = []; // [{artikelId, menge}]
 let bestSelKat = '';
+let orderExpanded = {};
 
 function renderBestellungDropdowns() {
   renderFahrzeugDropdowns();
@@ -2975,24 +2976,30 @@ function renderOrderList(filter) {
   if (!el) return;
   const orders = (state.orders||[]).filter(o =>
     filter === 'geliefert' ? o.status === 'geliefert' : o.status !== 'geliefert'
-  );
+  ).sort((a,b) => b.id - a.id);
   if (!orders.length) { el.innerHTML = `<div class="empty">${filter === 'geliefert' ? 'Keine gelieferten Bestellungen' : 'Keine offenen Bestellungen'}</div>`; return; }
   el.innerHTML = orders.map(o => {
+    const expanded = orderExpanded[o.id] || false;
     const statusBtn = o.status === 'geliefert'
-      ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'offen')">↩ Zurück auf Offen</button>`
-      : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'geliefert')">✅ Als geliefert markieren</button>`;
-    const deleteBtn = `<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation(); deleteOrder(${o.id})">🗑</button>`;
-    return `<div class="card" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:700">${o.fahrzeug} · ${o.monteur||''}</div>
-          <div style="font-size:12px;color:var(--muted)">${o.datum}${o.bemerkung ? ' · ' + o.bemerkung : ''}</div>
+      ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'offen')" style="font-size:11px">↩ Zurück</button>`
+      : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'geliefert')" style="font-size:11px">✅ Geliefert</button>`;
+    const deleteBtn = `<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red);font-size:11px" onclick="event.stopPropagation(); deleteOrder(${o.id})">🗑</button>`;
+    const itemCount = (o.items||[]).length;
+    const itemSummary = itemCount === 1 ? o.items[0].name : itemCount + ' Artikel';
+    return `<div class="card" style="margin-bottom:8px;padding:0;overflow:hidden">
+      <div onclick="orderExpanded[${o.id}]=!${expanded};renderOrderList('${filter}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;gap:10px">
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:700;font-size:13px">${o.fahrzeug} · <span style="font-weight:400">${o.monteur||''}</span></div>
+          <div style="font-size:11px;color:var(--muted)">${o.datum}${o.bemerkung ? ' · ' + o.bemerkung : ''} · <span style="color:var(--text)">${itemSummary}</span></div>
         </div>
-        <div style="display:flex;gap:6px">${statusBtn}${deleteBtn}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+          ${statusBtn}${deleteBtn}
+          <span style="color:var(--muted);font-size:13px">${expanded ? '▲' : '▼'}</span>
+        </div>
       </div>
-      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+      ${expanded ? `<div style="padding:8px 12px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px">
         ${(o.items||[]).map(i => `<span class="badge ${i.inStock ? 'badge-green' : 'badge-red'}">${i.name} × ${i.menge}</span>`).join('')}
-      </div>
+      </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -5350,7 +5357,8 @@ function showBsModal(id) {
   } else {
     badge.style.display='none'; info.textContent='';
   }
-  document.getElementById('bs-montage-typ').value = bs?.montageTyp||'';
+  const mtEl = document.getElementById('bs-montage-typ');
+  if (mtEl) mtEl.value = bs?.montageTyp||'';
   document.getElementById('bs-ap-name').value = bs?.apName||'';
   document.getElementById('bs-ap-tel').value = bs?.apTel||'';
   document.getElementById('bs-ap-email').value = bs?.apEmail||'';
@@ -5640,9 +5648,9 @@ function showBlockModal(preselMaId, preselDatum) {
 
 function renderBlockBsListe(preselMaId) {
   const el=document.getElementById('block-bs-liste');
-  const all=state.baustellen||[];
+  const all = (state.baustellen||[]).filter(b => !b.beendet);
   if(!all.length){
-    el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:4px 0">Noch keine Baustellen angelegt</div>';
+    el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:4px 0">Noch keine aktiven Baustellen angelegt</div>';
     return;
   }
   el.innerHTML=all.map(bs=>{
@@ -6640,6 +6648,7 @@ window.addEventListener('load', function() {
 
 let baustatusTab = 'status';
 let baustatusSelKW = {};
+let baustatusExpanded = {};
 
 // --- Helper: ISO Kalenderwoche ---
 function bsGetKW(date) {
@@ -6705,20 +6714,17 @@ function renderBaustatus() {
 // TAB 1: STATUS (Soll/Ist Übersicht + Task-Eingabe)
 // ============================================================
 function renderBaustatusStatus() {
-  let baustellen = state.baustellen || [];
+  let baustellen = (state.baustellen || []);
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = currentLoginUser?.rolle === 'leiter' || currentLoginUser?.funktion === 'leiter';
   const istChefMonteurFn = (bau) => bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
 
-  // Monteure sehen nur Baustellen, auf denen sie gearbeitet haben oder zugewiesen sind
+  // Monteure sehen nur ihre Baustellen
   if (!istAdmin && !istLeiter && currentLoginUser) {
-    const meinName = (currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'')).trim();
     baustellen = baustellen.filter(bau => {
-      // Prüfe ob Monteur Stunden auf einer Task hat
       const hatStunden = (bau.tasks||[]).some(t =>
         t.monteurHours && Object.keys(t.monteurHours).some(k => k.toLowerCase().includes(currentLoginUser.nachname?.toLowerCase()||'###'))
       );
-      // Prüfe ob Monteur im Wochenplan zugewiesen ist
       const hatZuweisung = Object.values(state.plan||{}).some(tag =>
         Object.values(tag||{}).some(e => e.maId === currentLoginUser.id && e.bsId === bau.id)
       );
@@ -6726,110 +6732,124 @@ function renderBaustatusStatus() {
     });
   }
 
+  // Beendete ausblenden (nur aktive zeigen)
+  const aktive = baustellen.filter(b => !b.beendet);
+
   let html = '';
   if (istAdmin || istLeiter) {
     html += '<div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">' +
       '<button class="btn btn-primary" onclick="showBsModal(null)">+ Neue Baustelle anlegen</button></div>';
   }
 
-  if (baustellen.length === 0) {
+  if (aktive.length === 0) {
     html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">' +
-      (istAdmin ? 'Noch keine Baustellen vorhanden.' : 'Keine Baustellen für dich gefunden.') + '</div>';
+      (istAdmin ? 'Keine aktiven Baustellen. Beendete sind im KW-Tab sichtbar.' : 'Keine Baustellen für dich gefunden.') + '</div>';
     document.getElementById('baustatus-content').innerHTML = html;
     return;
   }
 
-  baustellen.forEach(bau => {
+  aktive.forEach(bau => {
     const tasks = bau.tasks || [];
     const { soll, ist, pct, verfuegbar } = bsSollIst(bau);
     const aktiv = bsIsAktiv(bau);
     const montageInfo = [bau.montageArt, bau.montageDetail].filter(Boolean).join(' – ');
+    const expanded = baustatusExpanded['s_' + bau.id] !== false; // Status-Tab: default aufgeklappt wenn Tasks vorhanden, zu wenn keine
+    const hasExpanded = baustatusExpanded['s_' + bau.id] !== undefined;
+    const showExpanded = hasExpanded ? baustatusExpanded['s_' + bau.id] : tasks.length > 0;
 
-    html += '<div class="card" style="margin-bottom:1rem;border-left:4px solid ' + (aktiv?'#2563eb':'#9ca3af') + ';padding:14px;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
-        '<div style="cursor:pointer" onclick="showBsModal(' + bau.id + ')">' +
-          '<div style="font-size:15px;font-weight:700;">' + (aktiv?'🏗️':'🔒') + ' ' + (bau.name||'–') + ' <span style="font-size:11px;color:var(--muted);font-weight:400">✏️</span></div>' +
-          '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' +
-            (bau.kunde||'') + (bau.von?(' · '+bau.von+' – '+(bau.bis||'')):'') +
-            (montageInfo ? ' · <span style="color:var(--accent2)">' + montageInfo + '</span>' : '') +
-          '</div>' +
-        '</div>';
+    const borderCol = aktiv ? '#2563eb' : '#9ca3af';
 
-    if (tasks.length === 0) {
-      html += '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks/Soll-Stunden erfassen</button>' +
-        '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button></div></div>';
-      html += '<div style="color:var(--muted);font-size:12px;">Noch keine Soll-Stunden für diese Baustelle erfasst.</div></div>';
-      return;
-    }
+    html += '<div class="card" style="margin-bottom:8px;border-left:4px solid ' + borderCol + ';padding:0;overflow:hidden;">';
 
-    html += '<div style="text-align:right;font-size:12px;">' +
-      '<div><strong>Soll:</strong> ' + soll.toFixed(1) + 'h</div>' +
-      '<div style="color:#2563eb;"><strong>Gebucht:</strong> ' + ist.toFixed(1) + 'h</div>' +
-      '<div style="color:' + (verfuegbar<0?'#dc2626':'#059669') + ';"><strong>' + (verfuegbar<0?'⚠️ Überzogen:':'Verfügbar:') + '</strong> ' + Math.abs(verfuegbar).toFixed(1) + 'h</div>' +
-      '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red);margin-top:4px;font-size:11px;padding:2px 8px" onclick="deleteBaustelleById(' + bau.id + ')">🗑 Löschen</button>' +
-    '</div></div>';
-
-    html += '<div style="background:var(--bg-2);border-radius:4px;height:8px;margin-bottom:10px;overflow:hidden;">' +
-      '<div style="background:' + (pct>100?'#dc2626':'#2563eb') + ';width:' + Math.min(pct,100) + '%;height:100%;"></div></div>';
-
-    // Tasks-Tabelle
-    html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-    tasks.forEach(t => {
-      const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
-      const tPct = t.hours>0 ? Math.round((tIst/t.hours)*100) : 0;
-      const ueber = tIst > t.hours;
-      const zugewiesen = bsZugewieseneMonteure(bau.id);
-      const zugewiesenIds = new Set(zugewiesen.map(m=>m.id));
-      const andereMonteure = (state.mitarbeiter||[]).filter(m => !zugewiesenIds.has(m.id));
-      const monteurOptions =
-        (zugewiesen.length ? '<optgroup label="Im Wochenplan zugewiesen">' +
-          zugewiesen.map(m => '<option value="' + m.id + '">👷 ' + m.vorname + '</option>').join('') +
-        '</optgroup>' : '') +
-        (andereMonteure.length ? '<optgroup label="Alle Mitarbeiter">' +
-          andereMonteure.map(m => '<option value="' + m.id + '">' + m.vorname + '</option>').join('') +
-        '</optgroup>' : '');
-
-      html += '<tr style="border-bottom:1px solid var(--border);">' +
-        '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') +
-          // Monteur-Stunden-Detail mit Lösch-Buttons
-          (Object.keys(t.monteurHours||{}).length ? '<div style="margin-top:3px">' +
-            Object.entries(t.monteurHours).map(([n,h]) =>
-              '<span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--muted);margin-right:6px;background:var(--surface2);padding:1px 6px;border-radius:8px">' +
-                n + ': ' + h + 'h' +
-                (istAdmin || istLeiter || istChefMonteurFn(bau) || (currentLoginUser && n.toLowerCase().includes((currentLoginUser.nachname||'###').toLowerCase()))
-                  ? ' <button onclick="bsDeleteStunden(' + bau.id + ',\'' + t.id + '\',\'' + n.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Stunden löschen">✕</button>'
-                  : '') +
-              '</span>'
-            ).join('') +
-          '</div>' : '') +
-        '</td>' +
-        '<td style="padding:5px 4px;text-align:right;color:var(--muted);white-space:nowrap;">' + t.hours.toFixed(1) + 'h</td>' +
-        '<td style="padding:5px 4px;text-align:right;color:#2563eb;white-space:nowrap;">' + tIst.toFixed(1) + 'h</td>' +
-        '<td style="padding:5px 4px;width:60px;"><div style="background:var(--bg-2);border-radius:3px;height:6px;overflow:hidden;"><div style="background:' + (ueber?'#dc2626':'#2563eb') + ';width:' + Math.min(tPct,100) + '%;height:100%;"></div></div></td>' +
-        '<td style="padding:5px 4px;text-align:right;font-size:10px;color:' + (ueber?'#dc2626':'var(--muted)') + ';width:30px;">' + tPct + '%</td>' +
-        '<td style="padding:5px 4px;width:120px;text-align:right;">' +
-          '<input type="number" id="bsh_' + bau.id + '_' + t.id + '" placeholder="Std." step="0.5" min="0" style="width:55px;padding:3px 5px;font-size:11px;" value="">' +
-          '<select id="bsm_' + bau.id + '_' + t.id + '" style="width:80px;padding:3px;font-size:11px;">' +
-            monteurOptions +
-          '</select>' +
-          '<button class="btn btn-secondary btn-sm" style="padding:3px 6px;font-size:11px;" onclick="bsBuchen(' + bau.id + ',&quot;' + t.id + '&quot;)">OK</button>' +
-        '</td>' +
-      '</tr>';
-    });
-    html += '</table>';
-
-    html += '<div style="margin-top:8px;display:flex;gap:6px;">' +
-      '<button class="btn btn-secondary btn-sm" onclick="printBaustatus(' + bau.id + ')">🖨️ Drucken</button>' +
-      '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Task hinzufügen</button>' +
+    // Klickbarer Header
+    html += '<div onclick="baustatusExpanded[\'s_' + bau.id + '\']=' + (!showExpanded) + ';renderBaustatusStatus();" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;gap:10px">' +
+      '<div style="min-width:0;flex:1">' +
+        '<div style="font-size:14px;font-weight:700;">' + (aktiv?'🏗️':'🔒') + ' ' + (bau.name||'–') + '</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' +
+          (bau.kunde||'') + (bau.von ? ' · ' + bau.von + ' – ' + (bau.bis||'?') : '') +
+          (montageInfo ? ' · ' + montageInfo : '') +
+          (tasks.length ? ' · ' + soll.toFixed(1) + 'h Soll · ' + ist.toFixed(1) + 'h gebucht (' + pct + '%)' : ' · Keine Tasks') +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
+        (istAdmin || istLeiter ? '<button onclick="event.stopPropagation();showBsModal(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px">✏️</button>' : '') +
+        '<button onclick="event.stopPropagation();bsToggleBeendet(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px;color:var(--muted)">○ Beenden</button>' +
+        '<span style="color:var(--muted);font-size:13px">' + (showExpanded ? '▲' : '▼') + '</span>' +
+      '</div>' +
     '</div>';
 
-    html += '</div>';
+    if (showExpanded) {
+      html += '<div style="padding:0 14px 14px 14px;border-top:1px solid var(--border)">';
+
+      if (tasks.length === 0) {
+        html += '<div style="color:var(--muted);font-size:12px;padding:10px 0;">Noch keine Tasks erfasst. ' +
+          '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks erfassen</button>' +
+          (istAdmin || istLeiter ? ' <button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button>' : '') +
+          '</div>';
+      } else {
+        // Fortschrittsbalken
+        html += '<div style="background:var(--surface2);border-radius:4px;height:6px;margin:10px 0 10px;overflow:hidden;">' +
+          '<div style="background:' + (pct>100?'#dc2626':'#2563eb') + ';width:' + Math.min(pct,100) + '%;height:100%;"></div></div>';
+
+        // Tasks-Tabelle
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        tasks.forEach(t => {
+          const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
+          const tPct = t.hours>0 ? Math.round((tIst/t.hours)*100) : 0;
+          const ueber = tIst > t.hours;
+          const zugewiesen = bsZugewieseneMonteure(bau.id);
+          const zugewiesenIds = new Set(zugewiesen.map(m=>m.id));
+          const andereMonteure = (state.mitarbeiter||[]).filter(m => !zugewiesenIds.has(m.id));
+          const monteurOptions =
+            (zugewiesen.length ? '<optgroup label="Im Wochenplan zugewiesen">' +
+              zugewiesen.map(m => '<option value="' + m.id + '">👷 ' + m.vorname + '</option>').join('') +
+            '</optgroup>' : '') +
+            (andereMonteure.length ? '<optgroup label="Alle Mitarbeiter">' +
+              andereMonteure.map(m => '<option value="' + m.id + '">' + m.vorname + '</option>').join('') +
+            '</optgroup>' : '');
+
+          html += '<tr style="border-bottom:1px solid var(--border);">' +
+            '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') +
+              (Object.keys(t.monteurHours||{}).length ? '<div style="margin-top:3px">' +
+                Object.entries(t.monteurHours).map(([n,h]) =>
+                  '<span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--muted);margin-right:6px;background:var(--surface2);padding:1px 6px;border-radius:8px">' +
+                    n + ': ' + h + 'h' +
+                    (istAdmin || istLeiter || istChefMonteurFn(bau) || (currentLoginUser && n.toLowerCase().includes((currentLoginUser.nachname||'###').toLowerCase()))
+                      ? ' <button onclick="bsDeleteStunden(' + bau.id + ',\'' + t.id + '\',\'' + n.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Stunden löschen">✕</button>'
+                      : '') +
+                  '</span>'
+                ).join('') +
+              '</div>' : '') +
+            '</td>' +
+            '<td style="padding:5px 4px;text-align:right;color:var(--muted);white-space:nowrap;">' + t.hours.toFixed(1) + 'h</td>' +
+            '<td style="padding:5px 4px;text-align:right;color:#2563eb;white-space:nowrap;">' + tIst.toFixed(1) + 'h</td>' +
+            '<td style="padding:5px 4px;width:60px;"><div style="background:var(--surface2);border-radius:3px;height:6px;overflow:hidden;"><div style="background:' + (ueber?'#dc2626':'#2563eb') + ';width:' + Math.min(tPct,100) + '%;height:100%;"></div></div></td>' +
+            '<td style="padding:5px 4px;text-align:right;font-size:10px;color:' + (ueber?'#dc2626':'var(--muted)') + ';width:30px;">' + tPct + '%</td>' +
+            '<td style="padding:5px 4px;width:120px;text-align:right;">' +
+              '<input type="number" id="bsh_' + bau.id + '_' + t.id + '" placeholder="Std." step="0.5" min="0" style="width:55px;padding:3px 5px;font-size:11px;" value="">' +
+              '<select id="bsm_' + bau.id + '_' + t.id + '" style="width:80px;padding:3px;font-size:11px;">' + monteurOptions + '</select>' +
+              '<button class="btn btn-secondary btn-sm" style="padding:3px 6px;font-size:11px;" onclick="bsBuchen(' + bau.id + ',&quot;' + t.id + '&quot;)">OK</button>' +
+            '</td>' +
+          '</tr>';
+        });
+        html += '</table>';
+
+        html += '<div style="margin-top:8px;display:flex;gap:6px;">' +
+          '<button class="btn btn-secondary btn-sm" onclick="printBaustatus(' + bau.id + ')">🖨️ Drucken</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Task hinzufügen</button>' +
+          (istAdmin || istLeiter ? '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button>' : '') +
+        '</div>';
+      }
+      html += '</div>'; // end expanded
+    }
+    html += '</div>'; // end card
   });
 
   document.getElementById('baustatus-content').innerHTML = html;
 }
 
 // Stunden eines Monteurs auf einer Task löschen
+
 function bsDeleteStunden(bauId, taskId, monteurName) {
   const bau = state.baustellen.find(b => b.id === bauId);
   if (!bau) return;
@@ -6894,10 +6914,13 @@ function bsAddTasksPrompt(bauId) {
 // TAB 2: KW-ÜBERSICHT
 // ============================================================
 function renderBaustatusKW() {
-  const baustellen = (state.baustellen||[]).filter(b => (b.tasks||[]).length > 0);
   const heute = new Date();
   const aktKW = bsGetKW(heute);
   const aktJahr = heute.getFullYear();
+
+  // Globale KW für Filter (beendete Baustellen sichtbar wenn diese KW in ihrer Range)
+  if (!window.kwTabGlobalKW) window.kwTabGlobalKW = aktKW;
+  const filterKW = window.kwTabGlobalKW;
 
   const kws = [];
   for (let i=-4; i<=8; i++) {
@@ -6906,60 +6929,130 @@ function renderBaustatusKW() {
     kws.push({kw,jahr});
   }
 
+  // Aktive: immer anzeigen; Beendete: nur wenn filterKW in ihrer KW-Range
+  const allBaustellen = (state.baustellen||[]).filter(b => (b.tasks||[]).length > 0);
+  const sichtbar = allBaustellen.filter(bau => {
+    if (!bau.beendet) return true;
+    const kwVon = bau.von ? bsGetKW(new Date(bau.von)) : aktKW;
+    const kwBis = bau.bis ? bsGetKW(new Date(bau.bis)) : aktKW;
+    return filterKW >= kwVon && filterKW <= kwBis;
+  });
+
   let html = '';
-  if (baustellen.length === 0) {
-    html = '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Baustellen mit Soll-Stunden vorhanden.</div>';
+
+  // Globaler KW-Filter (für beendete Baustellen sichtbar machen)
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none">' +
+    '<span style="font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0">KW-Filter:</span>';
+  kws.forEach(({kw,jahr}) => {
+    const isAkt = kw === aktKW && jahr === aktJahr;
+    const isSel = filterKW === kw;
+    const monday = bsGetMondayOfKW(kw, jahr);
+    html += '<div onclick="window.kwTabGlobalKW=' + kw + ';renderBaustatusKW();" style="' +
+      'min-width:44px;padding:4px 3px;text-align:center;border-radius:6px;font-size:11px;cursor:pointer;flex-shrink:0;' +
+      'background:' + (isSel?'#2563eb':'var(--surface2)') + ';' +
+      'color:' + (isSel?'white':'var(--muted)') + ';' +
+      'border:2px solid ' + (isSel?'#1d4ed8':isAkt?'#f59e0b':'var(--border)') + ';' +
+      'font-weight:' + (isSel?'600':'400') + ';">' +
+      '<div>KW' + kw + '</div>' +
+      '<div style="font-size:9px">' + monday.getDate() + '.' + (monday.getMonth()+1) + '.</div>' +
+    '</div>';
+  });
+  html += '</div>';
+
+  if (sichtbar.length === 0) {
+    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Baustellen für KW' + filterKW + ' gefunden.</div>';
     document.getElementById('baustatus-content').innerHTML = html;
     return;
   }
 
-  baustellen.forEach(bau => {
-    const { soll, ist, pct, verfuegbar } = bsSollIst(bau);
-    const aktiv = bsIsAktiv(bau);
+  sichtbar.forEach(bau => {
+    const { soll, ist, pct } = bsSollIst(bau);
+    const beendet = !!bau.beendet;
     const kwVon = bau.von ? bsGetKW(new Date(bau.von)) : aktKW;
     const kwBis = bau.bis ? bsGetKW(new Date(bau.bis)) : aktKW;
     const selKW = baustatusSelKW[bau.id] || aktKW;
 
-    html += '<div class="card" style="margin-bottom:1rem;border-left:4px solid ' + (aktiv?'#2563eb':'#9ca3af') + ';padding:14px;">' +
-      '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">' + (aktiv?'🏗️':'🔒') + ' ' + bau.name + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">KW' + kwVon + '–KW' + kwBis + ' · Soll ' + soll.toFixed(1) + 'h · Gebucht ' + ist.toFixed(1) + 'h (' + pct + '%)</div>';
+    // Beendete Baustelle: nur zeigen wenn die selKW (oder aktKW) in ihrer Range liegt
 
-    // KW-Buttons
-    html += '<div style="overflow-x:auto;"><div style="display:flex;gap:4px;min-width:max-content;padding-bottom:6px;">';
-    kws.forEach(({kw,jahr}) => {
-      const inRange = kw>=kwVon && kw<=kwBis;
-      const isAkt = kw===aktKW && jahr===aktJahr;
-      const isSel = selKW===kw;
-      const monday = bsGetMondayOfKW(kw,jahr);
-      html += '<div onclick="baustatusSelKW[' + bau.id + ']=' + kw + ';renderBaustatusKW();" style="' +
-        'min-width:48px;padding:5px 3px;text-align:center;border-radius:6px;font-size:11px;cursor:pointer;' +
-        'background:' + (isSel?'#2563eb':inRange?'#dbeafe':'var(--bg-2)') + ';' +
-        'color:' + (isSel?'white':inRange?'#1e40af':'var(--muted)') + ';' +
-        'border:2px solid ' + (isSel?'#1d4ed8':isAkt?'#f59e0b':inRange?'#93c5fd':'var(--border)') + ';' +
-        'font-weight:' + (isSel||inRange?'600':'400') + ';">' +
-        '<div>KW' + kw + '</div><div style="font-size:9px;margin-top:1px;">' + monday.getDate() + '.' + (monday.getMonth()+1) + '.</div>' +
-      '</div>';
-    });
-    html += '</div></div>';
+    const expanded = baustatusExpanded[bau.id] || false;
+    const borderCol = beendet ? '#6b7280' : '#2563eb';
+    const icon = beendet ? '✅' : '🏗️';
 
-    // Tasks für gewählte KW
-    html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px;">' +
-      '<tr style="color:var(--muted);font-size:10px;font-weight:600;"><td>Task</td><td style="text-align:right;width:50px;">Soll</td><td style="text-align:right;width:50px;">Gesamt</td><td style="text-align:right;width:50px;color:#7c3aed;">KW' + selKW + '</td></tr>';
-    (bau.tasks||[]).forEach(t => {
-      const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
-      const kwIst = Object.values((t.kwHours&&t.kwHours['KW'+selKW])||{}).reduce((a,b)=>a+b,0);
-      html += '<tr style="border-bottom:1px solid var(--border);">' +
-        '<td style="padding:4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + t.name + '</td>' +
-        '<td style="padding:4px;text-align:right;color:var(--muted);">' + t.hours.toFixed(1) + 'h</td>' +
-        '<td style="padding:4px;text-align:right;color:#2563eb;">' + tIst.toFixed(1) + 'h</td>' +
-        '<td style="padding:4px;text-align:right;color:#7c3aed;font-weight:600;">' + (kwIst>0?kwIst.toFixed(1)+'h':'–') + '</td>' +
-      '</tr>';
-    });
-    html += '</table></div>';
+    // Header (immer sichtbar)
+    html += '<div class="card" style="margin-bottom:8px;border-left:4px solid ' + borderCol + ';padding:0;overflow:hidden;">';
+    // Klickbarer Header-Bereich
+    html += '<div onclick="baustatusExpanded[' + bau.id + ']=!' + expanded + ';renderBaustatusKW();" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;gap:12px">' +
+      '<div style="display:flex;align-items:center;gap:10px;min-width:0">' +
+        '<span style="font-size:15px">' + icon + '</span>' +
+        '<div style="min-width:0">' +
+          '<div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + bau.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">KW' + kwVon + '–KW' + kwBis + ' · ' + soll.toFixed(1) + 'h Soll · ' + ist.toFixed(1) + 'h gebucht (' + pct + '%)</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">' +
+        '<button onclick="event.stopPropagation();bsToggleBeendet(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px;' + (beendet ? 'color:var(--green);border-color:var(--green)' : 'color:var(--muted)') + '">' +
+          (beendet ? '✅ Beendet' : '○ Beenden') +
+        '</button>' +
+        '<span style="color:var(--muted);font-size:14px">' + (expanded ? '▲' : '▼') + '</span>' +
+      '</div>' +
+    '</div>';
+
+    // Aufgeklappter Bereich
+    if (expanded) {
+      html += '<div style="padding:0 14px 14px 14px;border-top:1px solid var(--border)">';
+
+      // KW-Buttons
+      html += '<div style="overflow-x:auto;margin-top:10px;"><div style="display:flex;gap:4px;min-width:max-content;padding-bottom:6px;">';
+      kws.forEach(({kw,jahr}) => {
+        const inRange = kw>=kwVon && kw<=kwBis;
+        const isAkt = kw===aktKW && jahr===aktJahr;
+        const isSel = selKW===kw;
+        const monday = bsGetMondayOfKW(kw,jahr);
+        html += '<div onclick="event.stopPropagation();baustatusSelKW[' + bau.id + ']=' + kw + ';renderBaustatusKW();" style="' +
+          'min-width:48px;padding:5px 3px;text-align:center;border-radius:6px;font-size:11px;cursor:pointer;' +
+          'background:' + (isSel?'#2563eb':inRange?'#dbeafe':'var(--surface2)') + ';' +
+          'color:' + (isSel?'white':inRange?'#1e40af':'var(--muted)') + ';' +
+          'border:2px solid ' + (isSel?'#1d4ed8':isAkt?'#f59e0b':inRange?'#93c5fd':'var(--border)') + ';' +
+          'font-weight:' + (isSel||inRange?'600':'400') + ';">' +
+          '<div>KW' + kw + '</div><div style="font-size:9px;margin-top:1px;">' + monday.getDate() + '.' + (monday.getMonth()+1) + '.</div>' +
+        '</div>';
+      });
+      html += '</div></div>';
+
+      // Tasks-Tabelle
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px;">' +
+        '<tr style="color:var(--muted);font-size:10px;font-weight:600;"><td>Task</td><td style="text-align:right;width:50px;">Soll</td><td style="text-align:right;width:50px;">Gesamt</td><td style="text-align:right;width:50px;color:#7c3aed;">KW' + selKW + '</td></tr>';
+      (bau.tasks||[]).forEach(t => {
+        const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
+        const kwIst = Object.values((t.kwHours&&t.kwHours['KW'+selKW])||{}).reduce((a,b)=>a+b,0);
+        html += '<tr style="border-bottom:1px solid var(--border);">' +
+          '<td style="padding:4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + t.name + '</td>' +
+          '<td style="padding:4px;text-align:right;color:var(--muted);">' + t.hours.toFixed(1) + 'h</td>' +
+          '<td style="padding:4px;text-align:right;color:#2563eb;">' + tIst.toFixed(1) + 'h</td>' +
+          '<td style="padding:4px;text-align:right;color:#7c3aed;font-weight:600;">' + (kwIst>0?kwIst.toFixed(1)+'h':'–') + '</td>' +
+        '</tr>';
+      });
+      html += '</table>';
+      html += '</div>'; // end expanded
+    }
+
+    html += '</div>'; // end card
   });
 
+  if (!html) html = '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Alle Baustellen beendet – KW wählen um abgeschlossene anzuzeigen.</div>';
   document.getElementById('baustatus-content').innerHTML = html;
 }
+
+function bsToggleBeendet(bauId) {
+  const bau = (state.baustellen||[]).find(b => b.id === bauId);
+  if (!bau) return;
+  bau.beendet = !bau.beendet;
+  save();
+  renderBaustatusKW();
+  toast(bau.beendet ? 'Beendet' : 'Wieder aktiv', bau.name, bau.beendet ? '✅' : '🏗️');
+}
+
+
 
 // ============================================================
 // TAB 3: KVP / NACHARBEIT
