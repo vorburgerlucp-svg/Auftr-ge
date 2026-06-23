@@ -1151,6 +1151,7 @@
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-danger btn-sm" id="bs-delete-btn" onclick="deleteBs()" style="margin-right:auto;display:none">🗑 Löschen</button>
       <button class="btn btn-secondary" onclick="closeBsModal()">Abbrechen</button>
+      <button class="btn btn-secondary" id="bs-delete-btn" style="color:var(--red);border-color:var(--red);display:none" onclick="deleteBaustelle()">🗑 Löschen</button>
       <button class="btn btn-primary" onclick="saveBsModal()">💾 Speichern</button>
     </div>
   </div>
@@ -5134,6 +5135,8 @@ function showBsModal(id) {
   if (kiStatus) kiStatus.textContent = '';
   const bs = id ? (state.baustellen||[]).find(b=>b.id===parseInt(id)) : null;
   document.getElementById('bs-modal-title').textContent = bs ? 'Baustelle bearbeiten' : 'Baustelle anlegen';
+  const delBtn = document.getElementById('bs-delete-btn');
+  if (delBtn) delBtn.style.display = bs ? '' : 'none';
   document.getElementById('bs-modal-id').value = id||'';
   document.getElementById('bs-name').value = bs?.name||'';
   document.getElementById('bs-kunde').value = bs?.kunde||'';
@@ -5208,6 +5211,34 @@ function bsTasksSumme() {
 }
 
 function closeBsModal() { document.getElementById('bs-modal').classList.remove('open'); tempBsDocs=[]; }
+
+function deleteBaustelle() {
+  const id = parseInt(document.getElementById('bs-modal-id').value);
+  deleteBaustelleById(id);
+  closeBsModal();
+}
+
+function deleteBaustelleById(id) {
+  const bs = (state.baustellen||[]).find(b => b.id === id);
+  if (!bs) return;
+  if (!confirm('Baustelle "' + bs.name + '" löschen?\n\nAlle Zuweisungen im Wochenplan und alle erfassten Stunden werden ebenfalls entfernt.')) return;
+
+  state.baustellen = (state.baustellen||[]).filter(b => b.id !== id);
+
+  // Wochenplan-Einträge für diese Baustelle entfernen
+  Object.keys(state.plan||{}).forEach(ds => {
+    const tag = state.plan[ds];
+    if (!tag) return;
+    Object.keys(tag).forEach(k => {
+      if (tag[k] && tag[k].bsId === id) delete tag[k];
+    });
+  });
+
+  save();
+  renderWochenplan();
+  renderBaustatusStatus();
+  toast('Baustelle gelöscht', bs.name, '🗑');
+}
 
 function handleBsDrop(e) {
   e.preventDefault();
@@ -5738,7 +5769,7 @@ function saveFirebaseConfig() {
   if (k) state.config.fbApiKey    = k.value.trim();
   if (p) state.config.fbProjectId = p.value.trim();
   if (a) state.config.fbAppId     = a.value.trim();
-  safeStorage.setItem('lagertool', JSON.stringify(state));
+  safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
 }
 
 function applyFirebaseConfig() {
@@ -5795,7 +5826,7 @@ function startFirebaseListener() {
         // Egal ob Entwickler, Admin oder Monteur – wer zuletzt gespeichert hat, 
         // dessen Daten bleiben. Manuelles Überschreiben: 💾 Speichern-Button.
         const lokalHatDaten = (state.mitarbeiter?.length > 5) || (state.artikel?.length > 10);
-        const lokalIstNeuer = state._ts && remote._ts && state._ts > remote._ts;
+        const lokalIstNeuer = state._ts && remote._ts && state._ts >= remote._ts;
         const remoteIstLeer = !remote.mitarbeiter?.length && !remote.artikel?.length;
 
         if (lokalIstNeuer || (lokalHatDaten && remoteIstLeer)) {
@@ -5833,7 +5864,7 @@ function startFirebaseListener() {
           mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
           hasReceivedFirebaseSync = true;
-          safeStorage.setItem('lagertool', JSON.stringify(state));
+          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
           showSyncIndicator('↓ Firebase → Lokal');
@@ -6492,13 +6523,14 @@ function renderBaustatusStatus() {
 
     html += '<div class="card" style="margin-bottom:1rem;border-left:4px solid ' + (aktiv?'#2563eb':'#9ca3af') + ';padding:14px;">' +
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
-        '<div>' +
-          '<div style="font-size:15px;font-weight:700;">' + (aktiv?'🏗️':'🔒') + ' ' + (bau.name||'–') + '</div>' +
+        '<div style="cursor:pointer" onclick="showBsModal(' + bau.id + ')">' +
+          '<div style="font-size:15px;font-weight:700;">' + (aktiv?'🏗️':'🔒') + ' ' + (bau.name||'–') + ' <span style="font-size:11px;color:var(--muted);font-weight:400">✏️</span></div>' +
           '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' + (bau.kunde||'') + (bau.von?(' · '+bau.von+' – '+(bau.bis||'')):'') + '</div>' +
         '</div>';
 
     if (tasks.length === 0) {
-      html += '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks/Soll-Stunden erfassen</button></div>';
+      html += '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks/Soll-Stunden erfassen</button>' +
+        '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button></div></div>';
       html += '<div style="color:var(--muted);font-size:12px;">Noch keine Soll-Stunden für diese Baustelle erfasst.</div></div>';
       return;
     }
@@ -6507,6 +6539,7 @@ function renderBaustatusStatus() {
       '<div><strong>Soll:</strong> ' + soll.toFixed(1) + 'h</div>' +
       '<div style="color:#2563eb;"><strong>Gebucht:</strong> ' + ist.toFixed(1) + 'h</div>' +
       '<div style="color:' + (verfuegbar<0?'#dc2626':'#059669') + ';"><strong>' + (verfuegbar<0?'⚠️ Überzogen:':'Verfügbar:') + '</strong> ' + Math.abs(verfuegbar).toFixed(1) + 'h</div>' +
+      '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red);margin-top:4px;font-size:11px;padding:2px 8px" onclick="deleteBaustelleById(' + bau.id + ')">🗑 Löschen</button>' +
     '</div></div>';
 
     html += '<div style="background:var(--bg-2);border-radius:4px;height:8px;margin-bottom:10px;overflow:hidden;">' +
@@ -6885,8 +6918,10 @@ function printBaustatus(bauId) {
 function forceSave() {
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   state._ts = Date.now();
-  const json = JSON.stringify(state);
-  safeStorage.setItem('lagertool', json);
+  const slimState = stripLargeData(state);
+  const slimJson = JSON.stringify(slimState);
+  safeStorage.setItem('lagertool', slimJson);
+  saveDocsToIDB(state);
   if (dbRef) {
     const btn = document.getElementById('btn-force-save');
     btn.textContent = '⏳ Speichern…';
