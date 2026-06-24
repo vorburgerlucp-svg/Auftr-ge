@@ -2274,6 +2274,29 @@ function katAdd() {
 }
 
 
+// Numerische Sortierung für Artikelnamen mit Ø-Präfix (z.B. Ø5mm < Ø5.5mm < Ø6mm)
+function sortArtikelName(a, b) {
+  function extractNum(str) {
+    const m = (str||'').match(/[Øø](\d+(?:[.,]\d+)?)/);
+    if (m) return parseFloat(m[1].replace(',','.'));
+    const m2 = (str||'').match(/(\d+(?:[.,]\d+)?)/);
+    return m2 ? parseFloat(m2[1].replace(',','.')) : 0;
+  }
+  const nA = extractNum(a), nB = extractNum(b);
+  if (nA !== nB) return nA - nB;
+  return (a||'').localeCompare(b||'', undefined, {numeric: true, sensitivity: 'base'});
+}
+function sortArtikelListe(list) {
+  const kats = state.kategorien || [];
+  return list.slice().sort((a,b) => {
+    const oA = kats.findIndex(k => k.name === a.kat);
+    const oB = kats.findIndex(k => k.name === b.kat);
+    const katDiff = (oA === -1 ? 999 : oA) - (oB === -1 ? 999 : oB);
+    if (katDiff !== 0) return katDiff;
+    return sortArtikelName(a.name, b.name);
+  });
+}
+
 function addArtikel() {
   const name = document.getElementById('art-name').value.trim();
   const bestand = parseInt(document.getElementById('art-bestand').value) || 0;
@@ -2390,10 +2413,10 @@ function renderKatFilterOptions() {
 function renderArtikelTable() {
   renderKatFilterOptions();
   const wrap = document.getElementById('artikel-table-wrap');
-  const list = state.artikel.filter(a =>
+  const list = sortArtikelListe(state.artikel.filter(a =>
     (!filterText || a.name.toLowerCase().includes(filterText) || a.kat.toLowerCase().includes(filterText)) &&
     (!filterKat || a.kat === filterKat)
-  );
+  ));
   if (!list.length) { wrap.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
   wrap.innerHTML = `<table>
     <thead><tr><th>Nr.</th><th>Artikel</th><th>Kategorie</th><th>Bestand</th><th>Status</th><th>Aktionen</th></tr></thead>
@@ -2852,18 +2875,11 @@ function renderArtikelGrid() {
   const el = document.getElementById('best-artikel-grid');
   if (!el) return;
   const q = (document.getElementById('best-search')?.value||'').trim().toLowerCase();
-  let liste = (state.artikel||[]).filter(a => {
+  let liste = sortArtikelListe((state.artikel||[]).filter(a => {
     if (bestSelKat && a.kat !== bestSelKat) return false;
     if (q && !(a.name||'').toLowerCase().includes(q) && !(a.nr||'').toLowerCase().includes(q)) return false;
     return true;
-  }).sort((a,b) => {
-    const kats = state.kategorien || [];
-    const oA = kats.findIndex(k => k.name === a.kat);
-    const oB = kats.findIndex(k => k.name === b.kat);
-    const katDiff = (oA === -1 ? 999 : oA) - (oB === -1 ? 999 : oB);
-    if (katDiff !== 0) return katDiff;
-    return (a.name||'').localeCompare(b.name||'', undefined, {numeric: true, sensitivity: 'base'});
-  });
+  }));
 
   if (!liste.length) { el.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
   el.innerHTML = liste.map(a => {
