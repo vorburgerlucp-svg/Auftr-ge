@@ -660,7 +660,7 @@
         </div>
       </div>
       <!-- Kategorie-Pillen -->
-      <div id="best-kat-pills" style="display:flex;flex-wrap:nowrap;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none"></div>
+      <div id="best-kat-pills" style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:calc(5 * 34px);gap:6px;margin-bottom:12px;align-content:flex-start"></div>
     </div>
 
     <!-- Artikel-Grid -->
@@ -2841,8 +2841,8 @@ function renderKatPills() {
   } else {
     kats = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))].sort();
   }
-  const baseStyle = 'cursor:pointer;padding:5px 13px;font-size:12px;font-weight:500;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);transition:all .15s;white-space:nowrap';
-  const activeStyle = 'cursor:pointer;padding:5px 13px;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--accent2);background:rgba(75,159,232,.12);color:var(--accent2);transition:all .15s;white-space:nowrap';
+  const baseStyle = 'cursor:pointer;padding:5px 12px;font-size:12px;font-weight:500;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);transition:all .15s;white-space:nowrap;text-align:center';
+  const activeStyle = 'cursor:pointer;padding:5px 12px;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--accent2);background:rgba(75,159,232,.12);color:var(--accent2);transition:all .15s;white-space:nowrap;text-align:center';
   el.innerHTML =
     `<button style="${!bestSelKat ? activeStyle : baseStyle}" onclick="bestSelKat='';renderKatPills();renderArtikelGrid()">Alle</button>` +
     kats.map(k => `<button style="${bestSelKat===k ? activeStyle : baseStyle}" onclick="bestSelKat='${k.replace(/'/g,"\\'")}';renderKatPills();renderArtikelGrid()">${k}</button>`).join('');
