@@ -424,6 +424,7 @@
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
       Meldungen<span id="meldungen-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center">0</span>
     </button>
+    <button class="nav-btn" onclick="showPage('meinprofil')">Mein Profil</button>
   </nav>
 </header>
 
@@ -700,6 +701,12 @@
   <h2>🔔 Meldungen</h2>
   <p class="subtitle">Benachrichtigungen von Monteuren — quittieren um zu schliessen</p>
   <div id="meldungen-liste"></div>
+</div>
+
+<div id="page-meinprofil" class="page">
+  <h2>👤 Mein Profil</h2>
+  <p class="subtitle">Deine Bestellungen, Verrechnung und Bewertungen</p>
+  <div id="meinprofil-content"></div>
 </div>
 
 <div id="page-einstellungen" class="page">
@@ -1941,7 +1948,7 @@ function finishLogin() {
     // Monteur: Bestellung, Baustellen-Status
     const erlaubt = istLeiter
       ? ['Wochenplan', '📊 Baustellen-Status', 'Meldungen', 'Bestellung']
-      : ['Bestellung', '📊 Baustellen-Status'];
+      : ['Bestellung', '📊 Baustellen-Status', 'Meldungen', 'Mein Profil'];
     document.querySelectorAll('.nav-btn').forEach(btn => {
       const txt = btn.textContent.trim();
       if (!erlaubt.some(t => txt.includes(t))) btn.style.display = 'none';
@@ -2122,6 +2129,7 @@ function showPage(id) {
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
   if (id === 'meldungen') renderMeldungen();
+  if (id === 'meinprofil') renderMeinProfil();
   if (id === 'einstellungen') {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
     renderEinstellungen();
@@ -2848,7 +2856,14 @@ function renderArtikelGrid() {
     if (bestSelKat && a.kat !== bestSelKat) return false;
     if (q && !(a.name||'').toLowerCase().includes(q) && !(a.nr||'').toLowerCase().includes(q)) return false;
     return true;
-  }).sort((a,b) => (a.kat||'').localeCompare(b.kat||'') || (a.name||'').localeCompare(b.name||''));
+  }).sort((a,b) => {
+    const kats = state.kategorien || [];
+    const oA = kats.findIndex(k => k.name === a.kat);
+    const oB = kats.findIndex(k => k.name === b.kat);
+    const katDiff = (oA === -1 ? 999 : oA) - (oB === -1 ? 999 : oB);
+    if (katDiff !== 0) return katDiff;
+    return (a.name||'').localeCompare(b.name||'', undefined, {numeric: true, sensitivity: 'base'});
+  });
 
   if (!liste.length) { el.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
   el.innerHTML = liste.map(a => {
@@ -3008,7 +3023,22 @@ function toggleOrderStatus(orderId, newStatus) {
   const o = (state.orders||[]).find(x => x.id === orderId);
   if (!o) return;
   o.status = newStatus;
-  if (newStatus === 'geliefert') o.geliefertDatum = new Date().toLocaleString('de-CH');
+  if (newStatus === 'geliefert') {
+    o.geliefertDatum = new Date().toLocaleString('de-CH');
+    // Meldung für Monteur des Fahrzeugs
+    const fzg = (state.fahrzeuge||[]).find(f => f.name === o.fahrzeug || f.id === o.fahrzeugId);
+    const ma = fzg ? (state.mitarbeiter||[]).find(m => { const mf = getMaFahrzeug(m); return mf?.id === fzg.id; }) : null;
+    if (!state.monteurMeldungen) state.monteurMeldungen = [];
+    const artikelText = (o.items||[]).map(i => `• ${i.name} × ${i.menge} ${i.einheit||'Stk'}`).join('\n');
+    state.monteurMeldungen.push({
+      id: Date.now(), typ: 'geliefert',
+      titel: '📦 Bestellung geliefert',
+      text: `Deine Bestellung vom ${o.datum||''} ist bereit.\n${artikelText}`,
+      maId: ma?.id || null, fahrzeug: o.fahrzeug || '',
+      datum: new Date().toISOString(), gelesen: false, quittiert: false
+    });
+    setTimeout(updateMeldungenBadge, 100);
+  }
   save();
   renderOrderList('offen');
   renderOrderList('geliefert');
@@ -6244,6 +6274,98 @@ function officeSyncExport() {
 }
 
 // ── MELDUNGEN ───────────────────────────────────────────
+function renderMeinProfil() {
+  const el = document.getElementById('meinprofil-content');
+  if (!el) return;
+  const ma = currentLoginUser;
+  if (!ma) { el.innerHTML = '<div class="card">Nicht eingeloggt</div>'; return; }
+
+  const meinFzg = getMaFahrzeug(ma);
+  const meineOrders = (state.orders||[]).filter(o =>
+    (meinFzg && (o.fahrzeug === meinFzg.name || o.fahrzeugId === meinFzg.id)) || o.maId === ma.id
+  ).sort((a,b) => (b.datum||'').localeCompare(a.datum||''));
+
+  // ─── Bewertungen ───
+  const meinName = (ma.vorname + ' ' + (ma.nachname||'')).trim();
+  const alleBew = [];
+  (state.baustellen||[]).forEach(bs => {
+    (bs.bewertungen||[]).filter(b => b.maId === ma.id || b.maName === meinName).forEach(b => {
+      alleBew.push({...b, bsName: bs.name});
+    });
+  });
+  const bewKats = ['Qualität','Einsatz','Pünktlichkeit','Sauberkeit','Rapporte'];
+
+  let html = '';
+
+  // Bewertungs-Card
+  html += `<div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;font-size:15px;margin-bottom:12px">⭐ Meine Bewertungen</div>`;
+  if (!alleBew.length) {
+    html += `<div style="color:var(--muted);font-size:13px">Noch keine Bewertungen vorhanden.</div>`;
+  } else {
+    html += `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">`;
+    bewKats.forEach(k => {
+      const vals = alleBew.map(b => b[k.toLowerCase()]||b[k]).filter(v => v > 0);
+      const avg = vals.length ? (vals.reduce((a,v)=>a+v,0)/vals.length).toFixed(1) : '–';
+      const col = avg==='–'?'var(--muted)':parseFloat(avg)>=4?'var(--green)':parseFloat(avg)>=3?'var(--accent)':'var(--red)';
+      html += `<div style="text-align:center;min-width:72px">
+        <div style="font-size:24px;font-weight:700;color:${col}">${avg}</div>
+        <div style="font-size:10px;color:var(--muted)">${k}</div>
+      </div>`;
+    });
+    html += `</div><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Letzte Bewertungen (${alleBew.length} total):</div>`;
+    alleBew.slice().reverse().slice(0,5).forEach(b => {
+      const stars = bewKats.map(k => { const v=b[k.toLowerCase()]||b[k]; return v?`${k}: ${v}★`:null; }).filter(Boolean).join(' · ');
+      html += `<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="font-weight:600">${b.bsName}</span>
+        <span style="color:var(--muted);margin-left:8px;font-size:11px">${b.datum||''}</span><br>
+        <span style="color:var(--accent)">${stars}</span>
+        ${b.notiz?`<div style="color:var(--muted);font-style:italic;margin-top:2px">${b.notiz}</div>`:''}
+      </div>`;
+    });
+  }
+  html += `</div>`;
+
+  // Bestellungen-Card
+  html += `<div class="card" style="margin-bottom:16px">
+    <div style="font-weight:700;font-size:15px;margin-bottom:12px">📦 Meine Bestellungen</div>`;
+  if (!meineOrders.length) {
+    html += `<div style="color:var(--muted);font-size:13px">Keine Bestellungen gefunden.</div>`;
+  } else {
+    meineOrders.slice(0,15).forEach(o => {
+      const statusCol = o.status==='geliefert'?'var(--green)':o.status==='offen'?'var(--accent)':'var(--muted)';
+      const statusLabel = o.status==='geliefert'?'✅ Geliefert':o.status==='offen'?'⏳ Offen':'📋 '+(o.status||'');
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:600;font-size:13px">${o.datum||''} — ${o.fahrzeug||''}</div>
+          <div style="font-size:11px;color:${statusCol};font-weight:700">${statusLabel}</div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">
+          ${(o.items||[]).map(i=>`${i.name} ×${i.menge} ${i.einheit||'Stk'}${i.verrechnet?' <span style="color:var(--green)">✓</span>':''}`).join(' · ')}
+        </div>
+      </div>`;
+    });
+  }
+  html += `</div>`;
+
+  // Offene Meldungen für diesen Monteur
+  const meineMeldungen = (state.monteurMeldungen||[]).filter(m => m.maId === ma.id && !m.quittiert);
+  if (meineMeldungen.length) {
+    html += `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--accent)">
+      <div style="font-weight:700;font-size:15px;margin-bottom:10px">🔔 Meine Benachrichtigungen</div>`;
+    meineMeldungen.forEach(m => {
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="font-weight:600">${m.titel}</div>
+        <div style="font-size:12px;color:var(--muted);white-space:pre-line;margin-top:3px">${m.text}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="meldungQuittieren(${m.id});renderMeinProfil()">✓ Gelesen</button>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
 function renderMeldungen() {
   const el=document.getElementById('meldungen-liste');
   if(!el) return;
