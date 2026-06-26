@@ -4052,35 +4052,28 @@ function renderWochenplan() {
         +'<div style="font-size:11px;color:var(--muted)">'+(m.nachname||'')+'</div>'
         +(isSwapSrc?'<div style="font-size:9px;color:var(--accent)">↕ wählen...</div>':'')
         +'</td>';
-      html+='<td onclick="wpFzgEdit('+m.id+',event)" style="text-align:center;font-family:var(--mono);font-size:11px;color:var(--accent);vertical-align:middle;cursor:pointer;user-select:none;line-height:1.2" title="Fahrzeug wechseln">'
+      html+='<td onclick="wpFzgEdit('+m.id+',event)" style="text-align:center;font-family:var(--mono);font-size:11px;color:#ffffff;font-weight:600;vertical-align:middle;cursor:pointer;user-select:none;line-height:1.2" title="Fahrzeug wechseln">'
         +fzgName
         +(()=>{
           const fzgObj=fzg||(state.fahrzeuge||[]).find(f=>f.name===fzgName||f.id===getMaFahrzeug(m)?.id);
           let w='';
           if(fzgObj){
-            const todayStr=fmtDate(new Date());
             const todayMs=new Date().setHours(0,0,0,0);
-            // Alle Service-Termine prüfen
             let minDiff=null, minDesc='';
             (fzgObj.service||[]).forEach(s=>{
-              const dateStr=s.reminderDate||s.datum;
+              const dateStr = s.reminderDate || s.datum;
               if(!dateStr) return;
-              const diff=Math.ceil((new Date(dateStr).setHours(0,0,0,0)-todayMs)/(1000*60*60*24));
-              if(minDiff===null||diff<minDiff){ minDiff=diff; minDesc=s.beschreibung||s.typ||'Service'; }
+              const entryMs = new Date(dateStr).setHours(0,0,0,0);
+              const diff = Math.ceil((entryMs - todayMs)/(1000*60*60*24));
+              if(diff < 0 || diff > 30) return;
+              if(minDiff===null || diff < minDiff){ minDiff=diff; minDesc=s.beschreibung||s.typ||'Service'; }
             });
             if(minDiff!==null){
-              if(minDiff<=0){
-                w+='<div style="font-size:9px;color:var(--red);font-weight:700;line-height:1.4" title="'+minDesc+'">🚨 ÜBERFÄLLIG</div>';
-              } else if(minDiff<=3){
-                w+='<div style="font-size:9px;color:var(--red);font-weight:700;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">⚠️ '+minDiff+'d</div>';
-              } else if(minDiff<=7){
-                w+='<div style="font-size:9px;color:#f0c040;font-weight:700;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">🔔 '+minDiff+'d</div>';
-              } else if(minDiff<=14){
-                w+='<div style="font-size:9px;color:var(--muted);font-weight:600;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">📅 '+minDiff+'d</div>';
-              }
+              const col = minDiff<=3 ? 'var(--red)' : '#f0c040';
+              const icon = minDiff<=3 ? '⚠️' : '🔔';
+              w+=`<div style="font-size:9px;color:${col};font-weight:700;line-height:1.6" title="${minDesc}">${icon} ${minDiff}d</div>`;
             }
           }
-          // Abholbereit für diesen Monteur
           const abholbereit=(state.monteurMeldungen||[]).some(ml=>
             !ml.quittiert&&ml.typ==='abholbereit'&&(ml.maId===m.id||ml.maId===null));
           if(abholbereit) w+='<div style="font-size:9px;color:#1ec864;font-weight:700;line-height:1.4">📦 ABHOL</div>';
