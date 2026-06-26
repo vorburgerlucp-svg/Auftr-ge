@@ -3063,13 +3063,22 @@ function toggleOrderStatus(orderId, newStatus) {
 }
 
 function deleteOrder(orderId) {
-  if (!confirm('Bestellung löschen?')) return;
-  state.orders = (state.orders||[]).filter(x => x.id !== orderId);
+  const o = (state.orders||[]).find(x => x.id === orderId);
+  if (!o) return;
+  const itemText = (o.items||[]).map(i => `${i.name} ×${i.menge}`).join(', ');
+  if (!confirm(`Bestellung löschen?\n${itemText}\n\nArtikel werden zurück ins Lager gebucht.`)) return;
+  // Artikel zurückbuchen
+  (o.items||[]).forEach(i => {
+    const art = (state.artikel||[]).find(a => a.id === i.artikelId || a.name === i.name);
+    if (art) art.bestand = (art.bestand||0) + (i.menge||0);
+  });
+  state.orders = state.orders.filter(x => x.id !== orderId);
   save();
+  renderArtikelTable();
   renderOrderList('offen');
   renderOrderList('geliefert');
   updateOffenCount();
-  toast('Gelöscht', '', '🗑');
+  toast('Gelöscht & zurückgebucht', itemText, '↩');
 }
 
 // ── Jahresbericht pro Fahrzeug ──
@@ -3291,6 +3300,7 @@ function renderMitarbeiterPage() {
           ? `<div style="font-size:12px">🚐 <span class="badge badge-green" style="font-size:10px">${fzg.name}</span></div>`
           : `<div style="font-size:12px;color:var(--muted)">🚐 Kein Fahrzeug zugewiesen</div>`}
         ${m.buero ? `<div style="font-size:12px">🏢 ${m.buero}</div>` : ''}
+        ${(currentLoginUser?.entwickler || currentLoginUser?.admin) && m.pin ? `<div style="font-size:12px;color:var(--muted)">🔑 PIN: <span style="font-family:var(--mono);color:var(--accent2);letter-spacing:2px">${m.pin}</span></div>` : ''}
         ${m.kontaktName ? `<div style="font-size:11px;color:var(--muted)">👤 ${m.kontaktName}${m.kontaktTel ? ` · <a href="tel:${m.kontaktTel}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.kontaktTel}</a>` : ''}</div>` : ''}
         ${m.notfall ? `<div style="font-size:11px;color:var(--muted)">🆘 ${m.notfall}</div>` : ''}
         ${(m.docs||[]).length ? `<div style="font-size:11px;color:var(--muted)">📁 ${m.docs.length} Dokument(e)</div>` : ''}
