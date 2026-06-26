@@ -1591,6 +1591,9 @@ function debugClick() {
 function load() {
   const s = safeStorage.getItem('lagertool');
   if (s) state = JSON.parse(s);
+  // _ts zurücksetzen: Firebase soll beim Start immer gewinnen.
+  // Nach eigenem Save wird _ts neu gesetzt und suppressListener schützt den Write.
+  state._ts = 0;
   // Absicherung: fehlende Kern-Arrays mit leerem Array initialisieren,
   // verhindert "state.X is undefined" Fehler nach unvollständigen Backups/Syncs
   if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
@@ -2722,7 +2725,7 @@ function renderFahrzeugePage() {
       : '';
     const docs = (f.docs||[]);
     const docHtml = docs.length ? `<div class="fzg-docs">${docs.map(d =>
-      d.type?.startsWith('image') ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
+      d.type?.startsWith('image') && d.data ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
       : `<span class="badge badge-yellow" title="${d.name}">📄 PDF</span>`
     ).join('')}</div>` : '';
 
@@ -6086,11 +6089,14 @@ function startFirebaseListener() {
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
 
-        // SYNC-STRATEGIE: Neuerer Timestamp gewinnt IMMER.
-        // Egal ob Entwickler, Admin oder Monteur – wer zuletzt gespeichert hat, 
-        // dessen Daten bleiben. Manuelles Überschreiben: 💾 Speichern-Button.
+        // SYNC-STRATEGIE:
+        // Beim initialen Laden gewinnt Firebase immer — ausser der lokale State
+        // ist eindeutig neuer UND der User ist Entwickler/Admin (wird nach Login geprüft).
+        // Nach eigenem Save wird suppressListener gesetzt (oben abgefangen).
         const lokalHatDaten = (state.mitarbeiter?.length > 5) || (state.artikel?.length > 10);
-        const lokalIstNeuer = state._ts && remote._ts && state._ts >= remote._ts;
+        const istPrivilegiert = currentLoginUser?.entwickler || currentLoginUser?.admin;
+        // Nur wenn schon eingeloggt und privilegiert: lokaler ts darf gewinnen
+        const lokalIstNeuer = istPrivilegiert && state._ts && remote._ts && state._ts > remote._ts;
         const remoteIstLeer = !remote.mitarbeiter?.length && !remote.artikel?.length;
 
         if (lokalIstNeuer || (lokalHatDaten && remoteIstLeer)) {
