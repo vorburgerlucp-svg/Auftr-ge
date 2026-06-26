@@ -1523,7 +1523,7 @@ function klassifiziereKategorie(name, nr, altKat) {
   if (n.startsWith('rafix mit kopf')) return 'Rafix mit Kopf';
   if (n.startsWith('rafix ohne kopf')) return 'Rafix ohne Kopf';
   if (n.startsWith('top-roc')) return 'Top Roc';
-  if (n.startsWith('linsenkopf') || n.startsWith('spax') || n.startsWith('spanplattenschraube') || n.startsWith('schraube ')) return 'Schrauben';
+  if (n.startsWith('rundkopf') || n.startsWith('spax') || n.startsWith('spanplattenschraube') || n.startsWith('schraube ')) return 'Schrauben';
   if (n.startsWith('verbindungsplättchen lamello')) return 'Lamello';
   if (n.includes('silikon')) return 'Silikon';
   if (n.includes('acryl') || n.startsWith('montageklebstoff')) return 'Kleber';
@@ -1539,6 +1539,129 @@ function migrationKategorienReorganisation() {
   if (state._kategorienReorganisationMigriert) return;
   state.artikel.forEach(a => { a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
   state._kategorienReorganisationMigriert = true;
+  save();
+}
+
+function migrationSchraubenNeu() {
+  if (state._schraubenNeuMigriert2) return;
+  // Zusätzlich prüfen ob noch alte Schrauben drin sind — wenn ja, nochmal laufen
+  const hatAlteSchrauben = (state.artikel||[]).some(a =>
+    a.kat === 'Schrauben' || a.kat === 'Schrauben & Befestigung' ||
+    (a.name||'').toLowerCase().startsWith('linsenkopf') ||
+    (a.name||'').toLowerCase().startsWith('spanplattenschraube') ||
+    (a.name||'').toLowerCase().startsWith('spax')
+  );
+  if (!hatAlteSchrauben && state._schraubenNeuMigriert2) return;
+
+  // 1. Alle alten Schrauben-Artikel entfernen (alle Kategorien die Schrauben enthalten)
+  const schraubenKats = ['Schrauben', 'Schrauben & Befestigung', 'Rundkopfschrauben', 'Senkkopfschrauben mit Schaft', 'Senkkopfschrauben Vollgewinde', 'Senkkopfschrauben ohne Schaft'];
+  state.artikel = (state.artikel||[]).filter(a => !schraubenKats.includes(a.kat));
+
+  // 2. Alle alten Schrauben-Kategorien entfernen
+  state.kategorien = (state.kategorien||[]).filter(k => !schraubenKats.includes(k.name));
+  const ts = Date.now();
+  const newKats = [
+    { id: 'kat_senk_s_' + ts, name: 'Senkkopfschrauben mit Schaft',   order: 50 },
+    { id: 'kat_senk_v_' + ts, name: 'Senkkopfschrauben ohne Schaft',   order: 51 },
+    { id: 'kat_rund_' + ts,   name: 'Rundkopfschrauben',               order: 52 },
+  ];
+  state.kategorien.push(...newKats);
+
+  // 3. Artikel generieren — Name: "Rundkopfschraube Ø3mm × 12mm", Nr: "82.1510.30012"
+  function makeArtikel(nr, d1, L, kat, prefix) {
+    return {
+      id: Date.now() + Math.floor(Math.random()*99999),
+      name: `${prefix} Ø${d1}mm × ${L}mm`,
+      nr: nr,
+      kat: kat,
+      einheit: 'Stk',
+      bestand: 0,
+      min: 10
+    };
+  }
+
+  // ── Rundkopfschrauben (82.1510) ──
+  const rundkopf = [
+    ['82.1510.30012',3,12],['82.1510.30016',3,16],['82.1510.30020',3,20],['82.1510.30025',3,25],['82.1510.30035',3,35],
+    ['82.1510.35012',3.5,12],['82.1510.35016',3.5,16],['82.1510.35020',3.5,20],['82.1510.35025',3.5,25],['82.1510.35030',3.5,30],
+    ['82.1510.35035',3.5,35],['82.1510.35040',3.5,40],
+    ['82.1510.40012',4,12],['82.1510.40016',4,16],['82.1510.40020',4,20],['82.1510.40025',4,25],['82.1510.40030',4,30],
+    ['82.1510.40035',4,35],['82.1510.40040',4,40],['82.1510.40045',4,45],['82.1510.40050',4,50],
+    ['82.1510.45016',4.5,16],['82.1510.45025',4.5,25],['82.1510.45030',4.5,30],['82.1510.45035',4.5,35],
+    ['82.1510.45040',4.5,40],['82.1510.45045',4.5,45],['82.1510.45050',4.5,50],
+    ['82.1510.50016',5,16],['82.1510.50020',5,20],['82.1510.50025',5,25],['82.1510.50030',5,30],
+    ['82.1510.50035',5,35],['82.1510.50040',5,40],['82.1510.50045',5,45],['82.1510.50050',5,50],
+    ['82.1510.50060',5,60],
+    ['82.1510.60025',6,25],['82.1510.60030',6,30],
+  ];
+
+  // ── Senkkopfschrauben mit Schaft (82.1020) ──
+  const senkkopfMitSchaft = [
+    ['82.1020.30025',3,25],['82.1020.30030',3,30],['82.1020.30035',3,35],['82.1020.30040',3,40],
+    ['82.1020.35025',3.5,25],['82.1020.35030',3.5,30],['82.1020.35035',3.5,35],['82.1020.35040',3.5,40],['82.1020.35045',3.5,45],['82.1020.35050',3.5,50],
+    ['82.1020.40025',4,25],['82.1020.40030',4,30],['82.1020.40035',4,35],['82.1020.40040',4,40],['82.1020.40045',4,45],['82.1020.40050',4,50],
+    ['82.1020.40055',4,55],['82.1020.40060',4,60],['82.1020.40070',4,70],
+    ['82.1020.45030',4.5,30],['82.1020.45035',4.5,35],['82.1020.45040',4.5,40],['82.1020.45045',4.5,45],['82.1020.45050',4.5,50],
+    ['82.1020.45055',4.5,55],['82.1020.45060',4.5,60],['82.1020.45070',4.5,70],['82.1020.45080',4.5,80],
+    ['82.1020.50030',5,30],['82.1020.50035',5,35],['82.1020.50040',5,40],['82.1020.50045',5,45],['82.1020.50050',5,50],
+    ['82.1020.50055',5,55],['82.1020.50060',5,60],['82.1020.50065',5,65],['82.1020.50070',5,70],['82.1020.50080',5,80],
+    ['82.1020.50090',5,90],['82.1020.50100',5,100],['82.1020.50120',5,120],
+    ['82.1020.60040',6,40],['82.1020.60050',6,50],['82.1020.60060',6,60],['82.1020.60070',6,70],['82.1020.60080',6,80],
+    ['82.1020.60090',6,90],['82.1020.60100',6,100],['82.1020.60110',6,110],['82.1020.60120',6,120],['82.1020.60130',6,130],
+    ['82.1020.60140',6,140],['82.1020.60150',6,150],['82.1020.60160',6,160],['82.1020.60180',6,180],['82.1020.60200',6,200],
+    ['82.1020.60220',6,220],['82.1020.60240',6,240],
+  ];
+
+  // ── Senkkopfschrauben Vollgewinde (82.1012) ──
+  const senkkopfVollgewinde = [
+    ['82.1012.30012',3,12],['82.1012.30016',3,16],['82.1012.30020',3,20],['82.1012.30025',3,25],['82.1012.30030',3,30],
+    ['82.1012.35015',3.5,15],['82.1012.35020',3.5,20],['82.1012.35030',3.5,30],['82.1012.35035',3.5,35],['82.1012.35040',3.5,40],['82.1012.35045',3.5,45],
+    ['82.1012.40015',4,15],['82.1012.40016',4,16],['82.1012.40020',4,20],['82.1012.40025',4,25],['82.1012.40030',4,30],
+    ['82.1012.40035',4,35],['82.1012.40040',4,40],['82.1012.40045',4,45],['82.1012.40050',4,50],
+    ['82.1012.45020',4.5,20],['82.1012.45025',4.5,25],['82.1012.45030',4.5,30],['82.1012.45035',4.5,35],
+    ['82.1012.45040',4.5,40],['82.1012.45045',4.5,45],['82.1012.45050',4.5,50],['82.1012.45060',4.5,60],['82.1012.45070',4.5,70],
+    ['82.1012.50020',5,20],['82.1012.50025',5,25],['82.1012.50030',5,30],['82.1012.50035',5,35],['82.1012.50040',5,40],
+    ['82.1012.50045',5,45],['82.1012.50050',5,50],['82.1012.50060',5,60],['82.1012.50070',5,70],['82.1012.50080',5,80],
+    ['82.1012.60050',6,50],['82.1012.60060',6,60],['82.1012.60070',6,70],['82.1012.60080',6,80],
+  ];
+
+  rundkopf.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Rundkopfschrauben','Rundkopfschraube')));
+  senkkopfMitSchaft.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben mit Schaft','Senkkopfschraube m.Schaft')));
+  senkkopfVollgewinde.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben ohne Schaft','Senkkopfschraube o.Schaft')));
+
+  state._schraubenNeuMigriert2 = true;
+  save();
+}
+
+function migrationDistanzplatten() {
+  if (state._distanzplattenMigriert) return;
+  if (!Array.isArray(state.kategorien)) state.kategorien = [];
+  if (!Array.isArray(state.artikel)) state.artikel = [];
+  // Kategorie hinzufügen falls nicht vorhanden
+  if (!state.kategorien.some(k => k.name === 'Distanzplatten')) {
+    state.kategorien.push({ id: 'kat_dist_' + Date.now(), name: 'Distanzplatten', order: 53 });
+  }
+  const artikel = [
+    { nr: '80.1280.0123', dicke: 1 },
+    { nr: '80.1280.0223', dicke: 2 },
+    { nr: '80.1280.0323', dicke: 3 },
+    { nr: '80.1280.0423', dicke: 4 },
+    { nr: '80.1280.0523', dicke: 5 },
+  ];
+  artikel.forEach(a => {
+    if (!state.artikel.some(x => x.nr === a.nr)) {
+      state.artikel.push({
+        id: Date.now() + Math.floor(Math.random()*99999),
+        name: `Distanzplatte ${a.dicke}mm × 22mm × 100mm`,
+        nr: a.nr,
+        kat: 'Distanzplatten',
+        einheit: 'Stk',
+        bestand: 0,
+        min: 10
+      });
+    }
+  });
+  state._distanzplattenMigriert = true;
   save();
 }
 
@@ -1615,6 +1738,8 @@ function load() {
   migrationHssBohrer();
   migrationKlebstoffeEtc();
   migrationSpanplattenschrauben();
+  migrationSchraubenNeu();
+  migrationDistanzplatten();
   migrationTopRocRafixTX();
   migrationRafixOhneKopfErweiterung();
   migrationKategorienKorrektur();
@@ -2895,7 +3020,7 @@ function renderArtikelGrid() {
           <div style="font-size:11px;color:var(--muted)">${a.kat||''} · ${a.nr||''}</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:12px;color:var(--muted)">Lager: ${a.bestand||0}</div>
+          <div style="font-size:12px;font-weight:600;color:${(a.bestand||0)===0?'var(--red)':(a.bestand||0)<(a.min||0)?'var(--accent)':(a.bestand||0)>=(a.min||0)?'var(--green)':'var(--muted)'}">Lager: ${a.bestand||0}</div>
           ${imCart ? `<div style="display:flex;align-items:center;gap:4px;margin-top:4px">
             <button onclick="event.stopPropagation();changeCartQty(${a.id},-1)" style="width:24px;height:24px;font-size:14px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer">−</button>
             <span style="font-weight:700;min-width:24px;text-align:center">${imCart.menge}</span>
@@ -3535,16 +3660,39 @@ function wzModalDelete(idx) {
 
 // Werkzeug-Vorschau auf Fahrzeugkarte
 function getWzSummary(f) {
-  const wz = f.werkzeug || [];
+  // Werkzeug aus state.werkzeug (globale Liste) nach Fahrzeug filtern
+  const wz = (state.werkzeug||[]).filter(w => w.fahrzeugId === f.id || w.fahrzeugName === f.name);
   if (!wz.length) return '';
   const ok = wz.filter(w => w.status === 'ok').length;
   const rep = wz.filter(w => w.status === 'reparatur').length;
   const aus = wz.filter(w => w.status === 'ausgebucht').length;
-  return `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-    <span style="font-size:11px;color:var(--muted)">🔨 Werkzeug:</span>
-    ${ok ? `<span class="badge badge-green" style="font-size:10px">✅ ${ok} OK</span>` : ''}
-    ${rep ? `<span class="badge badge-yellow" style="font-size:10px">🔧 ${rep} Reparatur</span>` : ''}
-    ${aus ? `<span class="badge badge-red" style="font-size:10px">❌ ${aus} Ausgebucht</span>` : ''}
+
+  const wzItems = wz.map(w => {
+    const statusCol = w.status === 'ok' ? 'var(--green)' : w.status === 'reparatur' ? 'var(--accent)' : 'var(--red)';
+    const statusIcon = w.status === 'ok' ? '✅' : w.status === 'reparatur' ? '🔧' : '❌';
+    const canRep = w.status === 'ok';
+    const canVerlust = w.status !== 'ausgebucht';
+    const canZurueck = w.status === 'reparatur';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:10px">${statusIcon}</span>
+      <span style="font-size:12px;flex:1;color:var(--text)">${w.name}</span>
+      ${w.serial ? `<span style="font-size:10px;color:var(--muted)">${w.serial}</span>` : ''}
+      <div style="display:flex;gap:4px" onclick="event.stopPropagation()">
+        ${canRep ? `<button class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 6px" onclick="wzAktion(${w.id},'reparatur')">🔧 Rep.</button>` : ''}
+        ${canZurueck ? `<button class="btn btn-primary btn-sm" style="font-size:10px;padding:2px 6px" onclick="wzAktion(${w.id},'zurueck')">✅ Zurück</button>` : ''}
+        ${canVerlust ? `<button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 6px" onclick="wzAktion(${w.id},'ausbuchen')">❌ Verlust</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px" onclick="event.stopPropagation()">
+    <div style="font-size:10px;color:var(--muted);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">
+      🔨 Werkzeug
+      ${ok ? `<span class="badge badge-green" style="font-size:10px;margin-left:4px">✅ ${ok}</span>` : ''}
+      ${rep ? `<span class="badge badge-yellow" style="font-size:10px;margin-left:4px">🔧 ${rep}</span>` : ''}
+      ${aus ? `<span class="badge badge-red" style="font-size:10px;margin-left:4px">❌ ${aus}</span>` : ''}
+    </div>
+    ${wzItems}
   </div>`;
 }
 
@@ -3722,7 +3870,7 @@ function wzBestaetigen(id, neuerStatus) {
     // Markiere als "gemeldet" — Office sieht das
   }
 
-  save(); closeWzModal(); renderWerkzeugPage();
+  save(); closeWzModal(); renderWerkzeugPage(); renderFahrzeugePage();
   toast(aktionText, w.name, neuerStatus === 'ausgebucht' ? '❌' : '✅');
 }
 
@@ -3910,10 +4058,27 @@ function renderWochenplan() {
           const fzgObj=fzg||(state.fahrzeuge||[]).find(f=>f.name===fzgName||f.id===getMaFahrzeug(m)?.id);
           let w='';
           if(fzgObj){
-            const today=fmtDate(new Date());
-            // Service fällig wenn reminderDate heute oder überfällig
-            const svcFaellig=(fzgObj.service||[]).some(s=>s.reminderDate&&s.reminderDate<=today);
-            if(svcFaellig) w+='<div style="font-size:9px;color:var(--accent);font-weight:700;line-height:1.4">⚠️ SERVICE</div>';
+            const todayStr=fmtDate(new Date());
+            const todayMs=new Date().setHours(0,0,0,0);
+            // Alle Service-Termine prüfen
+            let minDiff=null, minDesc='';
+            (fzgObj.service||[]).forEach(s=>{
+              const dateStr=s.reminderDate||s.datum;
+              if(!dateStr) return;
+              const diff=Math.ceil((new Date(dateStr).setHours(0,0,0,0)-todayMs)/(1000*60*60*24));
+              if(minDiff===null||diff<minDiff){ minDiff=diff; minDesc=s.beschreibung||s.typ||'Service'; }
+            });
+            if(minDiff!==null){
+              if(minDiff<=0){
+                w+='<div style="font-size:9px;color:var(--red);font-weight:700;line-height:1.4" title="'+minDesc+'">🚨 ÜBERFÄLLIG</div>';
+              } else if(minDiff<=3){
+                w+='<div style="font-size:9px;color:var(--red);font-weight:700;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">⚠️ '+minDiff+'d</div>';
+              } else if(minDiff<=7){
+                w+='<div style="font-size:9px;color:#f0c040;font-weight:700;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">🔔 '+minDiff+'d</div>';
+              } else if(minDiff<=14){
+                w+='<div style="font-size:9px;color:var(--muted);font-weight:600;line-height:1.4" title="'+minDesc+' in '+minDiff+'d">📅 '+minDiff+'d</div>';
+              }
+            }
           }
           // Abholbereit für diesen Monteur
           const abholbereit=(state.monteurMeldungen||[]).some(ml=>
@@ -6133,6 +6298,8 @@ function startFirebaseListener() {
 
           mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
+          migrationSchraubenNeu();
+          migrationDistanzplatten();
           hasReceivedFirebaseSync = true;
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
@@ -6507,33 +6674,33 @@ const PETERHANS_ARTIKEL = [
   {id:10007,name:'Kunststoffdübel Fischer 10x80',nr:'86.1115.10080',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:25},
   {id:10008,name:'Kunststoffdübel Fischer 12x60',nr:'86.1115.12060',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:10},
   {id:10009,name:'Kunststoffdübel Fischer 14x70',nr:'86.1115.14070',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:10},
-  // Linsenkopf
-  {id:10010,name:'Linsenkopf 3x20',nr:'82.1610.30020-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10011,name:'Linsenkopf 3x25',nr:'82.1610.30025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10012,name:'Linsenkopf 3x25 (1000er)',nr:'82.1610.30025-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10013,name:'Linsenkopf 3.5x16',nr:'82.1610.35016',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10014,name:'Linsenkopf 3.5x20',nr:'82.1610.35020',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10015,name:'Linsenkopf 3.5x25',nr:'82.1610.35025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10016,name:'Linsenkopf 3.5x30',nr:'82.1610.35030',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10017,name:'Linsenkopf 3.5x35',nr:'82.1610.35035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10018,name:'Linsenkopf 3.5x40',nr:'82.1610.35040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10019,name:'Linsenkopf 4x16',nr:'82.1610.40016',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10020,name:'Linsenkopf 4x16 (1000er)',nr:'82.1610.40016-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10021,name:'Linsenkopf 4x20',nr:'82.1610.40020',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10022,name:'Linsenkopf 4x20 (1000er)',nr:'82.1610.40020-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10023,name:'Linsenkopf 4x25',nr:'82.1610.40025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10024,name:'Linsenkopf 4x25 (1000er)',nr:'82.1610.40025-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10025,name:'Linsenkopf 4x30',nr:'82.1610.40030',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10026,name:'Linsenkopf 4x30 (500er)',nr:'82.1610.40030-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10027,name:'Linsenkopf 4x35',nr:'82.1610.40035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10028,name:'Linsenkopf 4x35 (500er)',nr:'82.1610.40035-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10029,name:'Linsenkopf 4x40',nr:'82.1610.40040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10030,name:'Linsenkopf 4x40 (500er)',nr:'82.1610.40040-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10031,name:'Linsenkopf 4x45',nr:'82.1610.40045',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
-  {id:10032,name:'Linsenkopf 4x45 (500er)',nr:'82.1610.40045-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10033,name:'Linsenkopf 5x35 (500er)',nr:'82.1610.50035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10034,name:'Linsenkopf 5x40',nr:'82.1610.50040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
-  {id:10035,name:'Linsenkopf 5x50',nr:'82.1610.50050',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  // Rundkopfschraube
+  {id:10010,name:'Rundkopfschraube 3x20',nr:'82.1610.30020-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10011,name:'Rundkopfschraube 3x25',nr:'82.1610.30025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10012,name:'Rundkopfschraube 3x25 (1000er)',nr:'82.1610.30025-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10013,name:'Rundkopfschraube 3.5x16',nr:'82.1610.35016',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10014,name:'Rundkopfschraube 3.5x20',nr:'82.1610.35020',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10015,name:'Rundkopfschraube 3.5x25',nr:'82.1610.35025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10016,name:'Rundkopfschraube 3.5x30',nr:'82.1610.35030',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10017,name:'Rundkopfschraube 3.5x35',nr:'82.1610.35035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10018,name:'Rundkopfschraube 3.5x40',nr:'82.1610.35040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10019,name:'Rundkopfschraube 4x16',nr:'82.1610.40016',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10020,name:'Rundkopfschraube 4x16 (1000er)',nr:'82.1610.40016-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10021,name:'Rundkopfschraube 4x20',nr:'82.1610.40020',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10022,name:'Rundkopfschraube 4x20 (1000er)',nr:'82.1610.40020-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10023,name:'Rundkopfschraube 4x25',nr:'82.1610.40025',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10024,name:'Rundkopfschraube 4x25 (1000er)',nr:'82.1610.40025-910',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10025,name:'Rundkopfschraube 4x30',nr:'82.1610.40030',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10026,name:'Rundkopfschraube 4x30 (500er)',nr:'82.1610.40030-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10027,name:'Rundkopfschraube 4x35',nr:'82.1610.40035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10028,name:'Rundkopfschraube 4x35 (500er)',nr:'82.1610.40035-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10029,name:'Rundkopfschraube 4x40',nr:'82.1610.40040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10030,name:'Rundkopfschraube 4x40 (500er)',nr:'82.1610.40040-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10031,name:'Rundkopfschraube 4x45',nr:'82.1610.40045',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:100},
+  {id:10032,name:'Rundkopfschraube 4x45 (500er)',nr:'82.1610.40045-500',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10033,name:'Rundkopfschraube 5x35 (500er)',nr:'82.1610.50035',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10034,name:'Rundkopfschraube 5x40',nr:'82.1610.50040',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
+  {id:10035,name:'Rundkopfschraube 5x50',nr:'82.1610.50050',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:50},
   // Rafix mit Kopf
   {id:10040,name:'Rafix mit Kopf 42mm',nr:'82.5410.75042',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:20},
   {id:10041,name:'Rafix mit Kopf 52mm',nr:'82.5410.75052',kat:'Schrauben & Befestigung',einheit:'Stk',bestand:0,min:20},
