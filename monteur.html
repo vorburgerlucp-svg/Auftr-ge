@@ -1125,13 +1125,94 @@ function renderWochenplan() {
       fzgHtml = `<div style="font-size:11px;color:var(--muted);margin-top:2px">🚐 ${meinFzg.name}${warnHtml}</div>`;
     }
 
-    html += `<div class="wp-day ${isToday?'today':''}">
+    let bsId = null;
+    if (eintrag) {
+      const bs = (state.baustellen||[]).find(b => b.id === eintrag.bsId);
+      if (bs) bsId = bs.id;
+    }
+    const clickAttr = bsId ? `onclick="wpZeigeBaustelle(${bsId})" style="cursor:pointer"` : '';
+
+    html += `<div class="wp-day ${isToday?'today':''}" ${clickAttr}>
       <div class="wp-day-label">${tageNamen[i]} ${d.toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit'})}${isToday?' · HEUTE':''}</div>
-      <div class="wp-day-content">${content}</div>
+      <div class="wp-day-content">${content}${bsId ? ' <span style="font-size:11px;color:var(--accent2)">→ Details</span>' : ''}</div>
       ${teamHtml}
       ${fzgHtml}
     </div>`;
   }
+  document.getElementById('wp-content').innerHTML = html;
+}
+
+// ── Baustellen-Detail anzeigen (vom Wochenplan aus angeklickt) ──
+function wpZeigeBaustelle(bauId) {
+  const bau = (state.baustellen||[]).find(b => b.id === bauId);
+  if (!bau) return;
+  const ma = currentLoginUser;
+  const meinName = (ma.vorname+' '+(ma.nachname||'')).trim();
+  const istChef = bau.chefMonteurId === ma.id;
+
+  const tasks = bau.tasks || [];
+  const soll = tasks.reduce((s,t)=>s+(t.hours||0),0);
+  const ist = tasks.reduce((s,t)=>s+Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0),0);
+  const pct = soll>0 ? Math.round((ist/soll)*100) : 0;
+  const montageInfo = [bau.montageArt, bau.montageDetail].filter(Boolean).join(' – ');
+
+  // Team: alle Monteure, die irgendwann im Wochenplan dieser Baustelle zugewiesen sind
+  const teamIds = new Set();
+  Object.values(state.plan||{}).forEach(tag => Object.values(tag||{}).forEach(e => { if (e.bsId === bau.id) teamIds.add(e.maId); }));
+  const team = [...teamIds].map(id => (state.mitarbeiter||[]).find(m => m.id === id)).filter(Boolean);
+
+  const taskRows = tasks.map(t => {
+    const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
+    return `<div class="task-row">
+      <div>${t.fertig?'✓ ':''}${t.name}</div>
+      <div style="font-size:11px;color:var(--muted)">${tIst.toFixed(1)}h / ${t.hours.toFixed(1)}h</div>
+    </div>`;
+  }).join('');
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:4px">
+      <h1 style="font-size:18px;margin:0">🏗️ ${bau.name}</h1>
+      ${istChef ? '<span style="font-size:10px;font-weight:700;color:var(--accent);background:rgba(232,184,75,.12);padding:2px 8px;border-radius:10px;white-space:nowrap">👷 Chef</span>' : ''}
+    </div>
+    <p class="subtitle" style="margin-bottom:14px">${bau.kunde||''}</p>
+
+    <div class="card">
+      ${bau.adresse ? `<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--muted)">📍 Adresse</div><div style="font-size:13px">${bau.adresse}</div></div>` : ''}
+      ${montageInfo ? `<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--muted)">🔧 Art der Montage</div><div style="font-size:13px">${montageInfo}</div></div>` : ''}
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        ${bau.von ? `<div><div style="font-size:11px;color:var(--muted)">📅 Zeitraum</div><div style="font-size:13px">${bau.von} – ${bau.bis||'?'}</div></div>` : ''}
+        ${bau.startzeit ? `<div><div style="font-size:11px;color:var(--muted)">⏰ Startzeit</div><div style="font-size:13px">${bau.startzeit}</div></div>` : ''}
+      </div>
+    </div>
+
+    ${(bau.apName || bau.apTel || bau.apEmail) ? `<div class="card">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">👤 Ansprechperson</div>
+      ${bau.apName ? `<div style="font-size:13px;font-weight:600">${bau.apName}</div>` : ''}
+      ${bau.apTel ? `<div style="font-size:13px"><a href="tel:${bau.apTel}" style="color:var(--accent2);text-decoration:none">📞 ${bau.apTel}</a></div>` : ''}
+      ${bau.apEmail ? `<div style="font-size:13px"><a href="mailto:${bau.apEmail}" style="color:var(--accent2);text-decoration:none">✉️ ${bau.apEmail}</a></div>` : ''}
+    </div>` : ''}
+
+    ${team.length ? `<div class="card">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">👥 Team</div>
+      <div style="font-size:13px">${team.map(m => m.vorname+' '+(m.nachname||'') + (m.id===bau.chefMonteurId?' 👷':'')).join(', ')}</div>
+    </div>` : ''}
+
+    ${tasks.length ? `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted)">📋 Positionen</div>
+        <div style="font-size:11px;color:var(--muted)">${ist.toFixed(1)}h / ${soll.toFixed(1)}h (${pct}%)</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%;background:${ist>soll?'var(--red)':'var(--accent2)'}"></div></div>
+      ${taskRows}
+    </div>` : ''}
+
+    ${bau.notiz ? `<div class="card">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">📝 Notiz</div>
+      <div style="font-size:13px;white-space:pre-line">${bau.notiz}</div>
+    </div>` : ''}
+
+    <button class="btn btn-block" style="margin-top:8px" onclick="renderWochenplan()">← Zurück zum Wochenplan</button>
+  `;
   document.getElementById('wp-content').innerHTML = html;
 }
 
