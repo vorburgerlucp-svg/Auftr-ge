@@ -3227,7 +3227,7 @@ async function submitBestellung() {
   save();
   renderBestellungDropdowns();
   if (document.getElementById('best-bemerkung')) document.getElementById('best-bemerkung').value = '';
-  toast('Bestellung gesendet!', items.length + ' Artikel für ' + fzg.name, '📤');
+  toast('Bestellung gesendet!', items.length + ' Artikel für ' + fzgName, '📤');
 
   // E-Mail im Hintergrund
   try { await sendNotification(order); } catch(e) { console.warn('E-Mail fehlgeschlagen:', e); }
