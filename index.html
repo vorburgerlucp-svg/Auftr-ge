@@ -19,6 +19,14 @@
   let firebaseReady = false;
   let suppressListener = false;
   let hasReceivedFirebaseSync = false;
+  let pendingSaveBeforeSync = false;
+  function markFirebaseSynced() {
+    hasReceivedFirebaseSync = true;
+    if (pendingSaveBeforeSync) {
+      pendingSaveBeforeSync = false;
+      save(); // jetzt mit Sync verfügbar — schreibt nach Firebase nach
+    }
+  }
   let dbRef = null;
 
   function showSyncIndicator(text) {
@@ -520,12 +528,12 @@
 <!-- ============ BAUSTELLEN-STATUS ============ -->
 <div id="page-baustatus" class="page">
   <h2>📊 Baustellen-Status</h2>
-  <p class="subtitle">Soll/Ist-Stunden, KW-Übersicht, KVP &amp; Bewertungen</p>
+  <p class="subtitle">Soll/Ist-Stunden, KW-Übersicht, Nacharbeit & Bewertungen</p>
 
   <div class="tabs" id="baustatus-tabs" style="display:flex; gap:8px; margin-bottom:16px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
     <button class="nav-btn active" onclick="switchBaustatusTab('status')">📋 Status</button>
     <button class="nav-btn" onclick="switchBaustatusTab('kw')">📅 KW</button>
-    <button class="nav-btn" onclick="switchBaustatusTab('kvp')">🔧 KVP</button>
+    <button class="nav-btn" onclick="switchBaustatusTab('kvp')">🔧 Nacharbeit</button>
     <button class="nav-btn" onclick="switchBaustatusTab('bewertung')">⭐ Bewertungen</button>
   </div>
 
@@ -1069,6 +1077,29 @@
       <div><label>Name *</label><input type="text" id="bs-name" placeholder="wird automatisch generiert"></div>
       <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Fust AG" oninput="generiereNameAusKundeOrt()"></div>
     </div>
+    <div class="form-row cols-1">
+      <div>
+        <label style="color:var(--accent2);font-weight:700">👷 Chef-Monteur (Zugriff auf Nacharbeit & Bewertung)</label>
+        <div style="position:relative">
+          <input type="text" id="bs-chefMonteur" placeholder="Monteur suchen…" autocomplete="off"
+            data-hidden-id="bs-chefMonteur-id"
+            style="border-color:var(--accent2)"
+            onfocus="spOpen(this,'ma')" onclick="spOpen(this,'ma')" oninput="spFilter(this)">
+          <input type="hidden" id="bs-chefMonteur-id" value="">
+        </div>
+      </div>
+    </div>
+    <div class="form-row cols-1">
+      <div>
+        <label>👥 Team-Monteure (werden automatisch im Wochenplan eingetragen)</label>
+        <div style="position:relative">
+          <input type="text" id="bs-teamMonteur-search" placeholder="Monteur suchen und hinzufügen…" autocomplete="off"
+            onfocus="bsTeamPickerOpen(this)" onclick="bsTeamPickerOpen(this)" oninput="bsTeamPickerFilter(this)">
+        </div>
+        <div id="bs-team-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+        <input type="hidden" id="bs-teamMonteur-ids" value="[]">
+      </div>
+    </div>
     <div class="form-row cols-2">
       <div><label>Art der Montage</label>
         <select id="bs-montageArt">
@@ -1128,16 +1159,6 @@
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Nur für Pauschal-Baustellen. Regie-Baustellen können leer bleiben.</div>
     <div id="bs-tasks-list"></div>
     <button class="btn btn-secondary btn-sm" onclick="bsModalAddTask()" style="margin-top:6px">+ Position hinzufügen</button>
-    <div class="form-row cols-1">
-      <div><label>👷 Chef-Monteur (Zugriff auf KVP & Bewertung)</label>
-        <div style="position:relative">
-          <input type="text" id="bs-chefMonteur" placeholder="Monteur suchen…" autocomplete="off"
-            data-hidden-id="bs-chefMonteur-id"
-            onfocus="spOpen(this,'ma')" onclick="spOpen(this,'ma')" oninput="spFilter(this)">
-          <input type="hidden" id="bs-chefMonteur-id" value="">
-        </div>
-      </div>
-    </div>
     <hr class="divider">
     <div class="card-title">👤 Ansprechperson</div>
     <div class="form-row cols-2">
@@ -1997,6 +2018,77 @@ function spSelect(maId, name) {
   spActiveInput = null;
 }
 
+// ── TEAM-MONTEUR PICKER (Mehrfachauswahl für Baustelle) ──
+function bsGetTeamIds() {
+  try { return JSON.parse(document.getElementById('bs-teamMonteur-ids')?.value || '[]'); }
+  catch { return []; }
+}
+function bsSetTeamIds(ids) {
+  document.getElementById('bs-teamMonteur-ids').value = JSON.stringify(ids);
+  bsRenderTeamTags();
+}
+function bsRenderTeamTags() {
+  const el = document.getElementById('bs-team-tags');
+  if (!el) return;
+  const ids = bsGetTeamIds();
+  if (!ids.length) { el.innerHTML = '<span style="font-size:11px;color:var(--muted)">Noch keine Team-Monteure zugewiesen</span>'; return; }
+  el.innerHTML = ids.map(id => {
+    const m = (state.mitarbeiter||[]).find(x => x.id === id);
+    if (!m) return '';
+    const name = m.vorname + ' ' + (m.nachname||'');
+    return `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
+      ${name}
+      <span onclick="bsRemoveTeamMonteur(${id})" style="cursor:pointer;color:var(--red);font-weight:700;margin-left:2px">×</span>
+    </span>`;
+  }).join('');
+}
+function bsRemoveTeamMonteur(id) {
+  bsSetTeamIds(bsGetTeamIds().filter(x => x !== id));
+}
+function bsTeamPickerOpen(inputEl) {
+  spActiveInput = inputEl;
+  let dd = inputEl.parentElement.querySelector('.sp-dropdown');
+  if (!dd) {
+    dd = document.createElement('div');
+    dd.className = 'sp-dropdown';
+    inputEl.parentElement.style.position = 'relative';
+    inputEl.parentElement.appendChild(dd);
+  }
+  bsTeamPickerRender(dd, '');
+  dd.classList.add('open');
+}
+function bsTeamPickerFilter(inputEl) {
+  const dd = inputEl.parentElement.querySelector('.sp-dropdown');
+  if (!dd) return;
+  bsTeamPickerRender(dd, inputEl.value.trim().toLowerCase());
+}
+function bsTeamPickerRender(dd, query) {
+  const alreadyIds = bsGetTeamIds();
+  const list = (state.mitarbeiter||[])
+    .slice()
+    .sort((a,b) => (a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
+    .filter(m => {
+      if (!m.vorname && !m.nachname) return false;
+      if (alreadyIds.includes(m.id)) return false;
+      if (!query) return true;
+      return (m.vorname+' '+m.nachname).toLowerCase().includes(query) ||
+             (m.nachname+' '+m.vorname).toLowerCase().includes(query);
+    });
+  dd.innerHTML = list.map(m => {
+    const name = m.vorname + ' ' + (m.nachname||'');
+    return `<div class="sp-item" onclick="bsAddTeamMonteur(${m.id})"><span>${name}</span></div>`;
+  }).join('') || '<div class="sp-item disabled"><span>Keine weiteren Mitarbeiter</span></div>';
+}
+function bsAddTeamMonteur(maId) {
+  const ids = bsGetTeamIds();
+  if (!ids.includes(maId)) ids.push(maId);
+  bsSetTeamIds(ids);
+  const input = document.getElementById('bs-teamMonteur-search');
+  input.value = '';
+  const dd = input.parentElement.querySelector('.sp-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+
 // Globaler Click-Handler: Picker schliessen bei Klick ausserhalb
 document.addEventListener('click', e => {
   document.querySelectorAll('.sp-dropdown.open').forEach(dd => {
@@ -2135,6 +2227,11 @@ function save() {
         .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
         .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
     } catch(e) { suppressListener = false; }
+  } else if (dbRef && !hasReceivedFirebaseSync) {
+    // Firebase noch nicht synchronisiert — Speicherung lokal vorgemerkt,
+    // wird nachgeholt sobald der erste Sync durch ist (verhindert Datenverlust
+    // wenn jemand sehr schnell nach App-Start speichert).
+    pendingSaveBeforeSync = true;
   }
 }
 
@@ -2162,6 +2259,10 @@ async function saveDocsToIDB(s) {
       if (m.foto && m.foto !== '_localOnly') store.put(m.foto, 'foto_' + m.id);
       if (m.docs?.some(d => d.data)) store.put(m.docs, 'ma_' + m.id);
     });
+    // Baustellen-Docs
+    (s.baustellen||[]).forEach(b => {
+      if (b.docs?.some(d => d.data)) store.put(b.docs, 'bs_' + b.id);
+    });
   } catch(e) { console.warn('IndexedDB write error:', e); }
 }
 
@@ -2181,6 +2282,10 @@ async function loadDocsFromIDB(s) {
       const docs = await get('ma_' + m.id);
       if (docs) m.docs = docs;
     }
+    for (const b of (s.baustellen||[])) {
+      const docs = await get('bs_' + b.id);
+      if (docs) b.docs = docs;
+    }
   } catch(e) { console.warn('IndexedDB read error:', e); }
 }
 
@@ -2194,6 +2299,9 @@ function stripLargeData(s) {
   (copy.mitarbeiter||[]).forEach(m => {
     if (m.foto) m.foto = '_localOnly';
     m.docs = (m.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+  });
+  (copy.baustellen||[]).forEach(b => {
+    b.docs = (b.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
   });
   return copy;
 }
@@ -2950,11 +3058,11 @@ function renderFzgSettings() {
   el.innerHTML = state.fahrzeuge.map(f => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
       <div><div style="font-weight:600">${f.name}</div><div style="font-size:12px;color:var(--muted)">${f.monteur}</div></div>
-      <button class="btn btn-danger btn-sm" onclick="deleteFahrzeug(${f.id})">Löschen</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteFahrzeugById(${f.id})">Löschen</button>
     </div>`).join('');
 }
 
-function deleteFahrzeug(id) {
+function deleteFahrzeugById(id) {
   if (!confirm('Fahrzeug löschen?')) return;
   state.fahrzeuge = state.fahrzeuge.filter(f => f.id !== id);
   save(); renderAll();
@@ -5580,6 +5688,9 @@ function showBsModal(id) {
   const chefMa = bs?.chefMonteurId ? (state.mitarbeiter||[]).find(m=>m.id===bs.chefMonteurId) : null;
   document.getElementById('bs-chefMonteur').value = chefMa ? chefMa.vorname+' '+(chefMa.nachname||'') : '';
   document.getElementById('bs-chefMonteur-id').value = bs?.chefMonteurId||'';
+  // Team-Monteure
+  bsSetTeamIds(Array.isArray(bs?.teamMonteurIds) ? bs.teamMonteurIds : []);
+  document.getElementById('bs-teamMonteur-search').value = '';
   document.getElementById('bs-startzeit').value = bs?.startzeit||'';
   window._aktFahrtzeit = bs?.fahrtzeitMin ? {min:bs.fahrtzeitMin, str:bs.fahrtzeitStr} : null;
   const badge = document.getElementById('fahrtzeit-badge');
@@ -5716,6 +5827,7 @@ function saveBsModal() {
     montageArt:document.getElementById('bs-montageArt').value,
     montageDetail:document.getElementById('bs-montageDetail').value.trim(),
     chefMonteurId:parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
+    teamMonteurIds: bsGetTeamIds(),
     startzeit:document.getElementById('bs-startzeit').value.trim(),
     fahrtzeitMin: window._aktFahrtzeit?.min || null,
     fahrtzeitStr: window._aktFahrtzeit?.str || null,
@@ -5737,6 +5849,26 @@ function saveBsModal() {
   };
   const idx=state.baustellen.findIndex(b=>b.id===id);
   if(idx>=0) state.baustellen[idx]=data; else state.baustellen.push(data);
+
+  // Team-Monteure (inkl. Chef-Monteur) automatisch im Wochenplan eintragen
+  const alleTeamIds = [...new Set([...(data.teamMonteurIds||[]), data.chefMonteurId].filter(Boolean))];
+  if (alleTeamIds.length && data.von) {
+    if (!state.plan) state.plan = {};
+    const startD = new Date(data.von + 'T12:00');
+    const endD = new Date((data.bis || data.von) + 'T12:00');
+    for (let d = new Date(startD); d <= endD; d.setDate(d.getDate()+1)) {
+      const datum = fmtDate(d);
+      // Sonntag überspringen (Wochenende ohne Eintrag)
+      if (d.getDay() === 0) continue;
+      if (!state.plan[datum]) state.plan[datum] = {};
+      alleTeamIds.forEach(maId => {
+        // Bestehenden Status-Eintrag für diesen Tag/Monteur nicht überschreiben falls schon eine andere Baustelle gesetzt ist und nicht diese
+        const key = 'ma' + maId + '_' + datum;
+        state.plan[datum][key] = { maId, bsId: data.id, farbeHex: data.farbeHex, notiz: '' };
+      });
+    }
+  }
+
   save(); closeBsModal();
   // Falls die Baustelle in der aktuell angezeigten Woche nicht sichtbar wäre, zu ihrem Start springen
   if (data.von) {
@@ -6260,7 +6392,7 @@ function startFirebaseListener() {
       // NICHT hier auf false setzen, sonst kommt das Echo durch!
       if (suppressListener) { firebaseReady = true; return; }
       const data = snapshot.val();
-      if (!data) { firebaseReady = true; hasReceivedFirebaseSync = true; return; }
+      if (!data) { firebaseReady = true; markFirebaseSynced(); return; }
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
 
@@ -6276,7 +6408,7 @@ function startFirebaseListener() {
 
         if (lokalIstNeuer || (lokalHatDaten && remoteIstLeer)) {
           console.log('[Firebase] Lokal gewinnt (ts:' + state._ts + ' > remote:' + remote._ts + ')');
-          hasReceivedFirebaseSync = true;
+          markFirebaseSynced();
           firebaseReady = true;
           save();
           showSyncIndicator('↑ Lokal → Firebase');
@@ -6319,12 +6451,16 @@ function startFirebaseListener() {
               if (Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) m.docs = lokal.docs;
             }
           });
+          (state.baustellen||[]).forEach(b => {
+            const lokal = (lokalVorSync.baustellen||[]).find(lb => lb.id === b.id);
+            if (lokal && Array.isArray(lokal.docs) && lokal.docs.some(d => d.data)) b.docs = lokal.docs;
+          });
 
           mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
           migrationSchraubenNeu();
           migrationDistanzplatten();
-          hasReceivedFirebaseSync = true;
+          markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
@@ -6651,7 +6787,7 @@ function importData(e) {
     try {
       state = JSON.parse(ev.target.result);
       state._ts = Date.now();
-      hasReceivedFirebaseSync = true;
+      markFirebaseSynced();
       // Schlanke Daten nach localStorage (72KB statt 29MB), Docs nach IndexedDB
       const slimJson = JSON.stringify(stripLargeData(state));
       safeStorage.setItem('lagertool', slimJson);
@@ -7413,7 +7549,7 @@ function bsToggleBeendet(bauId) {
 function renderBaustatusKVP() {
   const baustellen = (state.baustellen||[]).filter(b => (b.tasks||[]).length > 0);
   let html = '<div class="card" style="padding:14px;margin-bottom:1rem;">' +
-    '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">🔧 KVP – Nacharbeit erfassen</div>' +
+    '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">🔧 Nacharbeit erfassen</div>' +
     '<div style="display:grid;gap:8px;">' +
     '<div><label style="font-size:11px;color:var(--muted);">Mitarbeiter</label>' +
     '<select id="kvp-ma" style="width:100%;">' + (state.mitarbeiter||[]).map(m=>'<option value="'+m.id+'">'+m.vorname+' '+m.nachname+'</option>').join('') + '</select></div>' +
@@ -7433,7 +7569,7 @@ function renderBaustatusKVP() {
 
   // Übersicht aller KVP-Einträge pro Mitarbeiter
   html += '<div class="card" style="padding:14px;">' +
-    '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">👥 KVP-Übersicht je Mitarbeiter</div>';
+    '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">👥 Nacharbeit-Übersicht je Mitarbeiter</div>';
   (state.mitarbeiter||[]).forEach(m => {
     const eintraege = m.kvp || [];
     const totalH = eintraege.reduce((s,e)=>s+(e.stunden||0),0);
@@ -7485,7 +7621,7 @@ function kvpSpeichern() {
   save();
   document.getElementById('kvp-beschreibung').value = '';
   document.getElementById('kvp-stunden').value = '';
-  toast('Gespeichert', 'KVP-Eintrag für ' + ma.vorname + ' gespeichert', '✅');
+  toast('Gespeichert', 'Nacharbeit-Eintrag für ' + ma.vorname + ' gespeichert', '✅');
   renderBaustatusKVP();
 }
 
