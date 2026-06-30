@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LagerTool – Monteur</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>if (typeof emailjs !== 'undefined') { try { emailjs.init('uEjZ4g6QkqHfSFjQ_'); } catch(e) {} }</script>
+<style>
+  :root {
+    --bg: #0d0f12; --surface: #16191e; --surface2: #1d2127; --border: #2a2e36;
+    --text: #e8e8ea; --muted: #8a8f98; --accent: #e8b84b; --accent2: #4b9fe8;
+    --green: #4be88a; --red: #e8574b; --mono: 'SF Mono', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+    padding-bottom: 70px; min-height: 100vh;
+  }
+  input, select, textarea, button { font-family: var(--sans); font-size: 16px; }
+  .hidden { display: none !important; }
+
+  /* HEADER */
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 16px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 1px; }
+  .logo .sub { color: var(--muted); font-size: 11px; margin-left: 8px; }
+  .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 6px; transition: background .3s; }
+  .sync-dot.ok { background: var(--green); }
+  .sync-dot.err { background: var(--red); }
+
+  /* PAGES */
+  .page { display: none; padding: 16px; max-width: 700px; margin: 0 auto; }
+  .page.active { display: block; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+
+  /* CARDS */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px; margin-bottom: 10px;
+  }
+  .empty { text-align: center; padding: 32px 16px; color: var(--muted); font-size: 13px; }
+
+  /* BUTTONS */
+  .btn {
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+    border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer;
+    min-height: 42px; transition: all .15s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
+  .btn-green { background: var(--green); color: #0a1a10; border-color: var(--green); }
+  .btn-danger { background: rgba(232,87,75,.12); color: var(--red); border-color: var(--red); }
+  .btn-sm { padding: 6px 10px; font-size: 12px; min-height: 32px; }
+  .btn-block { width: 100%; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); margin-bottom: 12px;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent2); }
+
+  /* LOGIN */
+  #login-screen {
+    position: fixed; inset: 0; background: var(--bg); z-index: 1000;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .login-box { width: 100%; max-width: 340px; }
+  .login-box h1 { text-align: center; font-size: 24px; margin-bottom: 4px; }
+  .login-box .subtitle { text-align: center; margin-bottom: 24px; }
+  #login-pin { letter-spacing: 10px; text-align: center; font-size: 24px; }
+  .sp-wrap { position: relative; }
+  .sp-dropdown {
+    display: none; position: absolute; top: 100%; left: 0; right: 0;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    max-height: 220px; overflow-y: auto; z-index: 50; margin-top: 4px;
+  }
+  .sp-dropdown.open { display: block; }
+  .sp-item { padding: 10px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid var(--border); }
+  .sp-item:last-child { border-bottom: none; }
+  .sp-item:active { background: var(--accent); color: #1a1a1a; }
+
+  /* BOTTOM NAV */
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+    background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0px));
+  }
+  .nav-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; padding: 6px 2px; background: none; border: none; color: var(--muted);
+    cursor: pointer; position: relative; min-height: 54px;
+  }
+  .nav-item.active { color: var(--accent); }
+  .nav-item .ico { font-size: 21px; line-height: 1; }
+  .nav-item .lbl { font-size: 10px; font-weight: 700; }
+  .nav-item .badge {
+    position: absolute; top: 2px; right: calc(50% - 24px);
+    background: var(--red); color: #fff; font-size: 9px; font-weight: 700;
+    border-radius: 8px; padding: 1px 5px; min-width: 15px; text-align: center;
+  }
+
+  /* PILLS */
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .pill {
+    padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted); font-size: 13px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+  }
+  .pill.active { background: rgba(75,159,232,.15); border-color: var(--accent2); color: var(--accent2); }
+
+  /* ARTIKEL GRID (Bestellung) */
+  .art-card {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface2); margin-bottom: 8px;
+  }
+  .art-card.in-cart { border-color: var(--green); background: rgba(75,232,138,.06); }
+  .art-name { font-weight: 600; font-size: 13px; }
+  .art-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .art-lager { font-size: 12px; font-weight: 700; text-align: right; white-space: nowrap; }
+  .qty-ctrl { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .qty-btn {
+    width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 16px; font-weight: 700; cursor: pointer;
+  }
+  .qty-val { min-width: 24px; text-align: center; font-weight: 700; }
+
+  /* CART BAR */
+  #cart-bar {
+    position: fixed; bottom: 62px; left: 0; right: 0; z-index: 150;
+    background: var(--accent); color: #1a1a1a; padding: 12px 16px;
+    display: none; align-items: center; justify-content: space-between;
+    font-weight: 700; cursor: pointer;
+  }
+  #cart-bar.show { display: flex; }
+
+  /* BAUSTELLE / WOCHENPLAN */
+  .bs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .bs-name { font-weight: 700; font-size: 15px; }
+  .bs-meta { font-size: 11px; color: var(--muted); }
+  .progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .progress-fill { height: 100%; background: var(--accent2); }
+  .task-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .task-row:last-child { border-bottom: none; }
+  .wp-day { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .wp-day:last-child { border-bottom: none; }
+  .wp-day-label { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .wp-day-content { font-size: 14px; font-weight: 600; margin-top: 4px; }
+  .wp-day.today { background: rgba(232,184,75,.06); margin: 0 -14px; padding: 10px 14px; border-radius: 8px; }
+
+  /* TOAST */
+  #toast {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; z-index: 2000; transition: transform .3s; max-width: 90vw;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast .t-title { font-weight: 700; font-size: 13px; }
+  #toast .t-msg { font-size: 12px; color: var(--muted); }
+
+  .stars { color: var(--accent); font-size: 13px; }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 500;
+    align-items: flex-end; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--surface); border-radius: 16px 16px 0 0; padding: 20px;
+    width: 100%; max-width: 500px; max-height: 85vh; overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>⬡ LagerTool</h1>
+    <p class="subtitle">Monteur-Ansicht</p>
+    <div class="sp-wrap">
+      <label>Name</label>
+      <input type="text" id="login-name" placeholder="Name eingeben…" autocomplete="off"
+        onfocus="loginPickerOpen()" onclick="loginPickerOpen()" oninput="loginPickerFilter()">
+      <input type="hidden" id="login-name-id" value="">
+    </div>
+    <label>PIN</label>
+    <input type="password" id="login-pin" maxlength="4" inputmode="numeric" placeholder="••••">
+    <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
+    <button class="btn btn-primary btn-block" onclick="doLogin()">Anmelden</button>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">⬡ LagerTool <span class="sub" id="header-name"></span></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span><span class="sync-dot" id="sync-dot"></span><span id="sync-label" style="font-size:11px;color:var(--muted)">–</span></span>
+    <button class="btn btn-sm" onclick="doLogout()">Logout</button>
+  </div>
+</header>
+
+<!-- PAGE: BESTELLUNG -->
+<div id="page-bestellung" class="page">
+  <h1>🛒 Bestellung</h1>
+  <p class="subtitle">Artikel anfordern – Lager wird automatisch geprüft</p>
+
+  <div style="display:flex;gap:6px;margin-bottom:14px">
+    <button class="btn btn-sm" id="best-tab-bestellen-btn" onclick="switchBestTab('bestellen')">Bestellen</button>
+    <button class="btn btn-sm" id="best-tab-offen-btn" onclick="switchBestTab('offen')">Offen <span id="best-offen-badge"></span></button>
+    <button class="btn btn-sm" id="best-tab-geliefert-btn" onclick="switchBestTab('geliefert')">Geliefert</button>
+  </div>
+
+  <div id="best-tab-bestellen">
+    <input type="text" id="best-search" placeholder="🔍 Artikel suchen…" oninput="renderArtikelGrid()">
+    <div class="pills" id="best-kat-pills"></div>
+    <div id="best-artikel-grid"></div>
+  </div>
+
+  <div id="best-tab-offen" class="hidden"></div>
+  <div id="best-tab-geliefert" class="hidden"></div>
+</div>
+
+<!-- CART BAR -->
+<div id="cart-bar" onclick="showCartModal()">
+  <span id="cart-bar-text">0 Artikel im Warenkorb</span>
+  <span>Bestellen →</span>
+</div>
+
+<!-- CART MODAL -->
+<div class="modal-overlay" id="cart-modal">
+  <div class="modal-box">
+    <h1 style="font-size:17px">🛒 Warenkorb</h1>
+    <div id="cart-list" style="margin-bottom:14px"></div>
+    <label>Bemerkung (optional)</label>
+    <textarea id="best-bemerkung" rows="2" placeholder="z.B. dringend für morgen"></textarea>
+    <div style="display:flex;gap:8px">
+      <button class="btn" style="flex:1" onclick="closeCartModal()">Abbrechen</button>
+      <button class="btn btn-primary" style="flex:2" onclick="submitBestellung()">✅ Bestellung senden</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: BAUSTELLEN-STATUS -->
+<div id="page-baustatus" class="page">
+  <h1>📊 Baustellen-Status</h1>
+  <p class="subtitle">Deine Baustellen, Stunden erfassen</p>
+  <div id="baustatus-content"></div>
+</div>
+
+<!-- PAGE: WOCHENPLAN -->
+<div id="page-wochenplan" class="page">
+  <h1>📅 Wochenplan</h1>
+  <p class="subtitle" id="wp-subtitle"></p>
+  <div style="display:flex;gap:8px;margin-bottom:14px">
+    <button class="btn btn-sm" onclick="wpNavi(-7)">← Vorwoche</button>
+    <button class="btn btn-sm" onclick="wpHeute()" style="flex:1">Heute</button>
+    <button class="btn btn-sm" onclick="wpNavi(7)">Nächste →</button>
+  </div>
+  <div class="card" id="wp-content"></div>
+</div>
+
+<!-- PAGE: MELDUNGEN -->
+<div id="page-meldungen" class="page">
+  <h1>🔔 Meldungen</h1>
+  <p class="subtitle">Quittieren um zu schliessen</p>
+  <div id="meldungen-liste"></div>
+</div>
+
+<!-- PAGE: MEIN PROFIL -->
+<div id="page-profil" class="page">
+  <h1>👤 Mein Profil</h1>
+  <p class="subtitle">Bewertungen, Bestellungen, Stunden</p>
+  <div id="profil-content"></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav">
+  <button class="nav-item" data-page="bestellung" onclick="showPage('bestellung')">
+    <span class="ico">🛒</span><span class="lbl">Bestellung</span>
+  </button>
+  <button class="nav-item" data-page="baustatus" onclick="showPage('baustatus')">
+    <span class="ico">📊</span><span class="lbl">Baustellen</span>
+  </button>
+  <button class="nav-item" data-page="wochenplan" onclick="showPage('wochenplan')">
+    <span class="ico">📅</span><span class="lbl">Plan</span>
+  </button>
+  <button class="nav-item" data-page="meldungen" onclick="showPage('meldungen')">
+    <span class="ico">🔔</span><span class="lbl">Meldungen</span>
+    <span class="badge hidden" id="nav-meldungen-badge">0</span>
+  </button>
+  <button class="nav-item" data-page="profil" onclick="showPage('profil')">
+    <span class="ico">👤</span><span class="lbl">Profil</span>
+  </button>
+</nav>
+
+<!-- TOAST -->
+<div id="toast">
+  <div class="t-title" id="toast-title"></div>
+  <div class="t-msg" id="toast-msg"></div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// LagerTool – Monteur-App (eigenständig, gleiche Firebase-DB)
+// ════════════════════════════════════════════════════════
+
+// ── FIREBASE CONFIG (identisch mit Haupt-LagerTool) ──
+const FB_URL   = 'https://wochenplanung-6b50a-default-rtdb.europe-west1.firebasedatabase.app';
+const FB_KEY   = 'AIzaSyBwCjK7nzs8BV3GyFTouVFK16aUWGTntu4';
+const FB_PID   = 'wochenplanung-6b50a';
+const FB_APPID = '1:715914728927:web:7630a296888f052c8f606a';
+
+let state = { mitarbeiter:[], fahrzeuge:[], artikel:[], orders:[], baustellen:[], plan:{}, monteurMeldungen:[], kategorien:[], werkzeug:[] };
+let dbRef = null;
+let suppressListener = false;
+let hasReceivedFirebaseSync = false;
+let currentLoginUser = null;
+let cart = []; // [{artikelId, menge}]
+let bestSelKat = '';
+let bestTab = 'bestellen';
+let wpBaseMonday = getMonday(new Date());
+let spActiveInput = null;
+
+// ── SAFE STORAGE (localStorage Fallback) ──
+const safeStorage = (() => {
+  const mem = {};
+  let useLS = true;
+  try { localStorage.setItem('__t__','1'); localStorage.removeItem('__t__'); } catch(e) { useLS = false; }
+  return {
+    getItem: k => useLS ? localStorage.getItem(k) : (mem[k] ?? null),
+    setItem: (k,v) => { if (useLS) { try { localStorage.setItem(k,v); } catch(e){ useLS=false; mem[k]=v; } } else mem[k]=v; }
+  };
+})();
+
+// ── UTILITY ──
+function fmtDate(d) {
+  const yyyy = d.getFullYear(), mm = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+function getMonday(d) {
+  d = new Date(d);
+  const day = d.getDay() || 7;
+  if (day !== 1) d.setDate(d.getDate() - day + 1);
+  d.setHours(0,0,0,0);
+  return d;
+}
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function toast(title, msg, icon) {
+  const el = document.getElementById('toast');
+  document.getElementById('toast-title').textContent = (icon||'') + ' ' + title;
+  document.getElementById('toast-msg').textContent = msg || '';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+function istLeiterUser(u) {
+  u = u || currentLoginUser;
+  if (!u) return false;
+  return (u.rolle||'').toLowerCase() === 'leiter' || (u.funktion||'').toLowerCase() === 'leiter';
+}
+function getMaFahrzeug(m) {
+  if (!m) return null;
+  if (m.fahrzeugManuell !== undefined) {
+    if (m.fahrzeugManuell === null) return null;
+    return state.fahrzeuge.find(f => f.id === m.fahrzeugManuell) || null;
+  }
+  if (m.fahrzeugHint && m.fahrzeugHint !== 'Kein' && m.fahrzeugHint !== 'Keins' && m.fahrzeugHint !== '') {
+    const byHint = state.fahrzeuge.find(f => f.name === m.fahrzeugHint);
+    if (byHint) return byHint;
+  }
+  const byId = state.fahrzeuge.find(f => f.monteurId === m.id);
+  if (byId) return byId;
+  const fullName = (m.vorname + ' ' + (m.nachname||'')).trim().toLowerCase();
+  return state.fahrzeuge.find(f => !f.monteurId && f.monteur && f.monteur.trim().toLowerCase() === fullName) || null;
+}
+function sortArtikelName(a, b) {
+  function extractNum(str) {
+    const m = (str||'').match(/[Øø](\d+(?:[.,]\d+)?)/);
+    if (m) return parseFloat(m[1].replace(',','.'));
+    const m2 = (str||'').match(/(\d+(?:[.,]\d+)?)/);
+    return m2 ? parseFloat(m2[1].replace(',','.')) : 0;
+  }
+  const nA = extractNum(a), nB = extractNum(b);
+  if (nA !== nB) return nA - nB;
+  return (a||'').localeCompare(b||'', undefined, {numeric:true, sensitivity:'base'});
+}
+function sortArtikelListe(list) {
+  const kats = state.kategorien || [];
+  return list.slice().sort((a,b) => {
+    const oA = kats.findIndex(k => k.name === a.kat);
+    const oB = kats.findIndex(k => k.name === b.kat);
+    const diff = (oA===-1?999:oA) - (oB===-1?999:oB);
+    if (diff !== 0) return diff;
+    return sortArtikelName(a.name, b.name);
+  });
+}
+
+// ── LOAD / SAVE ──
+function load() {
+  const s = safeStorage.getItem('lagertool');
+  if (s) { try { state = JSON.parse(s); } catch(e) {} }
+  state._ts = 0; // Firebase gewinnt beim Start immer
+  if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
+  if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
+  if (!Array.isArray(state.artikel)) state.artikel = [];
+  if (!Array.isArray(state.orders)) state.orders = [];
+  if (!Array.isArray(state.baustellen)) state.baustellen = [];
+  if (!Array.isArray(state.monteurMeldungen)) state.monteurMeldungen = [];
+  if (!Array.isArray(state.kategorien)) state.kategorien = [];
+  if (!state.plan) state.plan = {};
+}
+
+function stripLargeData(s) {
+  const copy = JSON.parse(JSON.stringify(s));
+  (copy.fahrzeuge||[]).forEach(f => { f.docs = (f.docs||[]).map(d => ({name:d.name, type:d.type, _localOnly:true})); });
+  (copy.mitarbeiter||[]).forEach(m => { if (m.foto) m.foto = '_localOnly'; m.docs = (m.docs||[]).map(d => ({name:d.name, type:d.type, _localOnly:true})); });
+  (copy.baustellen||[]).forEach(b => { b.docs = (b.docs||[]).map(d => ({name:d.name, type:d.type, _localOnly:true})); });
+  return copy;
+}
+
+// Einmalige Migration: Test-Baustelle mit 4 Mann anlegen, Chef-Monteur = Luc Vorburger
+function migrationTestBaustelle() {
+  if (state._testBaustelleAngelegt) return;
+  if (!Array.isArray(state.baustellen)) state.baustellen = [];
+
+  const luc = (state.mitarbeiter||[]).find(m =>
+    (m.vorname||'').trim().toLowerCase() === 'luc' && (m.nachname||'').trim().toLowerCase() === 'vorburger'
+  );
+  if (!luc) return; // Mitarbeiterliste evtl. noch nicht geladen — beim nächsten Sync erneut versuchen
+
+  // 3 weitere Monteure (ohne Luc) für das Team auswählen
+  const andere = (state.mitarbeiter||[]).filter(m => m.id !== luc.id && (m.vorname||m.nachname)).slice(0, 3);
+  const teamIds = andere.map(m => m.id);
+
+  const heute = new Date();
+  const von = fmtDate(heute);
+  const bis = fmtDate(addDays(heute, 4));
+
+  const testBs = {
+    id: 999000111,
+    name: 'Testbaustelle Monteur-App',
+    kunde: 'Demo Kunde AG',
+    adresse: 'Musterstrasse 1, 4001 Basel',
+    von, bis,
+    startzeit: '07:00',
+    montageArt: 'Türenmontage',
+    montageDetail: '4-Mann Team Demo',
+    chefMonteurId: luc.id,
+    farbeHex: '#4b9fe8',
+    tasks: [
+      { id:'tt1', name:'Türen EG montieren', hours:16, monteurHours:{}, kwHours:{}, fertig:false },
+      { id:'tt2', name:'Türen OG montieren', hours:16, monteurHours:{}, kwHours:{}, fertig:false },
+      { id:'tt3', name:'Beschläge & Feinjustierung', hours:8, monteurHours:{}, kwHours:{}, fertig:false },
+    ],
+    docs: []
+  };
+  state.baustellen.push(testBs);
+
+  // Team (Luc + 3 Monteure) für den Zeitraum in den Wochenplan eintragen
+  if (!state.plan) state.plan = {};
+  const alleTeamIds = [luc.id, ...teamIds];
+  for (let d = new Date(von+'T12:00'); d <= new Date(bis+'T12:00'); d.setDate(d.getDate()+1)) {
+    if (d.getDay() === 0) continue; // Sonntag überspringen
+    const ds = fmtDate(d);
+    if (!state.plan[ds]) state.plan[ds] = {};
+    alleTeamIds.forEach(maId => {
+      state.plan[ds]['ma'+maId+'_'+ds] = { maId, bsId: testBs.id, farbeHex: testBs.farbeHex, notiz: '' };
+    });
+  }
+
+  state._testBaustelleAngelegt = true;
+  save();
+}
+
+let pendingSaveBeforeSync = false;
+function markFirebaseSynced() {
+  hasReceivedFirebaseSync = true;
+  if (pendingSaveBeforeSync) { pendingSaveBeforeSync = false; save(); }
+}
+
+function save() {
+  state._ts = Date.now();
+  const slimJson = JSON.stringify(stripLargeData(state));
+  safeStorage.setItem('lagertool', slimJson);
+  if (dbRef && hasReceivedFirebaseSync) {
+    try {
+      suppressListener = true;
+      dbRef.set(slimJson).then(() => setSyncStatus('ok','Sync'))
+        .catch(() => setSyncStatus('err','Fehler'))
+        .finally(() => setTimeout(() => { suppressListener = false; }, 2000));
+    } catch(e) { suppressListener = false; }
+  } else if (dbRef && !hasReceivedFirebaseSync) {
+    pendingSaveBeforeSync = true;
+  }
+}
+
+function setSyncStatus(state, label) {
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-label');
+  if (dot) dot.className = 'sync-dot' + (state==='ok'?' ok':state==='err'?' err':'');
+  if (lbl) lbl.textContent = label;
+}
+
+// ── FIREBASE INIT ──
+window.addEventListener('load', function() {
+  let versuche = 0;
+  const tryInit = () => {
+    if (typeof firebase !== 'undefined') initFirebase();
+    else if (versuche < 50) { versuche++; setTimeout(tryInit, 100); }
+    else setSyncStatus('err','Offline');
+  };
+  tryInit();
+});
+
+function initFirebase() {
+  try {
+    firebase.initializeApp({ apiKey: FB_KEY, databaseURL: FB_URL, projectId: FB_PID, appId: FB_APPID });
+    startFirebaseListener();
+  } catch(e) { console.error('[Firebase] init error', e); setSyncStatus('err','Fehler'); }
+}
+
+function startFirebaseListener() {
+  try {
+    const _db = firebase.database();
+    dbRef = _db.ref('lagertool');
+    dbRef.on('value', (snapshot) => {
+      if (suppressListener) return;
+      const data = snapshot.val();
+      if (!data) { markFirebaseSynced(); setSyncStatus('ok','Bereit'); return; }
+      try {
+        const remote = typeof data === 'string' ? JSON.parse(data) : data;
+        const istPrivilegiert = currentLoginUser?.entwickler || currentLoginUser?.admin;
+        const lokalIstNeuer = istPrivilegiert && state._ts && remote._ts && state._ts > remote._ts;
+        if (lokalIstNeuer) {
+          markFirebaseSynced();
+          save();
+        } else {
+          const lokalVorSync = state;
+          state = remote;
+          if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
+          if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
+          if (!Array.isArray(state.artikel)) state.artikel = [];
+          if (!Array.isArray(state.orders)) state.orders = [];
+          if (!Array.isArray(state.baustellen)) state.baustellen = [];
+          if (!Array.isArray(state.monteurMeldungen)) state.monteurMeldungen = [];
+          if (!Array.isArray(state.kategorien)) state.kategorien = [];
+          if (!state.plan) state.plan = {};
+          migrationTestBaustelle();
+          markFirebaseSynced();
+          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+          renderAllIfLoggedIn();
+        }
+        setSyncStatus('ok','Verbunden');
+      } catch(e2) { console.error('[Firebase] parse error', e2); setSyncStatus('err','Fehler'); }
+    }, (err) => { console.error('[Firebase] listener error', err); setSyncStatus('err','Verbindung verloren'); });
+    setSyncStatus('ok','Verbinde…');
+  } catch(e) { setSyncStatus('err','Fehler'); }
+}
+
+function renderAllIfLoggedIn() {
+  if (!currentLoginUser) return;
+  // aktuell sichtbare Seite neu rendern
+  const active = document.querySelector('.page.active');
+  if (active) showPage(active.id.replace('page-',''), true);
+  updateMeldungenBadge();
+}
+
+// ════════════════════════════════════════════════════════
+// LOGIN
+// ════════════════════════════════════════════════════════
+function loginPickerOpen() {
+  const input = document.getElementById('login-name');
+  const wrap = input.parentElement;
+  wrap.classList.add('sp-wrap');
+  let dd = wrap.querySelector('.sp-dropdown');
+  if (!dd) { dd = document.createElement('div'); dd.className = 'sp-dropdown'; wrap.appendChild(dd); }
+  renderLoginPicker(dd, '');
+  dd.classList.add('open');
+}
+function loginPickerFilter() {
+  const input = document.getElementById('login-name');
+  const dd = input.parentElement.querySelector('.sp-dropdown');
+  if (!dd) return;
+  renderLoginPicker(dd, input.value.trim().toLowerCase());
+  document.getElementById('login-name-id').value = '';
+}
+function renderLoginPicker(dd, query) {
+  const list = (state.mitarbeiter||[]).slice()
+    .sort((a,b) => (a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
+    .filter(m => {
+      if (!m.vorname && !m.nachname) return false;
+      if (!query) return true;
+      const full = (m.vorname+' '+m.nachname).toLowerCase();
+      const rev = (m.nachname+' '+m.vorname).toLowerCase();
+      return full.includes(query) || rev.includes(query);
+    });
+  dd.innerHTML = list.map(m => {
+    const name = m.vorname + ' ' + (m.nachname||'');
+    return `<div class="sp-item" onclick="loginPickerSelect(${m.id},'${name.replace(/'/g,"\\'")}')">${name}</div>`;
+  }).join('') || '<div class="sp-item">Keine Treffer</div>';
+}
+function loginPickerSelect(id, name) {
+  document.getElementById('login-name').value = name;
+  document.getElementById('login-name-id').value = id;
+  const dd = document.querySelector('.sp-dropdown.open');
+  if (dd) dd.classList.remove('open');
+  document.getElementById('login-pin').focus();
+}
+document.addEventListener('click', e => {
+  document.querySelectorAll('.sp-dropdown.open').forEach(dd => {
+    if (!dd.parentElement.contains(e.target)) dd.classList.remove('open');
+  });
+});
+
+function doLogin() {
+  const errEl = document.getElementById('login-error');
+  const id = parseInt(document.getElementById('login-name-id').value);
+  const pin = document.getElementById('login-pin').value;
+  const m = (state.mitarbeiter||[]).find(x => x.id === id);
+  if (!m || m.pin !== pin) {
+    errEl.textContent = 'Name oder PIN ungültig';
+    errEl.style.display = 'block';
+    document.getElementById('login-pin').value = '';
+    return;
+  }
+  errEl.style.display = 'none';
+  currentLoginUser = m;
+  try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
+  finishLogin();
+}
+
+function doLogout() {
+  currentLoginUser = null;
+  try { sessionStorage.removeItem('monteur_login'); } catch(e) {}
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-name').value = '';
+  document.getElementById('login-name-id').value = '';
+  document.getElementById('login-pin').value = '';
+}
+
+function finishLogin() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('header-name').textContent = currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'');
+  showPage('bestellung');
+  updateMeldungenBadge();
+}
+
+// Auto-Login bei bestehender Session
+window.addEventListener('DOMContentLoaded', () => {
+  load();
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('monteur_login')||'null');
+    if (saved?.id) {
+      const tryRestore = () => {
+        const m = (state.mitarbeiter||[]).find(x => x.id === saved.id);
+        if (m) { currentLoginUser = m; finishLogin(); return; }
+        if (window._restoreAttempts === undefined) window._restoreAttempts = 0;
+        if (window._restoreAttempts++ < 30) setTimeout(tryRestore, 200);
+      };
+      tryRestore();
+    }
+  } catch(e) {}
+});
+
+// ════════════════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════════════════
+function showPage(id, silent) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  const pageEl = document.getElementById('page-' + id);
+  if (pageEl) pageEl.classList.add('active');
+  const navBtn = document.querySelector('.nav-item[data-page="'+id+'"]');
+  if (navBtn) navBtn.classList.add('active');
+
+  if (id === 'bestellung') { renderKatPills(); renderArtikelGrid(); renderCartBar(); }
+  if (id === 'baustatus') renderBaustatus();
+  if (id === 'wochenplan') renderWochenplan();
+  if (id === 'meldungen') renderMeldungen();
+  if (id === 'profil') renderProfil();
+}
+
+// ════════════════════════════════════════════════════════
+// BESTELLUNG
+// ════════════════════════════════════════════════════════
+function switchBestTab(tab) {
+  bestTab = tab;
+  ['bestellen','offen','geliefert'].forEach(t => {
+    document.getElementById('best-tab-'+t).classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById('best-tab-'+t+'-btn');
+    if (btn) btn.className = 'btn btn-sm' + (t===tab ? ' btn-primary' : '');
+  });
+  document.getElementById('cart-bar').classList.toggle('show', tab === 'bestellen' && cart.length > 0);
+  if (tab === 'offen') renderOrderList('offen');
+  if (tab === 'geliefert') renderOrderList('geliefert');
+}
+
+function renderKatPills() {
+  const el = document.getElementById('best-kat-pills');
+  if (!el) return;
+  const kats = (state.kategorien||[]).length
+    ? state.kategorien.slice().sort((a,b)=>(a.order||0)-(b.order||0)).map(k=>k.name).filter(n => (state.artikel||[]).some(a=>a.kat===n))
+    : [...new Set((state.artikel||[]).map(a=>a.kat).filter(Boolean))].sort();
+  el.innerHTML = `<button class="pill ${!bestSelKat?'active':''}" onclick="bestSelKat='';renderKatPills();renderArtikelGrid()">Alle</button>` +
+    kats.map(k => `<button class="pill ${bestSelKat===k?'active':''}" onclick="bestSelKat='${k.replace(/'/g,"\\'")}';renderKatPills();renderArtikelGrid()">${k}</button>`).join('');
+}
+
+function renderArtikelGrid() {
+  const el = document.getElementById('best-artikel-grid');
+  if (!el) return;
+  const q = (document.getElementById('best-search')?.value||'').trim().toLowerCase();
+  let liste = sortArtikelListe((state.artikel||[]).filter(a => {
+    if (bestSelKat && a.kat !== bestSelKat) return false;
+    if (q && !(a.name||'').toLowerCase().includes(q) && !(a.nr||'').toLowerCase().includes(q)) return false;
+    return true;
+  }));
+  if (!liste.length) { el.innerHTML = '<div class="empty">Keine Artikel gefunden</div>'; return; }
+  el.innerHTML = liste.map(a => {
+    const imCart = cart.find(c => c.artikelId === a.id);
+    const bestand = a.bestand||0, min = a.min||0;
+    const col = bestand===0 ? 'var(--red)' : bestand<min ? 'var(--accent)' : 'var(--green)';
+    return `<div class="art-card ${imCart?'in-cart':''}" onclick="toggleCart(${a.id})">
+      <div style="flex:1;min-width:0">
+        <div class="art-name">${a.name}</div>
+        <div class="art-meta">${a.kat||''} · ${a.nr||''}</div>
+        ${imCart ? `<div class="qty-ctrl" onclick="event.stopPropagation()">
+          <button class="qty-btn" onclick="changeCartQty(${a.id},-1)">−</button>
+          <span class="qty-val">${imCart.menge}</span>
+          <button class="qty-btn" onclick="changeCartQty(${a.id},1)">+</button>
+        </div>` : ''}
+      </div>
+      <div class="art-lager" style="color:${col}">Lager: ${bestand}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCart(artikelId) {
+  const ex = cart.find(c => c.artikelId === artikelId);
+  if (ex) cart = cart.filter(c => c.artikelId !== artikelId);
+  else cart.push({artikelId, menge:1});
+  renderArtikelGrid(); renderCartBar();
+}
+function changeCartQty(artikelId, delta) {
+  const c = cart.find(x => x.artikelId === artikelId);
+  if (!c) return;
+  c.menge = Math.max(1, c.menge + delta);
+  renderArtikelGrid(); renderCartBar();
+}
+function renderCartBar() {
+  const bar = document.getElementById('cart-bar');
+  if (bestTab !== 'bestellen' || !cart.length) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  const totalQty = cart.reduce((s,c)=>s+c.menge,0);
+  document.getElementById('cart-bar-text').textContent = `${cart.length} Artikel (${totalQty} Stk) im Warenkorb`;
+}
+function showCartModal() {
+  const el = document.getElementById('cart-list');
+  el.innerHTML = cart.map(c => {
+    const a = (state.artikel||[]).find(x => x.id === c.artikelId);
+    if (!a) return '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-weight:600;font-size:13px">${a.name}</div>
+        <div style="font-size:11px;color:var(--muted)">${a.nr||''}</div>
+      </div>
+      <div class="qty-ctrl" style="margin-top:0">
+        <button class="qty-btn" onclick="changeCartQty(${a.id},-1);showCartModal()">−</button>
+        <span class="qty-val">${c.menge}</span>
+        <button class="qty-btn" onclick="changeCartQty(${a.id},1);showCartModal()">+</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">Warenkorb leer</div>';
+  document.getElementById('cart-modal').classList.add('open');
+}
+function closeCartModal() { document.getElementById('cart-modal').classList.remove('open'); }
+
+async function submitBestellung() {
+  if (!cart.length) return toast('Fehler','Warenkorb ist leer','⚠️');
+  const ma = currentLoginUser;
+  const meinFzg = getMaFahrzeug(ma);
+  let fzgName, monteurName, fahrzeugId, maId;
+  if (meinFzg) { fzgName = meinFzg.name; monteurName = meinFzg.monteur||''; fahrzeugId = meinFzg.id; maId = null; }
+  else { fzgName = '(kein Fahrzeug)'; monteurName = (ma.vorname+' '+(ma.nachname||'')).trim(); fahrzeugId = null; maId = ma.id; }
+
+  const items = [];
+  for (const c of cart) {
+    const a = state.artikel.find(x => x.id === c.artikelId);
+    if (!a) { items.push({name:'(Unbekannt)', menge:c.menge, einheit:'Stk', inStock:false}); continue; }
+    items.push({name:a.name, menge:c.menge, einheit:a.einheit||'Stk', inStock:(a.bestand||0)>=c.menge});
+  }
+  const order = {
+    id: Date.now(), datum: new Date().toLocaleString('de-CH'),
+    fahrzeug: fzgName, fahrzeugId, maId, monteur: monteurName,
+    bemerkung: document.getElementById('best-bemerkung')?.value || '',
+    status: 'offen', items
+  };
+  if (!Array.isArray(state.orders)) state.orders = [];
+  state.orders.unshift(order);
+  cart.forEach(c => {
+    const a = state.artikel.find(x => x.id === c.artikelId);
+    if (a && (a.bestand||0) >= c.menge) a.bestand -= c.menge;
+  });
+  cart = [];
+  save();
+  closeCartModal();
+  renderArtikelGrid(); renderCartBar();
+  document.getElementById('best-bemerkung').value = '';
+  toast('Bestellung gesendet!', items.length + ' Artikel', '📤');
+
+  try { await sendNotification(order); } catch(e) {}
+}
+
+async function sendNotification(order) {
+  const email = state.config?.email;
+  if (!email || typeof emailjs === 'undefined') return;
+  const fromStock = order.items.filter(i => i.inStock);
+  const toOrder = order.items.filter(i => !i.inStock);
+  const lager_liste = fromStock.length ? fromStock.map(i=>`• ${i.name}: ${i.menge} ${i.einheit}`).join('\n') : '(keine)';
+  const bestell_liste = toOrder.length ? toOrder.map(i=>`• ${i.name}: ${i.menge} ${i.einheit}`).join('\n') : '(keine)';
+  const params = {
+    to_email: email, subject: `[Bestellung] ${order.fahrzeug} – ${order.datum}`,
+    fahrzeug: order.fahrzeug, monteur: order.monteur, datum: order.datum,
+    lager_liste, bestell_liste, bemerkung: order.bemerkung || '—',
+    message: `Fahrzeug: ${order.fahrzeug}\nMonteur: ${order.monteur}\nDatum: ${order.datum}\n\n✅ AUS LAGER:\n${lager_liste}\n\n🛒 BESTELLEN:\n${bestell_liste}\n\nBemerkung: ${order.bemerkung||'—'}`
+  };
+  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); } catch(e) {}
+}
+
+function renderOrderList(filter) {
+  const el = document.getElementById('best-tab-'+filter);
+  if (!el) return;
+  const ma = currentLoginUser;
+  const meinFzg = getMaFahrzeug(ma);
+  const orders = (state.orders||[]).filter(o => {
+    const istMeine = (meinFzg && (o.fahrzeug===meinFzg.name || o.fahrzeugId===meinFzg.id)) || o.maId===ma.id;
+    if (!istMeine) return false;
+    return filter==='geliefert' ? o.status==='geliefert' : o.status!=='geliefert';
+  }).sort((a,b) => b.id - a.id);
+
+  if (!orders.length) { el.innerHTML = `<div class="empty">Keine ${filter==='geliefert'?'gelieferten':'offenen'} Bestellungen</div>`; return; }
+  el.innerHTML = orders.map(o => {
+    const alleVerr = (o.items||[]).length && (o.items||[]).every(i=>i.verrechnet);
+    const teilVerr = (o.items||[]).some(i=>i.verrechnet) && !alleVerr;
+    const verrLabel = alleVerr ? '💰 Verrechnet' : teilVerr ? '💰 Teilweise' : '';
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13px">${o.datum}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${o.status==='geliefert'?'var(--green)':'var(--accent)'}">${o.status==='geliefert'?'✅ Geliefert':'⏳ Offen'}</span>
+          ${verrLabel ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${alleVerr?'var(--green)':'var(--accent)'}">${verrLabel}</span>` : ''}
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">${(o.items||[]).map(i=>`${i.name} ×${i.menge}`).join(' · ')}</div>
+      ${o.bemerkung ? `<div style="font-size:11px;color:var(--muted);font-style:italic;margin-top:4px">${o.bemerkung}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════
+// BAUSTELLEN-STATUS
+// ════════════════════════════════════════════════════════
+function renderBaustatus() {
+  const el = document.getElementById('baustatus-content');
+  const ma = currentLoginUser;
+  const istChefMonteurFn = (bau) => bau.chefMonteurId && bau.chefMonteurId === ma?.id;
+  const meinName = (ma.vorname+' '+(ma.nachname||'')).trim();
+
+  const baustellen = (state.baustellen||[]).filter(bau => {
+    if (bau.beendet) return false;
+    if (istChefMonteurFn(bau)) return true;
+    const hatStunden = (bau.tasks||[]).some(t => t.monteurHours && Object.keys(t.monteurHours).some(k => k===meinName));
+    const hatZuweisung = Object.values(state.plan||{}).some(tag => Object.values(tag||{}).some(e => e.maId===ma.id && e.bsId===bau.id));
+    return hatStunden || hatZuweisung;
+  });
+
+  if (!baustellen.length) { el.innerHTML = '<div class="empty">Keine Baustellen für dich gefunden.</div>'; return; }
+
+  el.innerHTML = baustellen.map(bau => {
+    const tasks = bau.tasks || [];
+    const soll = tasks.reduce((s,t)=>s+(t.hours||0),0);
+    const ist = tasks.reduce((s,t)=>s+Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0),0);
+    const pct = soll>0 ? Math.round((ist/soll)*100) : 0;
+    const istChef = istChefMonteurFn(bau);
+    const montageInfo = [bau.montageArt, bau.montageDetail].filter(Boolean).join(' – ');
+
+    const taskRows = tasks.map(t => {
+      const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
+      const meineStd = t.monteurHours?.[meinName] || 0;
+      const canDelete = meineStd > 0;
+      return `<div class="task-row">
+        <div style="flex:1;min-width:0">
+          <div>${t.fertig?'✓ ':''}${t.name}</div>
+          <div style="font-size:10px;color:var(--muted)">${tIst.toFixed(1)}h / ${t.hours.toFixed(1)}h Soll</div>
+          ${meineStd>0 ? `<div style="font-size:10px;color:var(--accent2);margin-top:2px">Meine: ${meineStd}h ${canDelete?`<span onclick="bsDeleteEigeneStunden(${bau.id},'${t.id}')" style="color:var(--red);cursor:pointer;margin-left:6px">✕ löschen</span>`:''}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
+          <input type="number" id="bsh_${bau.id}_${t.id}" placeholder="Std." step="0.5" min="0" style="width:55px;padding:6px;margin:0;font-size:13px">
+          <button class="btn btn-sm btn-primary" onclick="bsBuchenEigene(${bau.id},'${t.id}')">OK</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `<div class="card">
+      <div class="bs-header">
+        <div>
+          <div class="bs-name">🏗️ ${bau.name}</div>
+          <div class="bs-meta">${bau.kunde||''}${bau.von?' · '+bau.von+' – '+(bau.bis||'?'):''}${montageInfo?' · '+montageInfo:''}</div>
+        </div>
+        ${istChef ? '<span style="font-size:10px;font-weight:700;color:var(--accent);background:rgba(232,184,75,.12);padding:2px 8px;border-radius:10px">👷 Chef</span>' : ''}
+      </div>
+      ${soll>0 ? `<div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%;background:${ist>soll?'var(--red)':'var(--accent2)'}"></div></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${ist.toFixed(1)}h / ${soll.toFixed(1)}h (${pct}%)</div>` : ''}
+      ${taskRows || '<div class="empty" style="padding:12px">Keine Tasks erfasst</div>'}
+      ${istChef ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="bsAddTaskPrompt(${bau.id})">+ Task hinzufügen</button>
+        <button class="btn btn-sm btn-primary" onclick="bsZeigeTeamBewertung(${bau.id})">⭐ Team bewerten</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── Chef-Monteur: Team-Mitglieder bewerten ──
+const bsKriterien = [
+  {key:'sauberkeit', label:'Sauberkeit'},
+  {key:'qualitaet', label:'Qualität'},
+  {key:'eigeninitiative', label:'Eigeninitiative'},
+  {key:'dokumentation', label:'Dokumentation'},
+  {key:'rueckmeldung', label:'Rückmeldung'},
+];
+
+function bsZeigeTeamBewertung(bauId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau) return;
+  // Team = alle Monteure die im Wochenplan dieser Baustelle zugewiesen sind oder Stunden gebucht haben
+  const teamIds = new Set();
+  Object.values(state.plan||{}).forEach(tag => Object.values(tag||{}).forEach(e => { if (e.bsId === bau.id) teamIds.add(e.maId); }));
+  (bau.tasks||[]).forEach(t => Object.keys(t.monteurHours||{}).forEach(name => {
+    const m = (state.mitarbeiter||[]).find(x => (x.vorname+' '+(x.nachname||'')).trim() === name);
+    if (m) teamIds.add(m.id);
+  }));
+  teamIds.delete(currentLoginUser?.id); // Chef bewertet sich nicht selbst
+  const team = [...teamIds].map(id => (state.mitarbeiter||[]).find(m => m.id === id)).filter(Boolean);
+
+  if (!team.length) return toast('Keine Team-Mitglieder', 'Niemand im Wochenplan dieser Baustelle zugewiesen', 'ℹ️');
+
+  let html = `<h1 style="font-size:17px">⭐ Team bewerten – ${bau.name}</h1>`;
+  team.forEach(m => {
+    const bew = m.bewertungen || {};
+    html += `<div class="card" style="margin-top:10px">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">${m.vorname} ${m.nachname||''}</div>`;
+    bsKriterien.forEach(kr => {
+      const aktuell = 0;
+      let sterne = '';
+      for (let i=1;i<=5;i++) sterne += `<span id="bwstar_${kr.key}_${m.id}_${i}" onclick="bwSetStern(${m.id},'${kr.key}',${i})" style="cursor:pointer;font-size:22px;color:var(--border);margin-right:2px">★</span>`;
+      html += `<div style="margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:2px">${kr.label} ${bew[kr.key]?`<span style="color:var(--muted);font-weight:400">(Ø ${bew[kr.key]})</span>`:''}</div>
+        ${sterne}
+        <input type="hidden" id="bwval_${kr.key}_${m.id}" value="0">
+      </div>`;
+    });
+    html += `<button class="btn btn-primary btn-block" onclick="bwSpeichern(${m.id})">💾 Bewertung speichern</button>
+    </div>`;
+  });
+  document.getElementById('baustatus-content').innerHTML = html + `<button class="btn btn-block" style="margin-top:14px" onclick="renderBaustatus()">← Zurück</button>`;
+}
+
+function bwSetStern(maId, key, wert) {
+  for (let i=1;i<=5;i++) {
+    const el = document.getElementById('bwstar_'+key+'_'+maId+'_'+i);
+    if (el) el.style.color = i<=wert ? 'var(--accent)' : 'var(--border)';
+  }
+  document.getElementById('bwval_'+key+'_'+maId).value = wert;
+}
+
+function bwSpeichern(maId) {
+  const m = (state.mitarbeiter||[]).find(x => x.id === maId);
+  if (!m) return;
+  if (!m.bewertungen) m.bewertungen = {};
+  const eintrag = {};
+  let ok = true;
+  bsKriterien.forEach(kr => {
+    const v = parseInt(document.getElementById('bwval_'+kr.key+'_'+maId)?.value || 0);
+    if (!v) ok = false;
+    eintrag[kr.key] = v;
+  });
+  if (!ok) return toast('Fehler','Bitte alle 5 Kriterien bewerten','⚠️');
+  eintrag.datum = new Date().toLocaleDateString('de-CH');
+  if (!m.bewertungen.eintraege) m.bewertungen.eintraege = [];
+  m.bewertungen.eintraege.push(eintrag);
+  const all = m.bewertungen.eintraege;
+  bsKriterien.forEach(kr => {
+    m.bewertungen[kr.key] = Math.round((all.reduce((s,e)=>s+(e[kr.key]||0),0)/all.length)*10)/10;
+  });
+  save();
+  toast('Gespeichert', m.vorname+' bewertet', '✅');
+}
+
+function bsBuchenEigene(bauId, taskId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  const task = (bau.tasks||[]).find(t => t.id === taskId);
+  const hEl = document.getElementById('bsh_'+bauId+'_'+taskId);
+  const h = parseFloat(hEl.value);
+  if (!h || h <= 0) return;
+  const ma = currentLoginUser;
+  const maName = ma.vorname + ' ' + (ma.nachname||'');
+  if (!task.monteurHours) task.monteurHours = {};
+  task.monteurHours[maName] = (task.monteurHours[maName]||0) + h;
+  save();
+  renderBaustatus();
+  toast('Gespeichert', h+'h auf "'+task.name+'" gebucht', '✅');
+}
+
+function bsDeleteEigeneStunden(bauId, taskId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  const task = (bau.tasks||[]).find(t => t.id === taskId);
+  const ma = currentLoginUser;
+  const maName = ma.vorname + ' ' + (ma.nachname||'');
+  if (!task?.monteurHours?.[maName]) return;
+  const stunden = task.monteurHours[maName];
+  if (!confirm('Deine '+stunden+'h auf "'+task.name+'" löschen?')) return;
+  delete task.monteurHours[maName];
+  save();
+  renderBaustatus();
+  toast('Gelöscht', stunden+'h entfernt', '🗑');
+}
+
+function bsAddTaskPrompt(bauId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau) return;
+  const istChef = bau.chefMonteurId === currentLoginUser?.id;
+  if (!istChef) return toast('Keine Berechtigung','Nur Chef-Monteur darf Tasks hinzufügen','⛔');
+  const input = prompt('Neue Task(s) — Format: Name, Soll-Stunden\nMehrere: eine pro Zeile\n\nBeispiel:\nKüche, 40\nBad, 15');
+  if (!input) return;
+  if (!bau.tasks) bau.tasks = [];
+  input.split('\n').forEach(line => {
+    const parts = line.split(',');
+    if (parts.length < 2) return;
+    const name = parts[0].trim(), hours = parseFloat(parts[1].trim());
+    if (!name || !hours) return;
+    bau.tasks.push({id:'t'+Date.now()+Math.floor(Math.random()*1000), name, hours, monteurHours:{}, kwHours:{}, fertig:false});
+  });
+  save();
+  renderBaustatus();
+}
+
+// ════════════════════════════════════════════════════════
+// WOCHENPLAN
+// ════════════════════════════════════════════════════════
+function wpNavi(delta) { wpBaseMonday = addDays(wpBaseMonday, delta); renderWochenplan(); }
+function wpHeute() { wpBaseMonday = getMonday(new Date()); renderWochenplan(); }
+
+function renderWochenplan() {
+  const ma = currentLoginUser;
+  const monday = wpBaseMonday;
+  const sunday = addDays(monday, 6);
+  document.getElementById('wp-subtitle').textContent =
+    monday.toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit'}) + ' – ' + sunday.toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric'});
+
+  const heute = fmtDate(new Date());
+  const tageNamen = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+  const meinFzg = getMaFahrzeug(ma);
+
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(monday, i);
+    const ds = fmtDate(d);
+    const eintrag = state.plan?.[ds]?.['ma'+ma.id+'_'+ds];
+    const statusEintrag = state.plan?.[ds]?.['status_ma'+ma.id];
+    const isToday = ds === heute;
+    let content = '<span style="color:var(--muted)">– frei –</span>';
+    let teamHtml = '';
+    let fzgHtml = '';
+
+    if (statusEintrag) {
+      content = `<span style="color:${statusEintrag.farbeHex||'var(--accent)'}">${statusEintrag.status}</span>`;
+    } else if (eintrag) {
+      const bs = (state.baustellen||[]).find(b => b.id === eintrag.bsId);
+      content = `<span style="color:${eintrag.farbeHex||'var(--accent2)'}">${bs?.name || '(Baustelle gelöscht)'}</span>`;
+      if (bs?.startzeit) content += ` <span style="font-size:11px;color:var(--muted)">· ab ${bs.startzeit}</span>`;
+
+      // Team: alle anderen Monteure die am selben Tag auf derselben Baustelle eingeteilt sind
+      if (bs) {
+        const tagPlan = state.plan?.[ds] || {};
+        const kollegen = Object.values(tagPlan)
+          .filter(e => e.bsId === bs.id && e.maId !== ma.id)
+          .map(e => (state.mitarbeiter||[]).find(m => m.id === e.maId))
+          .filter(Boolean);
+        if (kollegen.length) {
+          teamHtml = `<div style="font-size:11px;color:var(--muted);margin-top:4px">👥 Mit: ${kollegen.map(k=>k.vorname).join(', ')}</div>`;
+        }
+      }
+    }
+
+    // Fahrzeug-Block: Fahrzeugname + Service/Reparatur-Warnung
+    if (meinFzg) {
+      let warnHtml = '';
+      const todayMs = new Date(d).setHours(0,0,0,0);
+      let minDiff = null, minDesc = '';
+      (meinFzg.service||[]).forEach(s => {
+        const dateStr = s.reminderDate || s.datum;
+        if (!dateStr) return;
+        const entryMs = new Date(dateStr).setHours(0,0,0,0);
+        const diff = Math.round((entryMs - todayMs) / (1000*60*60*24));
+        if (diff < 0 || diff > 30) return;
+        if (minDiff === null || diff < minDiff) { minDiff = diff; minDesc = s.beschreibung || s.typ || 'Service'; }
+      });
+      if (minDiff !== null) {
+        const col = minDiff <= 3 ? 'var(--red)' : 'var(--accent)';
+        const icon = minDiff <= 3 ? '⚠️' : '🔧';
+        warnHtml = ` <span style="font-size:11px;color:${col};font-weight:700">${icon} ${minDesc} in ${minDiff===0?'heute':minDiff+'d'}</span>`;
+      }
+      fzgHtml = `<div style="font-size:11px;color:var(--muted);margin-top:2px">🚐 ${meinFzg.name}${warnHtml}</div>`;
+    }
+
+    html += `<div class="wp-day ${isToday?'today':''}">
+      <div class="wp-day-label">${tageNamen[i]} ${d.toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit'})}${isToday?' · HEUTE':''}</div>
+      <div class="wp-day-content">${content}</div>
+      ${teamHtml}
+      ${fzgHtml}
+    </div>`;
+  }
+  document.getElementById('wp-content').innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════
+// MELDUNGEN
+// ════════════════════════════════════════════════════════
+function renderMeldungen() {
+  const el = document.getElementById('meldungen-liste');
+  const ma = currentLoginUser;
+  const alle = (state.monteurMeldungen||[]).filter(m => !m.quittiert && m.maId === ma.id).sort((a,b)=>b.datum.localeCompare(a.datum));
+  updateMeldungenBadge();
+  if (!alle.length) { el.innerHTML = '<div class="card"><div class="empty">✅ Keine offenen Meldungen</div></div>'; return; }
+
+  el.innerHTML = alle.map(m => {
+    const d = new Date(m.datum).toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const order = m.orderId ? (state.orders||[]).find(o => o.id === m.orderId) : null;
+    let statusBadges = '';
+    if (order) {
+      const alleVerr = (order.items||[]).length && (order.items||[]).every(i=>i.verrechnet);
+      const teilVerr = (order.items||[]).some(i=>i.verrechnet) && !alleVerr;
+      const verrLabel = alleVerr ? '💰 Verrechnet' : teilVerr ? '💰 Teilweise' : '';
+      statusBadges = `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${order.status==='geliefert'?'var(--green)':'var(--accent)'}">${order.status==='geliefert'?'✅ Geliefert':'⏳ Offen'}</span>
+        ${verrLabel ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${alleVerr?'var(--green)':'var(--accent)'}">${verrLabel}</span>` : ''}
+      </div>`;
+    }
+    return `<div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${m.titel}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${d}</div>
+      <div style="font-size:13px;white-space:pre-line">${m.text}</div>
+      ${statusBadges}
+      <button class="btn btn-primary btn-sm btn-block" style="margin-top:10px" onclick="meldungQuittieren(${m.id})">✓ Erledigt</button>
+    </div>`;
+  }).join('');
+}
+function meldungQuittieren(id) {
+  const m = (state.monteurMeldungen||[]).find(x => x.id === id);
+  if (!m) return;
+  m.quittiert = true; m.quittiert_datum = new Date().toISOString();
+  save(); renderMeldungen();
+  toast('Erledigt','Meldung geschlossen','✅');
+}
+function updateMeldungenBadge() {
+  if (!currentLoginUser) return;
+  const n = (state.monteurMeldungen||[]).filter(m => !m.quittiert && m.maId === currentLoginUser.id).length;
+  const b = document.getElementById('nav-meldungen-badge');
+  if (b) { b.textContent = n; b.classList.toggle('hidden', n===0); }
+}
+
+// ════════════════════════════════════════════════════════
+// MEIN PROFIL
+// ════════════════════════════════════════════════════════
+function renderProfil() {
+  const el = document.getElementById('profil-content');
+  const ma = currentLoginUser;
+  const meinFzg = getMaFahrzeug(ma);
+  const meineOrders = (state.orders||[]).filter(o =>
+    (meinFzg && (o.fahrzeug===meinFzg.name || o.fahrzeugId===meinFzg.id)) || o.maId===ma.id
+  ).sort((a,b) => (b.datum||'').localeCompare(a.datum||''));
+
+  // Bewertungen: liegen global pro Mitarbeiter (m.bewertungen), nicht pro Baustelle
+  const bew = ma.bewertungen || {};
+  const eintraege = bew.eintraege || [];
+  const bsKriterien = [
+    {key:'sauberkeit', label:'Sauberkeit'},
+    {key:'qualitaet', label:'Qualität'},
+    {key:'eigeninitiative', label:'Eigeninitiative'},
+    {key:'dokumentation', label:'Dokumentation'},
+    {key:'rueckmeldung', label:'Rückmeldung'},
+  ];
+
+  let html = `<div class="card">
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">⭐ Meine Bewertungen</div>`;
+  if (!eintraege.length) {
+    html += '<div style="color:var(--muted);font-size:13px">Noch keine Bewertungen vorhanden.</div>';
+  } else {
+    html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
+    bsKriterien.forEach(kr => {
+      const avg = bew[kr.key];
+      const col = !avg ? 'var(--muted)' : avg>=4 ? 'var(--green)' : avg>=3 ? 'var(--accent)' : 'var(--red)';
+      html += `<div style="text-align:center;min-width:64px">
+        <div style="font-size:20px;font-weight:700;color:${col}">${avg||'–'}</div>
+        <div style="font-size:9px;color:var(--muted)">${kr.label}</div>
+      </div>`;
+    });
+    html += '</div>';
+    eintraege.slice().reverse().slice(0,5).forEach(e => {
+      const stars = bsKriterien.map(kr => e[kr.key] ? `${kr.label}: ${e[kr.key]}★` : null).filter(Boolean).join(' · ');
+      html += `<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted);font-size:10px">${e.datum||''}</span><br>
+        <span class="stars">${stars}</span>
+      </div>`;
+    });
+  }
+  html += '</div>';
+
+  html += `<div class="card">
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">📦 Meine Bestellungen (${meineOrders.length})</div>`;
+  if (!meineOrders.length) {
+    html += '<div style="color:var(--muted);font-size:13px">Keine Bestellungen gefunden.</div>';
+  } else {
+    meineOrders.forEach(o => {
+      const alleVerr = (o.items||[]).length && (o.items||[]).every(i=>i.verrechnet);
+      const teilVerr = (o.items||[]).some(i=>i.verrechnet) && !alleVerr;
+      const verrLabel = alleVerr ? '💰 Verrechnet' : teilVerr ? '💰 Teilweise' : '';
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+          <div style="font-weight:600;font-size:12px">${o.datum}</div>
+          <div style="display:flex;gap:6px">
+            ${verrLabel?`<span style="font-size:10px;color:${alleVerr?'var(--green)':'var(--accent)'};font-weight:700">${verrLabel}</span>`:''}
+            <span style="font-size:10px;color:${o.status==='geliefert'?'var(--green)':'var(--accent)'};font-weight:700">${o.status==='geliefert'?'✅':'⏳'}</span>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${(o.items||[]).map(i=>`${i.name} ×${i.menge}`).join(' · ')}</div>
+      </div>`;
+    });
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+</script>
+</body>
+</html>
