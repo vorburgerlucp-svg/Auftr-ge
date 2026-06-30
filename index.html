@@ -6276,6 +6276,20 @@ function startFirebaseListener() {
           if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
           if (!state.plan) state.plan = {};
 
+          // SCHUTZ: Falls Firebase deutlich weniger Baustellen hat als lokal vorhanden waren
+          // (z.B. anderer Client hat mit altem/leerem Stand gespeichert), NICHT stillschweigend
+          // löschen — lokale Baustellen behalten und zurück nach Firebase schreiben.
+          const lokalBsAnzahl = (lokalVorSync.baustellen||[]).length;
+          const remoteBsAnzahl = (state.baustellen||[]).length;
+          if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl) {
+            console.warn('[Firebase] Baustellen-Verlust erkannt (lokal:' + lokalBsAnzahl + ' remote:' + remoteBsAnzahl + ') — lokale Baustellen werden behalten');
+            // Fehlende lokale Baustellen (per ID) wieder einfügen
+            const remoteIds = new Set((state.baustellen||[]).map(b => b.id));
+            (lokalVorSync.baustellen||[]).forEach(b => {
+              if (!remoteIds.has(b.id)) state.baustellen.push(b);
+            });
+          }
+
           // Lokale Dokumente/Fotos (base64) zurückholen
           (state.fahrzeuge||[]).forEach(f => {
             const lokal = (lokalVorSync.fahrzeuge||[]).find(lf => lf.id === f.id);
@@ -6298,6 +6312,14 @@ function startFirebaseListener() {
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
           showSyncIndicator('↓ Firebase → Lokal');
+          // Falls Baustellen wiederhergestellt wurden, sofort zurück nach Firebase schreiben
+          if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl && dbRef) {
+            state._ts = Date.now();
+            suppressListener = true;
+            const slimJson = JSON.stringify(stripLargeData(state));
+            dbRef.set(slimJson).then(() => showSyncIndicator('↑ Baustellen wiederhergestellt'))
+              .finally(() => setTimeout(() => { suppressListener = false; }, 2000));
+          }
         }
 
         // Falls Login-Screen noch offen: Picker aktualisieren
