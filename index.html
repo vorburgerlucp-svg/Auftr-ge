@@ -1200,9 +1200,8 @@
       <input type="hidden" id="bs-farbe" value="gruen">
     </div>
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-danger btn-sm" id="bs-delete-btn" onclick="deleteBs()" style="margin-right:auto;display:none">🗑 Löschen</button>
       <button class="btn btn-secondary" onclick="closeBsModal()">Abbrechen</button>
-      <button class="btn btn-secondary" id="bs-delete-btn" style="color:var(--red);border-color:var(--red);display:none" onclick="deleteBaustelle()">🗑 Löschen</button>
+      <button class="btn btn-secondary" id="bs-delete-btn" style="color:var(--red);border-color:var(--red);margin-right:auto;display:none" onclick="deleteBaustelle()">🗑 Löschen</button>
       <button class="btn btn-primary" onclick="saveBsModal()">💾 Speichern</button>
     </div>
   </div>
@@ -1654,6 +1653,32 @@ function migrationSchraubenNeu() {
   save();
 }
 
+// Repariert bestehende Meldungen ohne maId: Monteur über die zugehörige
+// Bestellung (orderId → order.maId) nachträglich zuordnen, damit ältere
+// Meldungen von Monteuren ohne Fahrzeug nicht "unsichtbar" bleiben.
+function migrationMeldungenMaIdReparatur() {
+  if (state._meldungenMaIdRepariert) return;
+  let repariert = 0;
+  (state.monteurMeldungen||[]).forEach(m => {
+    if (m.maId) return; // bereits korrekt zugeordnet
+    // 1. Über orderId direkt
+    let order = m.orderId ? (state.orders||[]).find(o => o.id === m.orderId) : null;
+    // 2. Fallback: über Fahrzeug + Datum (ältere Meldungen ohne orderId)
+    if (!order && m.fahrzeug) {
+      order = (state.orders||[]).find(o => o.fahrzeug === m.fahrzeug && o.datum &&
+        m.datum && Math.abs(new Date(o.datum.replace(/(\d{2})\.(\d{2})\.(\d{4})/,'$3-$2-$1')) - new Date(m.datum)) < 1000*60*60*24);
+    }
+    if (order?.maId) { m.maId = order.maId; repariert++; }
+    else if (order?.fahrzeugId) {
+      const fzg = (state.fahrzeuge||[]).find(f => f.id === order.fahrzeugId);
+      const ma = fzg ? (state.mitarbeiter||[]).find(mm => { const mf = getMaFahrzeug(mm); return mf?.id === fzg.id; }) : null;
+      if (ma) { m.maId = ma.id; repariert++; }
+    }
+  });
+  state._meldungenMaIdRepariert = true;
+  if (repariert > 0) save();
+}
+
 function migrationDistanzplatten() {
   if (state._distanzplattenMigriert) return;
   if (!Array.isArray(state.kategorien)) state.kategorien = [];
@@ -1761,6 +1786,7 @@ function load() {
   migrationSpanplattenschrauben();
   migrationSchraubenNeu();
   migrationDistanzplatten();
+  migrationMeldungenMaIdReparatur();
   migrationTopRocRafixTX();
   migrationRafixOhneKopfErweiterung();
   migrationKategorienKorrektur();
@@ -1925,6 +1951,16 @@ function migrationMitarbeiterPins() {
 }
 
 let currentLoginUser = null;
+// Zentrale, gross-/kleinschreibungs-unabhängige Rollenprüfung
+function istLeiterUser(u) {
+  u = u || currentLoginUser;
+  if (!u) return false;
+  return (u.rolle||'').toLowerCase() === 'leiter' || (u.funktion||'').toLowerCase() === 'leiter';
+}
+function istAdminUser(u) {
+  u = u || currentLoginUser;
+  return !!(u?.admin || u?.entwickler);
+}
 
 function initLoginScreen() {
   // Bereits eingeloggt? (sessionStorage)
@@ -2154,14 +2190,14 @@ function finishLogin() {
   // Eingeloggten Namen im Header anzeigen
   const logo = document.querySelector('.logo');
   if (logo) {
-    const rolle = currentLoginUser.entwickler ? '🛠️ Entwickler' : currentLoginUser.admin ? '👑 Admin' : currentLoginUser.rolle === 'leiter' ? '👷 Leiter' : '🔧 Monteur';
+    const rolle = currentLoginUser.entwickler ? '🛠️ Entwickler' : currentLoginUser.admin ? '👑 Admin' : istLeiterUser() ? '👷 Leiter' : '🔧 Monteur';
     logo.innerHTML = '⬡ LagerTool <span style="font-size:11px;color:var(--muted,#8a8f98);font-weight:400;margin-left:8px;">' + currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'') + ' · ' + rolle + '</span> <button class="btn btn-secondary btn-sm" style="margin-left:10px;font-size:11px;" onclick="doLogout()">Logout</button>';
   }
 
   // ── Rollenbasierte Navigation ──
   const istEntwickler = !!currentLoginUser.entwickler;
   const istAdmin = !!currentLoginUser.admin;
-  const istLeiter = currentLoginUser.rolle === 'leiter' || currentLoginUser.funktion === 'leiter';
+  const istLeiter = istLeiterUser();
 
   if (!istAdmin) {
     // Leiter: Wochenplan, Baustellen-Status, Meldungen, Bestellung
@@ -3294,9 +3330,13 @@ function toggleOrderStatus(orderId, newStatus) {
   o.status = newStatus;
   if (newStatus === 'geliefert') {
     o.geliefertDatum = new Date().toLocaleString('de-CH');
-    // Meldung für Monteur des Fahrzeugs
-    const fzg = (state.fahrzeuge||[]).find(f => f.name === o.fahrzeug || f.id === o.fahrzeugId);
-    const ma = fzg ? (state.mitarbeiter||[]).find(m => { const mf = getMaFahrzeug(m); return mf?.id === fzg.id; }) : null;
+    // Meldung für Monteur: zuerst direkt über o.maId (Bestellung ohne Fahrzeug),
+    // sonst über das zugeordnete Fahrzeug
+    let ma = o.maId ? (state.mitarbeiter||[]).find(m => m.id === o.maId) : null;
+    if (!ma) {
+      const fzg = (state.fahrzeuge||[]).find(f => f.name === o.fahrzeug || f.id === o.fahrzeugId);
+      ma = fzg ? (state.mitarbeiter||[]).find(m => { const mf = getMaFahrzeug(m); return mf?.id === fzg.id; }) : null;
+    }
     if (!state.monteurMeldungen) state.monteurMeldungen = [];
     const artikelText = (o.items||[]).map(i => `• ${i.name} × ${i.menge} ${i.einheit||'Stk'}`).join('\n');
     state.monteurMeldungen.push({
@@ -3304,6 +3344,7 @@ function toggleOrderStatus(orderId, newStatus) {
       titel: '📦 Bestellung geliefert',
       text: `Deine Bestellung vom ${o.datum||''} ist bereit.\n${artikelText}`,
       maId: ma?.id || null, fahrzeug: o.fahrzeug || '',
+      orderId: o.id,
       datum: new Date().toISOString(), gelesen: false, quittiert: false
     });
     setTimeout(updateMeldungenBadge, 100);
@@ -5674,7 +5715,8 @@ function showBsModal(id) {
   const bs = id ? (state.baustellen||[]).find(b=>b.id===parseInt(id)) : null;
   document.getElementById('bs-modal-title').textContent = bs ? 'Baustelle bearbeiten' : 'Baustelle anlegen';
   const delBtn = document.getElementById('bs-delete-btn');
-  if (delBtn) delBtn.style.display = bs ? '' : 'none';
+  const istAdminOderLeiter = currentLoginUser?.admin || currentLoginUser?.entwickler || istLeiterUser();
+  if (delBtn) delBtn.style.display = (bs && istAdminOderLeiter) ? '' : 'none';
   document.getElementById('bs-modal-id').value = id||'';
   document.getElementById('bs-name').value = bs?.name||'';
   document.getElementById('bs-kunde').value = bs?.kunde||'';
@@ -5719,7 +5761,6 @@ function showBsModal(id) {
   // Tasks/Positionen laden
   tempBsTasks = bs?.tasks ? JSON.parse(JSON.stringify(bs.tasks)) : [];
   renderBsTasks();
-  document.getElementById('bs-delete-btn').style.display = bs ? '' : 'none';
   document.getElementById('bs-modal').classList.add('open');
 }
 
@@ -5769,6 +5810,11 @@ function deleteBaustelle() {
 function deleteBaustelleById(id) {
   const bs = (state.baustellen||[]).find(b => b.id === id);
   if (!bs) return;
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  if (!istAdmin && !istLeiter) {
+    return toast('Keine Berechtigung', 'Nur Admin/Leiter dürfen Baustellen löschen', '⛔');
+  }
   if (!confirm('Baustelle "' + bs.name + '" löschen?\n\nAlle Zuweisungen im Wochenplan und alle erfassten Stunden werden ebenfalls entfernt.')) return;
 
   state.baustellen = (state.baustellen||[]).filter(b => b.id !== id);
@@ -5886,6 +5932,11 @@ function saveBsModal() {
 
 function deleteBs() {
   const id=parseInt(document.getElementById('bs-modal-id').value);
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  if (!istAdmin && !istLeiter) {
+    return toast('Keine Berechtigung', 'Nur Admin/Leiter dürfen Baustellen löschen', '⛔');
+  }
   if(!confirm('Baustelle löschen?')) return;
   state.baustellen=state.baustellen.filter(b=>b.id!==id);
   Object.keys(state.plan).forEach(d=>Object.keys(state.plan[d]||{}).forEach(k=>{if(state.plan[d][k]?.bsId===id) delete state.plan[d][k];}));
@@ -6460,6 +6511,7 @@ function startFirebaseListener() {
           migrationFahrzeugMonteurId();
           migrationSchraubenNeu();
           migrationDistanzplatten();
+          migrationMeldungenMaIdReparatur();
           markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
@@ -6695,17 +6747,24 @@ function renderMeinProfil() {
 
   // Bestellungen-Card
   html += `<div class="card" style="margin-bottom:16px">
-    <div style="font-weight:700;font-size:15px;margin-bottom:12px">📦 Meine Bestellungen</div>`;
+    <div style="font-weight:700;font-size:15px;margin-bottom:12px">📦 Meine Bestellungen (${meineOrders.length})</div>`;
   if (!meineOrders.length) {
     html += `<div style="color:var(--muted);font-size:13px">Keine Bestellungen gefunden.</div>`;
   } else {
-    meineOrders.slice(0,15).forEach(o => {
+    meineOrders.forEach(o => {
       const statusCol = o.status==='geliefert'?'var(--green)':o.status==='offen'?'var(--accent)':'var(--muted)';
       const statusLabel = o.status==='geliefert'?'✅ Geliefert':o.status==='offen'?'⏳ Offen':'📋 '+(o.status||'');
+      const alleVerrechnet = (o.items||[]).length && (o.items||[]).every(i => i.verrechnet);
+      const teilweiseVerrechnet = (o.items||[]).some(i => i.verrechnet) && !alleVerrechnet;
+      const verrLabel = alleVerrechnet ? '💰 Verrechnet' : teilweiseVerrechnet ? '💰 Teilweise verrechnet' : '';
+      const verrCol = alleVerrechnet ? 'var(--green)' : 'var(--accent)';
       html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
           <div style="font-weight:600;font-size:13px">${o.datum||''} — ${o.fahrzeug||''}</div>
-          <div style="font-size:11px;color:${statusCol};font-weight:700">${statusLabel}</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${verrLabel ? `<span style="font-size:11px;color:${verrCol};font-weight:700">${verrLabel}</span>` : ''}
+            <span style="font-size:11px;color:${statusCol};font-weight:700">${statusLabel}</span>
+          </div>
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:3px">
           ${(o.items||[]).map(i=>`${i.name} ×${i.menge} ${i.einheit||'Stk'}${i.verrechnet?' <span style="color:var(--green)">✓</span>':''}`).join(' · ')}
@@ -6736,7 +6795,14 @@ function renderMeinProfil() {
 function renderMeldungen() {
   const el=document.getElementById('meldungen-liste');
   if(!el) return;
-  const alle=(state.monteurMeldungen||[]).filter(m=>!m.quittiert).sort((a,b)=>b.datum.localeCompare(a.datum));
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  let alle=(state.monteurMeldungen||[]).filter(m=>!m.quittiert);
+  // Monteure sehen nur ihre eigenen Meldungen. Admin/Leiter sehen alle.
+  if (!istAdmin && !istLeiter && currentLoginUser) {
+    alle = alle.filter(m => m.maId === currentLoginUser.id);
+  }
+  alle = alle.sort((a,b)=>b.datum.localeCompare(a.datum));
   const badge=document.getElementById('meldungen-badge');
   if(badge){badge.textContent=alle.length;badge.style.display=alle.length?'inline':'none';}
   if(!alle.length){
@@ -6747,12 +6813,28 @@ function renderMeldungen() {
     const ma=(state.mitarbeiter||[]).find(x=>x.id===m.maId);
     const d=new Date(m.datum).toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
     const col=m.typ==='abholbereit'?'var(--green)':m.typ==='service'?'var(--accent)':'var(--accent2)';
+    // Zugehörige Bestellung suchen, um aktuellen Status (offen/geliefert/verrechnet) anzuzeigen
+    const order = m.orderId ? (state.orders||[]).find(o => o.id === m.orderId) : null;
+    let statusBadges = '';
+    if (order) {
+      const statusCol = order.status==='geliefert'?'var(--green)':'var(--accent)';
+      const statusLabel = order.status==='geliefert'?'✅ Geliefert':'⏳ Offen';
+      const alleVerrechnet = (order.items||[]).length && (order.items||[]).every(i => i.verrechnet);
+      const teilweiseVerrechnet = (order.items||[]).some(i => i.verrechnet) && !alleVerrechnet;
+      const verrLabel = alleVerrechnet ? '💰 Verrechnet' : teilweiseVerrechnet ? '💰 Teilweise verrechnet' : '';
+      const verrCol = alleVerrechnet ? 'var(--green)' : 'var(--accent)';
+      statusBadges = `<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:700;color:${statusCol};background:var(--surface2);padding:2px 8px;border-radius:10px">${statusLabel}</span>
+        ${verrLabel ? `<span style="font-size:11px;font-weight:700;color:${verrCol};background:var(--surface2);padding:2px 8px;border-radius:10px">${verrLabel}</span>` : ''}
+      </div>`;
+    }
     return `<div class="card" style="border-left:4px solid ${col};margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;gap:12px">
         <div style="flex:1">
           <div style="font-weight:700;font-size:14px;margin-bottom:4px">${m.titel}</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${d}${ma?' · '+ma.vorname+' '+(ma.nachname||''):''}</div>
           <div style="font-size:13px;white-space:pre-line">${m.text}</div>
+          ${statusBadges}
         </div>
         <button class="btn btn-primary btn-sm" onclick="meldungQuittieren(${m.id})" style="flex-shrink:0;white-space:nowrap">✓ Erledigt</button>
       </div>
@@ -6767,7 +6849,13 @@ function meldungQuittieren(id){
   toast('Erledigt','Meldung geschlossen','✅');
 }
 function updateMeldungenBadge(){
-  const n=(state.monteurMeldungen||[]).filter(m=>!m.quittiert).length;
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  let offene = (state.monteurMeldungen||[]).filter(m=>!m.quittiert);
+  if (!istAdmin && !istLeiter && currentLoginUser) {
+    offene = offene.filter(m => m.maId === currentLoginUser.id);
+  }
+  const n = offene.length;
   const b=document.getElementById('meldungen-badge');
   if(b){b.textContent=n;b.style.display=n?'inline':'none';}
 }
@@ -7205,14 +7293,18 @@ function renderBaustatus() {
 function renderBaustatusStatus() {
   let baustellen = (state.baustellen || []);
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
-  const istLeiter = currentLoginUser?.rolle === 'leiter' || currentLoginUser?.funktion === 'leiter';
+  const istLeiter = istLeiterUser();
   const istChefMonteurFn = (bau) => bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
 
-  // Monteure sehen nur ihre Baustellen
-  if (!istAdmin && !istLeiter && currentLoginUser) {
+  // Nur Admin/Entwickler sehen alle Baustellen.
+  // Leiter UND Monteure sehen nur Baustellen, denen sie effektiv zugeteilt sind
+  // (über Wochenplan-Zuweisung, eigene Stunden, oder als Chef-Monteur).
+  if (!istAdmin && currentLoginUser) {
     baustellen = baustellen.filter(bau => {
+      if (istChefMonteurFn(bau)) return true;
+      const meinName = (currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim();
       const hatStunden = (bau.tasks||[]).some(t =>
-        t.monteurHours && Object.keys(t.monteurHours).some(k => k.toLowerCase().includes(currentLoginUser.nachname?.toLowerCase()||'###'))
+        t.monteurHours && Object.keys(t.monteurHours).some(k => k === meinName)
       );
       const hatZuweisung = Object.values(state.plan||{}).some(tag =>
         Object.values(tag||{}).some(e => e.maId === currentLoginUser.id && e.bsId === bau.id)
@@ -7261,8 +7353,8 @@ function renderBaustatusStatus() {
         '</div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
-        (istAdmin || istLeiter ? '<button onclick="event.stopPropagation();showBsModal(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px">✏️</button>' : '') +
-        '<button onclick="event.stopPropagation();bsToggleBeendet(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px;color:var(--muted)">○ Beenden</button>' +
+        (istAdmin || istLeiter || istChefMonteurFn(bau) ? '<button onclick="event.stopPropagation();showBsModal(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px">✏️</button>' : '') +
+        (istAdmin || istLeiter ? '<button onclick="event.stopPropagation();bsToggleBeendet(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px;color:var(--muted)">○ Beenden</button>' : '') +
         '<span style="color:var(--muted);font-size:13px">' + (showExpanded ? '▲' : '▼') + '</span>' +
       '</div>' +
     '</div>';
@@ -7272,7 +7364,7 @@ function renderBaustatusStatus() {
 
       if (tasks.length === 0) {
         html += '<div style="color:var(--muted);font-size:12px;padding:10px 0;">Noch keine Tasks erfasst. ' +
-          '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks erfassen</button>' +
+          (istAdmin || istLeiter || istChefMonteurFn(bau) ? '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Tasks erfassen</button>' : '') +
           (istAdmin || istLeiter ? ' <button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button>' : '') +
           '</div>';
       } else {
@@ -7289,13 +7381,16 @@ function renderBaustatusStatus() {
           const zugewiesen = bsZugewieseneMonteure(bau.id);
           const zugewiesenIds = new Set(zugewiesen.map(m=>m.id));
           const andereMonteure = (state.mitarbeiter||[]).filter(m => !zugewiesenIds.has(m.id));
-          const monteurOptions =
-            (zugewiesen.length ? '<optgroup label="Im Wochenplan zugewiesen">' +
-              zugewiesen.map(m => '<option value="' + m.id + '">👷 ' + m.vorname + '</option>').join('') +
-            '</optgroup>' : '') +
-            (andereMonteure.length ? '<optgroup label="Alle Mitarbeiter">' +
-              andereMonteure.map(m => '<option value="' + m.id + '">' + m.vorname + '</option>').join('') +
-            '</optgroup>' : '');
+          const darfFuerAlleBuchen = istAdmin || istLeiter || istChefMonteurFn(bau);
+          const monteurOptions = darfFuerAlleBuchen
+            ? (zugewiesen.length ? '<optgroup label="Im Wochenplan zugewiesen">' +
+                zugewiesen.map(m => '<option value="' + m.id + '">👷 ' + m.vorname + '</option>').join('') +
+              '</optgroup>' : '') +
+              (andereMonteure.length ? '<optgroup label="Alle Mitarbeiter">' +
+                andereMonteure.map(m => '<option value="' + m.id + '">' + m.vorname + '</option>').join('') +
+              '</optgroup>' : '')
+            // Normale Monteure können nur für sich selbst buchen
+            : (currentLoginUser ? '<option value="' + currentLoginUser.id + '">' + currentLoginUser.vorname + '</option>' : '');
 
           html += '<tr style="border-bottom:1px solid var(--border);">' +
             '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') +
@@ -7303,7 +7398,7 @@ function renderBaustatusStatus() {
                 Object.entries(t.monteurHours).map(([n,h]) =>
                   '<span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--muted);margin-right:6px;background:var(--surface2);padding:1px 6px;border-radius:8px">' +
                     n + ': ' + h + 'h' +
-                    (istAdmin || istLeiter || istChefMonteurFn(bau) || (currentLoginUser && n.toLowerCase().includes((currentLoginUser.nachname||'###').toLowerCase()))
+                    (istAdmin || istLeiter || istChefMonteurFn(bau) || (currentLoginUser && n === (currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim())
                       ? ' <button onclick="bsDeleteStunden(' + bau.id + ',\'' + t.id + '\',\'' + n.replace(/'/g,"\\'") + '\')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Stunden löschen">✕</button>'
                       : '') +
                   '</span>'
@@ -7325,7 +7420,7 @@ function renderBaustatusStatus() {
 
         html += '<div style="margin-top:8px;display:flex;gap:6px;">' +
           '<button class="btn btn-secondary btn-sm" onclick="printBaustatus(' + bau.id + ')">🖨️ Drucken</button>' +
-          '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Task hinzufügen</button>' +
+          (istAdmin || istLeiter || istChefMonteurFn(bau) ? '<button class="btn btn-secondary btn-sm" onclick="bsAddTasksPrompt(' + bau.id + ')">+ Task hinzufügen</button>' : '') +
           (istAdmin || istLeiter ? '<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red)" onclick="deleteBaustelleById(' + bau.id + ')">🗑</button>' : '') +
         '</div>';
       }
@@ -7342,6 +7437,13 @@ function renderBaustatusStatus() {
 function bsDeleteStunden(bauId, taskId, monteurName) {
   const bau = state.baustellen.find(b => b.id === bauId);
   if (!bau) return;
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  const meinName = currentLoginUser ? (currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim() : null;
+  if (!istAdmin && !istLeiter && !istChef && monteurName !== meinName) {
+    return toast('Keine Berechtigung', 'Du kannst nur deine eigenen Stunden löschen', '⛔');
+  }
   const task = (bau.tasks||[]).find(t => t.id === taskId);
   if (!task || !task.monteurHours || !task.monteurHours[monteurName]) return;
   const stunden = task.monteurHours[monteurName];
@@ -7362,6 +7464,14 @@ function bsBuchen(bauId, taskId) {
   if (!h || h <= 0) return;
   const ma = state.mitarbeiter.find(m => m.id === parseInt(mEl.value));
   if (!ma) return;
+
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  if (!istAdmin && !istLeiter && !istChef && ma.id !== currentLoginUser?.id) {
+    return toast('Keine Berechtigung', 'Du kannst nur deine eigenen Stunden buchen', '⛔');
+  }
+
   const maName = ma.vorname + ' ' + ma.nachname;
 
   if (!task.monteurHours) task.monteurHours = {};
@@ -7381,6 +7491,13 @@ function bsBuchen(bauId, taskId) {
 // Tasks für eine Baustelle anlegen (einfacher Prompt-Dialog, mehrere Tasks per Zeile)
 function bsAddTasksPrompt(bauId) {
   const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau) return;
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  if (!istAdmin && !istLeiter && !istChef) {
+    return toast('Keine Berechtigung', 'Nur Admin/Leiter/Chef-Monteur dürfen Tasks hinzufügen', '⛔');
+  }
   if (!bau.tasks) bau.tasks = [];
   const input = prompt('Neue Task(s) eingeben — Format: Name, Soll-Stunden\\nMehrere Tasks: eine pro Zeile\\n\\nBeispiel:\\nKüche, 40\\nBad, 15');
   if (!input) return;
@@ -7535,6 +7652,11 @@ function renderBaustatusKW() {
 function bsToggleBeendet(bauId) {
   const bau = (state.baustellen||[]).find(b => b.id === bauId);
   if (!bau) return;
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const istLeiter = istLeiterUser();
+  if (!istAdmin && !istLeiter) {
+    return toast('Keine Berechtigung', 'Nur Admin/Leiter dürfen Baustellen beenden', '⛔');
+  }
   bau.beendet = !bau.beendet;
   save();
   renderBaustatusKW();
