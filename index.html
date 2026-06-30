@@ -2939,11 +2939,8 @@ function addFahrzeug() {
 }
 
 function renderFahrzeugDropdowns() {
-  const sel = document.getElementById('best-fahrzeug');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— Fahrzeug wählen —</option>' +
-    state.fahrzeuge.map(f => `<option value="${f.id}">${f.name} (${f.monteur})</option>`).join('');
-  if (cur) sel.value = cur;
+  // Hinweis: 'best-fahrzeug' wird separat in renderBestellungDropdowns() befüllt
+  // (mit fzg_/ma_ Prefix für Monteure ohne Fahrzeug) — hier NICHT anfassen.
 }
 
 function renderFzgSettings() {
@@ -2972,11 +2969,19 @@ function renderBestellungDropdowns() {
   renderFahrzeugDropdowns();
   const sel = document.getElementById('best-fahrzeug');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— Fahrzeug wählen —</option>' +
-    state.fahrzeuge.map(f => `<option value="${f.id}">${f.name} (${f.monteur||'frei'})</option>`).join('');
+  const fzgOptions = state.fahrzeuge.map(f => `<option value="fzg_${f.id}">${f.name} (${f.monteur||'frei'})</option>`).join('');
+  // Monteure ohne Fahrzeug als eigene Option
+  const maOhneFzg = (state.mitarbeiter||[]).filter(m => !getMaFahrzeug(m) && !m.entwickler && !m.admin);
+  const maOptions = maOhneFzg.length
+    ? `<optgroup label="Monteure ohne Fahrzeug">` +
+      maOhneFzg.map(m => `<option value="ma_${m.id}">${m.vorname} ${m.nachname||''} (kein Fzg)</option>`).join('') +
+      `</optgroup>`
+    : '';
+  sel.innerHTML = '<option value="">— Fahrzeug / Monteur wählen —</option>' + fzgOptions + maOptions;
   if (!cur && currentLoginUser && !currentLoginUser.admin) {
     const meinFzg = getMaFahrzeug(currentLoginUser);
-    if (meinFzg) sel.value = meinFzg.id;
+    if (meinFzg) sel.value = 'fzg_' + meinFzg.id;
+    else sel.value = 'ma_' + currentLoginUser.id;
   } else if (cur) sel.value = cur;
   renderKatPills();
   renderArtikelGrid();
@@ -3066,12 +3071,22 @@ function renderBestCart() {
 function removeFromCart(id) { toggleCart(id); }
 
 async function submitBestellung() {
-  const fzgId = parseInt(document.getElementById('best-fahrzeug').value);
-  if (!fzgId) return toast('Fehler', 'Bitte Fahrzeug auswählen', '⚠️');
+  const selVal = document.getElementById('best-fahrzeug').value;
+  if (!selVal) return toast('Fehler', 'Bitte Fahrzeug oder Monteur auswählen', '⚠️');
   if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
 
-  const fzg = state.fahrzeuge.find(f => f.id === fzgId);
-  if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden (ID: ' + fzgId + ')', '⚠️');
+  let fzgName = '', monteurName = '', fahrzeugId = null, maId = null;
+  if (selVal.startsWith('fzg_')) {
+    const fzgId = parseInt(selVal.slice(4));
+    const fzg = state.fahrzeuge.find(f => f.id === fzgId);
+    if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden', '⚠️');
+    fzgName = fzg.name; monteurName = fzg.monteur || ''; fahrzeugId = fzg.id;
+  } else if (selVal.startsWith('ma_')) {
+    const mId = parseInt(selVal.slice(3));
+    const ma = (state.mitarbeiter||[]).find(m => m.id === mId);
+    if (!ma) return toast('Fehler', 'Monteur nicht gefunden', '⚠️');
+    fzgName = '(kein Fahrzeug)'; monteurName = (ma.vorname+' '+(ma.nachname||'')).trim(); maId = ma.id;
+  } else return toast('Fehler', 'Ungültige Auswahl', '⚠️');
 
   const items = [];
   for (const c of cart) {
@@ -3083,8 +3098,10 @@ async function submitBestellung() {
   const order = {
     id: Date.now(),
     datum: new Date().toLocaleString('de-CH'),
-    fahrzeug: fzg.name,
-    monteur: fzg.monteur || '',
+    fahrzeug: fzgName,
+    fahrzeugId: fahrzeugId,
+    maId: maId,
+    monteur: monteurName,
     bemerkung: document.getElementById('best-bemerkung')?.value || '',
     status: 'offen',
     items
