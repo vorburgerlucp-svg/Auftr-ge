@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>LagerTool – Monteur</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if (typeof emailjs !== 'undefined') { try { emailjs.init('uEjZ4g6QkqHfSFjQ_'); } catch(e) {} }</script>
@@ -525,7 +526,9 @@ window.addEventListener('load', function() {
 function initFirebase() {
   try {
     firebase.initializeApp({ apiKey: FB_KEY, databaseURL: FB_URL, projectId: FB_PID, appId: FB_APPID });
-    startFirebaseListener();
+    firebase.auth().signInAnonymously()
+      .then(() => startFirebaseListener())
+      .catch((err) => { console.error('[Firebase] Anmeldung fehlgeschlagen', err); setSyncStatus('err','Anmeldung fehlgeschlagen'); });
   } catch(e) { console.error('[Firebase] init error', e); setSyncStatus('err','Fehler'); }
 }
 
