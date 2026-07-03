@@ -512,6 +512,7 @@
       <button class="btn btn-secondary btn-sm" onclick="showBlockModal()">📅 Block einfügen</button>
       <button class="btn btn-secondary btn-sm" onclick="autoAssign()">🤖 Auto-Zuweisung</button>
       <button class="btn btn-secondary btn-sm" onclick="wpToggleSort()">🔀 Gruppieren</button>
+      <button class="btn btn-secondary btn-sm" onclick="wpPrint()">🖨️ Drucken</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wp-excel-upload').click()">⬆ Import (Excel/PDF)</button>
       <input type="file" id="wp-excel-upload" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="wpFileImport(event)">
@@ -1170,7 +1171,19 @@
       <div><label>E-Mail</label><input type="email" id="bs-ap-email" placeholder="t.fust@fust.ch"></div>
     </div>
     <hr class="divider">
-    <div class="card-title">📋 Bemerkungen / Auftragsinformationen</div>
+    <div class="card-title">🏨 Hotel / Unterkunft</div>
+    <div class="form-row cols-2">
+      <div><label>Hotel Name</label><input type="text" id="bs-hotel-name" placeholder="z.B. Hotel Merian Basel"></div>
+      <div><label>Check-in / Check-out</label><input type="text" id="bs-hotel-daten" placeholder="z.B. 07.07. – 11.07.2026"></div>
+    </div>
+    <div class="form-row cols-1">
+      <div><label>Hotel Adresse</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="bs-hotel-adresse" placeholder="z.B. Rheingasse 2, 4058 Basel" style="flex:1">
+          <button type="button" onclick="const a=document.getElementById('bs-hotel-adresse').value.trim();if(a)window.open('https://maps.google.com/?q='+encodeURIComponent(a),'_blank');" class="btn btn-secondary btn-sm">🗺</button>
+        </div>
+      </div>
+    </div>
     <div class="form-row cols-1">
       <div>
         <textarea id="bs-notiz" rows="4"
@@ -1342,6 +1355,7 @@
         <div id="buchungs-bs-startzeit" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-ap" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-positionen" style="font-size:12px;color:var(--muted)"></div>
+        <div id="buchungs-bs-hotel" style="font-size:12px;color:#f0c040;font-weight:600;display:none">🏨 <span id="buchungs-bs-hotel-text"></span></div>
         <div id="buchungs-bs-notiz" style="font-size:12px;color:var(--text);white-space:pre-line;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"></div>
       </div>
     </div>
@@ -4201,8 +4215,15 @@ function renderWochenplan() {
   html+='</tr></thead><tbody>';
 
   // Plan-Key pro Tag und Monteur: ma{maId}_{datum}
-  // Baustellen-Kopfzeilen
+  // Baustellen-Kopfzeilen (ein-/ausklappbar)
   if(baustellen.length){
+    const collapsed = window._wpBsCollapsed === true;
+    html += '<tr><td colspan="'+cols+'" style="padding:4px 8px;background:var(--surface2);border-bottom:1px solid var(--border)">'
+      +'<button onclick="window._wpBsCollapsed=!window._wpBsCollapsed;renderWochenplan()" '
+      +'style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;font-weight:700;letter-spacing:.5px">'
+      +(collapsed?'▶':'▼')+' BAUSTELLEN ('+baustellen.length+')'+(collapsed?' – eingeklappt':'')+'</button>'
+      +'</td></tr>';
+    if(!collapsed){
     baustellen.forEach((bs,bsIdx)=>{
       const hex=getHex(bs), tc=textCol(hex);
       if(bsIdx>0) html+='<tr><td colspan="'+cols+'" style="height:6px;background:var(--bg);border:none;padding:0"></td></tr>';
@@ -4232,6 +4253,7 @@ function renderWochenplan() {
       html+='</tr>';
     });
     html+='<tr><td colspan="'+cols+'" style="height:8px;background:var(--bg);border:none;padding:0"></td></tr>';
+    } // end if(!collapsed)
   }
 
   // ALLE MONTEURE als Zeilen
@@ -4322,12 +4344,13 @@ function renderWochenplan() {
           const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
           const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
           const label=bs?bs.name:'?';
+          const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell" draggable="true" '
             +'data-key="'+planKey+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
             +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:28px;cursor:grab" '
             +'onclick="wpMaCellClick('+m.id+',\''+ds+'\')">'
-            +label+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')
+            +label+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
             +'</div></td>';
         } else if(statusE?.status){
           const sHex=statusE.farbeHex||statusHex(statusE.status), sTc=textCol(sHex);
@@ -4801,6 +4824,15 @@ function showBuchungsMenu(maId, datum) {
     document.getElementById('buchungs-bs-ap').innerHTML       = entryBs.apName
       ? '👤 '+entryBs.apName+(entryBs.apTel?' · '+entryBs.apTel:'')+(entryBs.apEmail?' · '+entryBs.apEmail:'') : '';
     document.getElementById('buchungs-bs-positionen').innerHTML = '👷 '+( entryBs.positionen||1)+' Monteur'+((entryBs.positionen||1)>1?'e':'');
+    // Hotel
+    const hotelEl = document.getElementById('buchungs-bs-hotel');
+    const hotelTextEl = document.getElementById('buchungs-bs-hotel-text');
+    if (entryBs.hotelName) {
+      hotelTextEl.innerHTML = entryBs.hotelName
+        + (entryBs.hotelDaten ? ' · '+entryBs.hotelDaten : '')
+        + (entryBs.hotelAdresse ? ' · <a href="https://maps.google.com/?q='+encodeURIComponent(entryBs.hotelAdresse)+'" target="_blank" style="color:#f0c040">'+entryBs.hotelAdresse+'</a>' : '');
+      hotelEl.style.display = 'block';
+    } else { hotelEl.style.display = 'none'; }
     const notizEl = document.getElementById('buchungs-bs-notiz');
     if (notizEl) {
       notizEl.style.display = entryBs.notiz ? 'block' : 'none';
@@ -5257,8 +5289,10 @@ function parseWochenplanExcel(rows) {
     });
     if (!ma) { if (!nichtGefunden.includes(monteurName)) nichtGefunden.push(monteurName); continue; }
 
-    // Für jeden Wochentag
+    // Für jeden Wochentag (Sa/So überspringen)
     tagSpalten.forEach(({ col, datum }) => {
+      const d = new Date(datum + 'T12:00');
+      if (d.getDay() === 0 || d.getDay() === 6) return; // Samstag + Sonntag frei
       const zelle = String(row[col]||'').trim();
       if (!zelle) return;
       const zelleLC = zelle.toLowerCase();
@@ -5782,7 +5816,10 @@ function showBsModal(id) {
   document.getElementById('bs-ap-name').value = bs?.apName||'';
   document.getElementById('bs-ap-tel').value = bs?.apTel||'';
   document.getElementById('bs-ap-email').value = bs?.apEmail||'';
-  document.getElementById('bs-notiz').value     = bs?.notiz||'';
+  document.getElementById('bs-hotel-name').value = bs?.hotelName||'';
+  document.getElementById('bs-hotel-adresse').value = bs?.hotelAdresse||'';
+  document.getElementById('bs-hotel-daten').value = bs?.hotelDaten||'';
+  document.getElementById('bs-notiz').value = bs?.notiz||'';
   // Farbe setzen
   const hex = bs?.farbeHex || (bs?.farbe ? FARB_HEX[bs.farbe]||'#1a6b3a' : '#1a6b3a');
   selectedBsHex = hex;
@@ -5914,6 +5951,9 @@ function saveBsModal() {
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
     apEmail:document.getElementById('bs-ap-email').value.trim(),
+    hotelName:document.getElementById('bs-hotel-name').value.trim(),
+    hotelAdresse:document.getElementById('bs-hotel-adresse').value.trim(),
+    hotelDaten:document.getElementById('bs-hotel-daten').value.trim(),
     notiz:document.getElementById('bs-notiz').value.trim(),
     farbeHex:selectedBsHex||'#1a6b3a',
     docs:tempBsDocs,
@@ -6222,8 +6262,10 @@ function saveBlock() {
     }
     if(!maIds.length) return toast('Fehler','Bitte mindestens einen Monteur wählen','⚠️');
 
-    // Pro Tag: jeden gewählten Monteur in seine Position eintragen
+    // Pro Tag: jeden gewählten Monteur in seine Position eintragen (Sa/So überspringen)
     tage.forEach(ds=>{
+      const dObj = new Date(ds+'T12:00');
+      if (dObj.getDay() === 0 || dObj.getDay() === 6) return; // Sa+So frei
       if(!state.plan[ds]) state.plan[ds]={};
       maIds.forEach((maId,idx)=>{
         const konflikt=Object.values(state.plan[ds]).some(e=>e.maId===maId && e.bsId && e.bsId!==blockSelBsId);
@@ -6246,8 +6288,8 @@ function saveBlock() {
     if(!maId) return toast('Fehler','Bitte Monteur wählen','⚠️');
     const hex=statusHex(blockSelStatus);
     tage.forEach(ds=>{
+      if (new Date(ds+'T12:00').getDay() === 0 || new Date(ds+'T12:00').getDay() === 6) return;
       if(!state.plan[ds]) state.plan[ds]={};
-      state.plan[ds]['status_ma'+maId]={ maId, status:blockSelStatus, farbeHex:hex, notiz };
     });
     save();
     const ma=(state.mitarbeiter||[]).find(m=>m.id===maId);
@@ -6360,10 +6402,12 @@ function wpExcelExport() {
     const fzg = getMaFahrzeug(m);
     const row = [m.vorname, m.nachname||'', fzg?fzg.name:(m.fahrzeugHint||''), m.startzeit||''];
     allDates.forEach(d => {
-      const e = state.plan[fmtDate(d)]?.[`ma${m.id}`];
+      const ds = fmtDate(d);
+      const planKey = `ma${m.id}_${ds}`;
+      const e = state.plan?.[ds]?.[planKey] || state.plan?.[ds]?.['status_ma'+m.id];
       if (!e) { row.push(''); return; }
-      const bs = e.bsId ? state.baustellen?.find(b=>b.id===e.bsId) : null;
-      row.push((bs?bs.name:e.status||'')+(e.notiz?' · '+e.notiz:''));
+      const bs = e.bsId ? (state.baustellen||[]).find(b=>b.id===e.bsId) : null;
+      row.push(bs ? bs.name : (e.status||''));
     });
     csv += row.join(';') + '\n';
   });
@@ -6374,6 +6418,76 @@ function wpExcelExport() {
   a.download=`Wochenplan_KW${getKW(wpBaseMonday)}_${wpBaseMonday.getFullYear()}.csv`;
   a.click();
   toast('Excel Export', `KW ${getKW(wpBaseMonday)} heruntergeladen`, '📊');
+}
+
+function wpPrint() {
+  wpInit();
+  const monteure = (state.mitarbeiter||[]).filter(m=>m.vorname);
+  const allDates = [];
+  for (let d=0; d<5; d++) allDates.push(addDays(wpBaseMonday,d)); // Mo–Fr
+  const TAGE = ['Mo','Di','Mi','Do','Fr'];
+  const kw = getKW(wpBaseMonday);
+
+  // Farben der Baustellen sammeln
+  const farbeMap = {};
+  (state.baustellen||[]).forEach(bs => { farbeMap[bs.id] = getHex(bs); });
+
+  let rows = '';
+  monteure.forEach(m => {
+    const fzg = getMaFahrzeug(m);
+    let tds = '';
+    allDates.forEach(d => {
+      const ds = fmtDate(d);
+      const e = state.plan?.[ds]?.['ma'+m.id+'_'+ds];
+      const s = state.plan?.[ds]?.['status_ma'+m.id];
+      let text = '', bg = '#2a2e36', col = '#aaa';
+      if (s) {
+        text = s.status;
+        bg = s.farbeHex || '#8B0000'; col = '#fff';
+      } else if (e?.bsId) {
+        const bs = (state.baustellen||[]).find(b=>b.id===e.bsId);
+        text = bs?.name || '?';
+        bg = e.farbeHex || '#333'; col = '#fff';
+      }
+      tds += `<td style="background:${bg};color:${col}">${text}</td>`;
+    });
+    rows += `<tr>
+      <td class="name">${m.vorname}<br><span>${m.nachname||''}</span></td>
+      <td class="fzg">${fzg?fzg.name:''}</td>
+      ${tds}
+    </tr>`;
+  });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Wochenplan KW${kw} ${wpBaseMonday.getFullYear()}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 9pt; background: #fff; }
+    @page { size: A4 landscape; margin: 10mm; }
+    h1 { font-size: 13pt; margin-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 4px 5px; text-align: center; vertical-align: middle; }
+    th { background: #1a1d24; color: #fff; font-size: 9pt; }
+    td.name { text-align: left; font-weight: 700; min-width: 90px; background: #f5f5f5; }
+    td.name span { font-weight: 400; color: #666; font-size: 8pt; }
+    td.fzg { font-size: 8pt; color: #444; min-width: 38px; }
+    td { font-size: 8pt; font-weight: 600; min-width: 80px; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style></head><body>
+  <h1>📅 Wochenplan KW${kw} · ${fmtDE(wpBaseMonday)} – ${fmtDE(addDays(wpBaseMonday,4))} · ${wpBaseMonday.getFullYear()}</h1>
+  <table>
+    <thead><tr>
+      <th>Monteur</th><th>Fzg.</th>
+      ${TAGE.map((t,i)=>`<th>${t}<br><span style="font-weight:400;font-size:8pt">${fmtDE(allDates[i])}</span></th>`).join('')}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+
+  const w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── HISTORY ────────────────────────────────────────────
