@@ -511,6 +511,7 @@
       <button class="btn btn-secondary btn-sm" onclick="showBsModal(null)">+ Baustelle anlegen</button>
       <button class="btn btn-secondary btn-sm" onclick="showBlockModal()">📅 Block einfügen</button>
       <button class="btn btn-secondary btn-sm" onclick="autoAssign()">🤖 Auto-Zuweisung</button>
+      <button class="btn btn-secondary btn-sm" onclick="wpToggleSort()">🔀 Gruppieren</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wp-excel-upload').click()">⬆ Import (Excel/PDF)</button>
       <input type="file" id="wp-excel-upload" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="wpFileImport(event)">
@@ -4112,6 +4113,33 @@ function wpInit() {
   if (!state.plan) state.plan = {};
 }
 function wpNavi(delta) { wpBaseMonday = addDays(wpBaseMonday, delta*7); renderWochenplan(); }
+
+let wpSortGruppiert = false;
+function wpToggleSort() {
+  wpSortGruppiert = !wpSortGruppiert;
+  renderWochenplan();
+  toast(wpSortGruppiert ? 'Gruppiert' : 'Normal', wpSortGruppiert ? 'Nach Baustelle sortiert' : 'Alphabetische Reihenfolge', '🔀');
+}
+function wpGetMonteuerSortKey(m, allDates) {
+  // Haupteinsatz der Woche bestimmen (häufigstes Ziel Mo–Fr)
+  const bsCount = {};
+  let status = null;
+  for (const d of allDates) {
+    const ds = fmtDate(d);
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    const e = state.plan?.[ds]?.['ma'+m.id+'_'+ds];
+    const s = state.plan?.[ds]?.['status_ma'+m.id];
+    if (s) status = s.status;
+    if (e?.bsId) bsCount[e.bsId] = (bsCount[e.bsId]||0) + 1;
+  }
+  const topBsId = Object.keys(bsCount).sort((a,b)=>bsCount[b]-bsCount[a])[0];
+  if (topBsId) {
+    const bs = (state.baustellen||[]).find(b=>b.id===parseInt(topBsId));
+    return '1_' + (bs?.name||topBsId);
+  }
+  if (status) return '2_' + status; // Urlaub/Krank etc.
+  return '3_frei';
+}
 function wpHeute() { wpBaseMonday = getMonday(new Date()); renderWochenplan(); }
 
 // ── WOCHENPLAN KERN ────────────────────────────────────
@@ -4146,7 +4174,12 @@ function renderWochenplan() {
     'KW '+kw+' · '+fmtDE(wpBaseMonday)+' – '+fmtDE(addDays(wpBaseMonday,6))+' · '+wpBaseMonday.getFullYear();
   renderWpLegende();
 
-  const monteure   = (state.mitarbeiter||[]).filter(m=>m.vorname);
+  let monteure = (state.mitarbeiter||[]).filter(m=>m.vorname);
+  if (wpSortGruppiert) {
+    monteure = monteure.slice().sort((a,b) =>
+      wpGetMonteuerSortKey(a, allDates).localeCompare(wpGetMonteuerSortKey(b, allDates))
+    );
+  }
   const baustellen = (state.baustellen||[]).filter(bs=>{
     const von=bs.von||'0000-00-00', bis=bs.bis||'9999-12-31';
     return von<=wEnd && bis>=wStart;
@@ -5905,7 +5938,7 @@ function saveBsModal() {
     for (let d = new Date(startD); d <= endD; d.setDate(d.getDate()+1)) {
       const datum = fmtDate(d);
       // Sonntag überspringen (Wochenende ohne Eintrag)
-      if (d.getDay() === 0) continue;
+      if (d.getDay() === 0 || d.getDay() === 6) continue; // Samstag + Sonntag frei
       if (!state.plan[datum]) state.plan[datum] = {};
       alleTeamIds.forEach(maId => {
         // Bestehenden Status-Eintrag für diesen Tag/Monteur nicht überschreiben falls schon eine andere Baustelle gesetzt ist und nicht diese
