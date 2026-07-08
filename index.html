@@ -3423,10 +3423,13 @@ function renderJahresbericht() {
 
   if (!orders.length) { el.innerHTML = '<div class="empty">Keine Bestellungen im gewählten Zeitraum</div>'; return; }
 
-  // Verrechnungs-Daten laden
   if (!state.verrechnungen) state.verrechnungen = {};
+  if (!state.verrechnungsPos) state.verrechnungsPos = {}; // Freie Positionen pro Fahrzeug+Jahr
   const vKey = (fzg, art) => fzg + '||' + art + '||' + jahrFilter;
+  const posKey = (fzg) => fzg + '||' + jahrFilter + '||pos';
+  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
 
+  // Gruppieren nach Fahrzeug
   const perFzg = {};
   orders.forEach(o => {
     if (!perFzg[o.fahrzeug]) perFzg[o.fahrzeug] = { monteur: o.monteur, items: {}, count: 0 };
@@ -3437,46 +3440,92 @@ function renderJahresbericht() {
     });
   });
 
-  const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
-
   el.innerHTML = Object.entries(perFzg).map(([fzg, data]) => {
-    const rows = Object.entries(data.items)
-      .sort((a,b) => b[1].menge - a[1].menge)
-      .map(([name, info]) => {
-        const key = vKey(fzg, name);
-        const verr = state.verrechnungen[key] || 0;
-        const offen = info.menge - verr;
-        return `<tr>
-          <td>${name}</td>
-          <td style="text-align:right;font-weight:700">${info.menge}</td>
-          <td>${info.einheit}</td>
-          ${istAdmin ? `<td style="text-align:right">
-            <input type="number" min="0" max="${info.menge}" value="${verr}" style="width:60px;text-align:right;padding:2px 4px;font-size:12px"
-              onchange="saveVerrechnung('${key.replace(/'/g,"\\'")}', parseInt(this.value)||0)">
-          </td>
-          <td style="text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen}</td>` : ''}
-        </tr>`;
-      }).join('');
+    // Artikel-Zeilen
+    const rows = Object.entries(data.items).sort((a,b) => b[1].menge - a[1].menge).map(([name, info]) => {
+      const key = vKey(fzg, name);
+      const verr = state.verrechnungen[key] ?? 0;
+      const verrChf = state.verrechnungen[key+'||chf'] ?? '';
+      const offen = Math.max(0, info.menge - verr);
+      const pct = info.menge > 0 ? Math.min(100, Math.round(verr/info.menge*100)) : 100;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 4px">${name}</td>
+        <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge}</td>
+        <td style="padding:6px 4px;color:var(--muted)">${info.einheit}</td>
+        ${istAdmin ? `
+        <td style="padding:6px 4px;text-align:right">
+          <input type="number" min="0" step="0.5" value="${verr}"
+            style="width:65px;text-align:right;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
+            onchange="saveVerrechnung('${key.replace(/'/g,"\\'")}', parseFloat(this.value)||0)">
+          <span style="font-size:10px;color:var(--muted)">${info.einheit}</span>
+        </td>
+        <td style="padding:6px 4px;text-align:right">
+          <input type="text" value="${verrChf}" placeholder="CHF"
+            style="width:70px;text-align:right;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
+            onchange="saveVerrechnung('${(key+'||chf').replace(/'/g,"\\'")}', this.value)">
+        </td>
+        <td style="padding:6px 4px;text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen > 0 ? offen+' '+info.einheit : '✅'}</td>` : ''}
+      </tr>`;
+    }).join('');
+
+    // Freie Positionen (eigene Zeilen mit Beschrieb + CHF)
+    const pk = posKey(fzg);
+    const freiePos = state.verrechnungsPos[pk] || [];
+    const freiePosRows = freiePos.map((p, idx) => `
+      <tr style="border-bottom:1px solid var(--border);background:rgba(75,159,232,.04)">
+        <td style="padding:6px 4px" colspan="3">
+          <input type="text" value="${p.beschrieb||''}" placeholder="z.B. 10 LM Floorliner / Schrauben Kiste"
+            style="width:100%;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
+            onchange="saveFreePos('${pk.replace(/'/g,"\\'")}', ${idx}, 'beschrieb', this.value)">
+        </td>
+        ${istAdmin ? `
+        <td style="padding:6px 4px" colspan="2">
+          <input type="text" value="${p.chf||''}" placeholder="CHF Wert"
+            style="width:100%;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
+            onchange="saveFreePos('${pk.replace(/'/g,"\\'")}', ${idx}, 'chf', this.value)">
+        </td>
+        <td style="padding:6px 4px;text-align:right">
+          <select onchange="saveFreePos('${pk.replace(/'/g,"\\'")}', ${idx}, 'status', this.value)"
+            style="padding:3px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px">
+            <option value="offen" ${(!p.status||p.status==='offen')?'selected':''}>⏳ Offen</option>
+            <option value="verrechnet" ${p.status==='verrechnet'?'selected':''}>✅ Verrechnet</option>
+          </select>
+          <button onclick="deleteFreePos('${pk.replace(/'/g,"\\'")}', ${idx})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;padding:2px">✕</button>
+        </td>` : `<td style="padding:6px 4px;text-align:right;color:${p.status==='verrechnet'?'var(--green)':'var(--red)'}">
+          ${p.chf||''} · ${p.status==='verrechnet'?'✅ Verrechnet':'⏳ Offen'}
+        </td>`}
+      </tr>`).join('');
+
+    // Totals
     const totalBestellt = Object.values(data.items).reduce((s,i) => s+i.menge, 0);
-    const totalVerr = Object.entries(data.items).reduce((s,[name]) => s + (state.verrechnungen[vKey(fzg,name)]||0), 0);
-    const totalOffen = totalBestellt - totalVerr;
-    return `<div class="card" style="margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    const totalVerr = Object.entries(data.items).reduce((s,[name]) => s+(state.verrechnungen[vKey(fzg,name)]||0), 0);
+    const totalOffen = Math.max(0, totalBestellt - totalVerr);
+    const totalChf = Object.entries(data.items)
+      .map(([name]) => parseFloat(state.verrechnungen[vKey(fzg,name)+'||chf'])||0)
+      .reduce((s,v)=>s+v,0)
+      + freiePos.filter(p=>p.chf).reduce((s,p)=>s+(parseFloat(p.chf)||0),0);
+    const offeneFreie = freiePos.filter(p => !p.status || p.status === 'offen').length;
+    const allOk = totalOffen === 0 && offeneFreie === 0;
+
+    return `<div class="card" style="margin-bottom:12px;border-left:4px solid ${allOk?'var(--green)':'var(--red)'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:700">${fzg} · ${data.monteur||''} <span style="color:var(--muted);font-weight:400">(${data.count} Bestellungen)</span></div>
-        ${istAdmin ? `<div style="font-size:12px">
-          <span style="color:var(--green)">✅ ${totalVerr} verrechnet</span> · 
-          <span style="color:${totalOffen>0?'var(--red)':'var(--green)'}">📋 ${totalOffen} offen</span>
-        </div>` : ''}
+        <div style="display:flex;gap:10px;font-size:12px;flex-wrap:wrap">
+          ${totalChf > 0 ? `<span style="color:var(--accent2);font-weight:700">💰 CHF ${totalChf.toFixed(2)}</span>` : ''}
+          <span style="color:var(--green)">✅ ${totalVerr.toFixed(1)} verrechnet</span>
+          <span style="color:${totalOffen>0||offeneFreie>0?'var(--red)':'var(--green)'}">📋 ${totalOffen > 0 ? totalOffen+' Stk' : ''}${offeneFreie > 0 ? (totalOffen>0?' + ':'')+offeneFreie+' Pos.' : ''} offen</span>
+        </div>
       </div>
-      <table style="width:100%;font-size:13px">
-        <thead><tr>
-          <th style="text-align:left">Artikel</th>
-          <th style="text-align:right">Bestellt</th>
-          <th>Einheit</th>
-          ${istAdmin ? '<th style="text-align:right">Verrechnet</th><th style="text-align:right">Offen</th>' : ''}
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
+          <th style="text-align:left;padding:4px">Artikel</th>
+          <th style="text-align:right;padding:4px">Bestellt</th>
+          <th style="padding:4px">Einheit</th>
+          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">CHF</th><th style="text-align:right;padding:4px">Offen</th>' : ''}
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows}${freiePosRows}</tbody>
       </table>
+      ${istAdmin ? `<button onclick="addFreePos('${pk.replace(/'/g,"\\'")}', '${fzg}')" class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:11px">+ Freie Position hinzufügen</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -3484,6 +3533,28 @@ function renderJahresbericht() {
 function saveVerrechnung(key, val) {
   if (!state.verrechnungen) state.verrechnungen = {};
   state.verrechnungen[key] = val;
+  save();
+  renderJahresbericht();
+}
+
+function addFreePos(pk, fzg) {
+  if (!state.verrechnungsPos) state.verrechnungsPos = {};
+  if (!state.verrechnungsPos[pk]) state.verrechnungsPos[pk] = [];
+  state.verrechnungsPos[pk].push({ beschrieb: '', chf: '', status: 'offen' });
+  save();
+  renderJahresbericht();
+}
+
+function saveFreePos(pk, idx, field, val) {
+  if (!state.verrechnungsPos?.[pk]?.[idx]) return;
+  state.verrechnungsPos[pk][idx][field] = val;
+  save();
+  renderJahresbericht();
+}
+
+function deleteFreePos(pk, idx) {
+  if (!state.verrechnungsPos?.[pk]) return;
+  state.verrechnungsPos[pk].splice(idx, 1);
   save();
   renderJahresbericht();
 }
