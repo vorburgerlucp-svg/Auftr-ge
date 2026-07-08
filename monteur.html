@@ -900,18 +900,25 @@ function renderBaustatus() {
       const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
       const meineStd = t.monteurHours?.[meinName] || 0;
       const canDelete = meineStd > 0;
-      return `<div class="task-row">
+      const fertigBtn = istChef
+        ? `<button onclick="bsTaskToggleFertig(${bau.id},'${t.id}')" style="background:none;border:1px solid ${t.fertig?'var(--green)':'var(--border)'};border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;color:${t.fertig?'var(--green)':'var(--muted)'};white-space:nowrap">${t.fertig?'✅ Fertig':'○ Offen'}</button>`
+        : '';
+      return `<div class="task-row" style="${t.fertig?'opacity:0.6;':''}">
         <div style="flex:1;min-width:0">
-          <div>${t.fertig?'✓ ':''}${t.name}</div>
+          <div style="${t.fertig?'text-decoration:line-through;color:var(--muted)':''}">${t.fertig?'✓ ':''}${t.name}</div>
           <div style="font-size:10px;color:var(--muted)">${tIst.toFixed(1)}h / ${t.hours.toFixed(1)}h Soll</div>
           ${meineStd>0 ? `<div style="font-size:10px;color:var(--accent2);margin-top:2px">Meine: ${meineStd}h ${canDelete?`<span onclick="bsDeleteEigeneStunden(${bau.id},'${t.id}')" style="color:var(--red);cursor:pointer;margin-left:6px">✕ löschen</span>`:''}</div>` : ''}
         </div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
-          <input type="number" id="bsh_${bau.id}_${t.id}" placeholder="Std." step="0.5" min="0" style="width:55px;padding:6px;margin:0;font-size:13px">
-          <button class="btn btn-sm btn-primary" onclick="bsBuchenEigene(${bau.id},'${t.id}')">OK</button>
+          ${fertigBtn}
+          ${!t.fertig ? `<input type="number" id="bsh_${bau.id}_${t.id}" placeholder="Std." step="0.5" min="0" style="width:55px;padding:6px;margin:0;font-size:13px">
+          <button class="btn btn-sm btn-primary" onclick="bsBuchenEigene(${bau.id},'${t.id}')">OK</button>` : ''}
         </div>
       </div>`;
     }).join('');
+
+    // Fertige Tasks zählen für Fortschritt
+    const fertigCount = tasks.filter(t => t.fertig).length;
 
     return `<div class="card">
       <div class="bs-header">
@@ -922,9 +929,33 @@ function renderBaustatus() {
         ${istChef ? '<span style="font-size:10px;font-weight:700;color:var(--accent);background:rgba(232,184,75,.12);padding:2px 8px;border-radius:10px">👷 Chef</span>' : ''}
       </div>
       ${soll>0 ? `<div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%;background:${ist>soll?'var(--red)':'var(--accent2)'}"></div></div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${ist.toFixed(1)}h / ${soll.toFixed(1)}h (${pct}%)</div>` : ''}
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;gap:12px">
+        <span>${ist.toFixed(1)}h / ${soll.toFixed(1)}h (${pct}%)</span>
+        ${tasks.length ? `<span style="color:${fertigCount===tasks.length?'var(--green)':'var(--muted)'}">✓ ${fertigCount}/${tasks.length} Positionen fertig</span>` : ''}
+      </div>` : ''}
       ${taskRows || '<div class="empty" style="padding:12px">Keine Tasks erfasst</div>'}
-      ${istChef ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+      ${istChef ? `
+      <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">📊 Leistungserfassung (Chef)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div>
+            <label style="font-size:11px;color:var(--muted)">🔴 Mängel</label>
+            <input type="number" id="bs_maengel_${bau.id}" value="${bau.maengel||0}" min="0" style="width:100%;padding:6px;font-size:13px;margin:0" onchange="bsSaveLeistung(${bau.id})">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted)">⏱ Nacharbeitsstunden</label>
+            <input type="number" id="bs_nacharbeit_${bau.id}" value="${bau.nacharbeitStunden||0}" min="0" step="0.5" style="width:100%;padding:6px;font-size:13px;margin:0" onchange="bsSaveLeistung(${bau.id})">
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <label style="font-size:11px;color:var(--muted)">📝 Bemerkung (intern Chef)</label>
+          <textarea id="bs_chefnotiz_${bau.id}" rows="2" style="width:100%;padding:6px;font-size:12px;resize:none;margin:0" placeholder="z.B. Materialfehler, Terminprobleme…" onchange="bsSaveLeistung(${bau.id})">${bau.chefNotiz||''}</textarea>
+        </div>
+        ${bau.maengel||bau.nacharbeitStunden ? `<div style="font-size:11px;color:var(--muted);padding:6px 8px;background:var(--surface2);border-radius:6px">
+          📈 Total: ${bau.maengel||0} Mängel · ${(bau.nacharbeitStunden||0).toFixed(1)}h Nacharbeit
+        </div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
         <button class="btn btn-sm" onclick="bsAddTaskPrompt(${bau.id})">+ Task hinzufügen</button>
         <button class="btn btn-sm btn-primary" onclick="bsZeigeTeamBewertung(${bau.id})">⭐ Team bewerten</button>
       </div>` : ''}
@@ -1006,6 +1037,40 @@ function bwSpeichern(maId) {
   });
   save();
   toast('Gespeichert', m.vorname+' bewertet', '✅');
+}
+
+function bsTaskToggleFertig(bauId, taskId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  const task = (bau?.tasks||[]).find(t => t.id === taskId);
+  if (!task) return;
+  // Nur Chef-Monteur darf Positionen abschliessen
+  const istChef = bau.chefMonteurId === currentLoginUser?.id;
+  if (!istChef) return toast('Keine Berechtigung', 'Nur Chef-Monteur darf Positionen abschliessen', '⛔');
+  task.fertig = !task.fertig;
+  save();
+  renderBaustatus();
+  toast(task.fertig ? 'Position abgeschlossen' : 'Position wieder offen', task.name, task.fertig ? '✅' : '↩');
+}
+
+function bsSaveLeistung(bauId) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau) return;
+  const m = parseInt(document.getElementById('bs_maengel_'+bauId)?.value) || 0;
+  const n = parseFloat(document.getElementById('bs_nacharbeit_'+bauId)?.value) || 0;
+  const notiz = document.getElementById('bs_chefnotiz_'+bauId)?.value || '';
+  bau.maengel = m;
+  bau.nacharbeitStunden = n;
+  bau.chefNotiz = notiz;
+  // Historie führen
+  if (!bau.leistungHistorie) bau.leistungHistorie = [];
+  const heute = new Date().toLocaleDateString('de-CH');
+  const letzter = bau.leistungHistorie[bau.leistungHistorie.length-1];
+  if (!letzter || letzter.datum !== heute) {
+    bau.leistungHistorie.push({ datum: heute, maengel: m, nacharbeit: n, notiz });
+  } else {
+    letzter.maengel = m; letzter.nacharbeit = n; letzter.notiz = notiz;
+  }
+  save();
 }
 
 function bsBuchenEigene(bauId, taskId) {
