@@ -7540,7 +7540,11 @@ function renderBaustatusStatus() {
             : (currentLoginUser ? '<option value="' + currentLoginUser.id + '">' + currentLoginUser.vorname + '</option>' : '');
 
           html += '<tr style="border-bottom:1px solid var(--border);">' +
-            '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + (t.name||'') +
+            '<td style="padding:5px 4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' +
+            (istAdmin || istLeiter || istChefMonteurFn(bau)
+              ? '<button onclick="bsTaskToggleFertig(' + bau.id + ',\'' + t.id + '\')" style="background:none;border:1px solid '+(t.fertig?'var(--green)':'var(--border)')+';border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;color:'+(t.fertig?'var(--green)':'var(--muted)')+';margin-right:4px">'+(t.fertig?'✓':'○')+'</button>'
+              : (t.fertig?'✓ ':'')) +
+            (t.name||'') +
               (Object.keys(t.monteurHours||{}).length ? '<div style="margin-top:3px">' +
                 Object.entries(t.monteurHours).map(([n,h]) =>
                   '<span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--muted);margin-right:6px;background:var(--surface2);padding:1px 6px;border-radius:8px">' +
@@ -7580,6 +7584,16 @@ function renderBaustatusStatus() {
 }
 
 // Stunden eines Monteurs auf einer Task löschen
+
+function bsTaskToggleFertig(bauId, taskId) {
+  const bau = (state.baustellen||[]).find(b => b.id === bauId);
+  const task = (bau?.tasks||[]).find(t => t.id === taskId);
+  if (!task) return;
+  task.fertig = !task.fertig;
+  save();
+  renderBaustatusStatus();
+  toast(task.fertig ? 'Position abgeschlossen' : 'Position wieder offen', task.name, task.fertig ? '✅' : '↩');
+}
 
 function bsDeleteStunden(bauId, taskId, monteurName) {
   const bau = state.baustellen.find(b => b.id === bauId);
