@@ -1496,6 +1496,66 @@ function renderProfil() {
     });
   }
   html += '</div>';
+
+  // ── Bauleiter-Bewertungen auf meinen Baustellen ──
+  const blKrit = [
+    {key:'zusammenarbeit', label:'Zusammenarbeit'},
+    {key:'kommunikation',  label:'Kommunikation'},
+    {key:'organisation',   label:'Organisation'},
+    {key:'unterlagen',     label:'Unterlagen'},
+  ];
+  // Alle Baustellen auf denen dieser Monteur tätig war
+  const meinName = (ma.vorname+' '+(ma.nachname||'')).trim();
+  const meineBaustellen = (state.baustellen||[]).filter(bau => {
+    if (bau.chefMonteurId === ma.id) return true;
+    if ((bau.blBewertungen||[]).length === 0) return false;
+    const hatZuweisung = Object.values(state.plan||{}).some(tag =>
+      Object.values(tag||{}).some(e => e.maId === ma.id && e.bsId === bau.id)
+    );
+    const hatStunden = (bau.tasks||[]).some(t => t.monteurHours?.[meinName] > 0);
+    return hatZuweisung || hatStunden;
+  }).filter(bau => (bau.blBewertungen||[]).length > 0);
+
+  if (meineBaustellen.length) {
+    html += `<div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px">🏗️ Bauleiter-Bewertungen meiner Baustellen</div>`;
+
+    meineBaustellen.forEach(bau => {
+      const bews = bau.blBewertungen || [];
+      const schnitt = {};
+      blKrit.forEach(kr => {
+        const vals = bews.map(b=>b[kr.key]||0).filter(v=>v>0);
+        schnitt[kr.key] = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null;
+      });
+      const allVals = Object.values(schnitt).filter(Boolean).map(Number);
+      const avg = allVals.length ? (allVals.reduce((a,b)=>a+b,0)/allVals.length).toFixed(1) : null;
+      const avgCol = !avg?'var(--muted)':parseFloat(avg)>=4?'var(--green)':parseFloat(avg)>=3?'var(--accent)':'var(--red)';
+
+      html += `<div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:600;font-size:13px">🏗️ ${bau.name}</div>
+          ${avg ? `<span style="font-size:16px;font-weight:700;color:${avgCol}">Ø ${avg}</span>` : ''}
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          ${blKrit.map(kr => {
+            const v = schnitt[kr.key];
+            const c = !v?'var(--muted)':parseFloat(v)>=4?'var(--green)':parseFloat(v)>=3?'var(--accent)':'var(--red)';
+            return `<div style="text-align:center;min-width:58px">
+              <div style="font-size:14px;font-weight:700;color:${c}">${v||'–'}</div>
+              <div style="font-size:9px;color:var(--muted)">${kr.label}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        ${bews.slice().reverse().slice(0,3).map(b => {
+          const kStr = blKrit.map(kr=>b[kr.key]?`${kr.key.charAt(0).toUpperCase()}:${b[kr.key]}★`:null).filter(Boolean).join(' · ');
+          return `<div style="font-size:11px;color:var(--muted);padding:3px 0">${b.datum||''} · ${kStr}${b.notiz?' · <em>'+b.notiz+'</em>':''}</div>`;
+        }).join('')}
+      </div>`;
+    });
+
+    html += '</div>';
+  }
+
   el.innerHTML = html;
 }
 
