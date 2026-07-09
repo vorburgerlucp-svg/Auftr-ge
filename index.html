@@ -5803,9 +5803,9 @@ async function kiAuftragImportieren() {
 }
 
 function kiPrompt(text) {
-  const basis = `Extrahiere alle Informationen für einen Montageauftrag. Gib NUR ein JSON-Objekt zurück ohne Markdown oder Erklärungen:
-{"kunde":"Firma","adresse":"Strasse Nr, PLZ Ort","von":"YYYY-MM-DD","bis":"YYYY-MM-DD","positionen":1,"startzeit":"HH:MM","montageTyp":"Küchenmontage|Fenstermontage|Ladenbau|Sanitär|Badplatten|Innenausbau|Hochwertiger Innenausbau","apName":"Name","apTel":"Tel","apEmail":"Email"}
-Nicht erkennbare Felder leer lassen. Datum in YYYY-MM-DD. Jahr wenn fehlt: ${new Date().getFullYear()}.`;
+  const basis = `Extrahiere alle Informationen aus diesem Montageaufgebot/Auftragstext. Gib NUR ein JSON-Objekt zurück ohne Markdown oder Erklärungen:
+{"name":"Baustellen-Name (aus 'Baustelle:' Zeile)","kunde":"Auftraggeber/Firma (aus Kontakt-Klammern oder Firma)","adresse":"Strasse Nr, PLZ Ort","von":"YYYY-MM-DD","bis":"YYYY-MM-DD","startzeit":"HH:MM","montageArt":"Küchenmontage|Fenstermontage|Ladenbau|Sanitär|Badplatten|Innenausbau|Schreinermontage|Türenmontage|Sonstiges","apName":"Kontaktperson Name","apTel":"Telefon","apEmail":"E-Mail"}
+Regeln: Nicht erkennbare Felder leer lassen. Datum in YYYY-MM-DD. Jahr wenn fehlt: ${new Date().getFullYear()}. "Baustelle:" Zeile → name. Firma in Klammern nach "Kontakt" → kunde. Ankunftszeit/Startzeit → startzeit.`;
   return text ? basis + '\n\nText:\n' + text : basis;
 }
 
@@ -5823,74 +5823,145 @@ function kiParseText(t) {
     return null;
   }
 
-  const range = t.match(/(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\s*[-–—]+\s*(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)/i);
-  if (range) {
-    p.von = parseDate(range[1]); p.bis = parseDate(range[2]);
-    if (p.von && p.bis) {
-      const bisY = p.bis.split('-')[0];
-      if (!p.von.startsWith(bisY)) p.von = bisY+'-'+p.von.split('-').slice(1).join('-');
-    }
-  } else {
-    const d = t.match(/(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)/);
-    if (d) { p.von = parseDate(d[1]); p.bis = p.von; }
+  // Baustelle Name
+  const bsLine = t.match(/(?:baustelle)[:\s]+([^\n]+)/i);
+  if (bsLine) p.name = bsLine[1].trim().substring(0,60);
+
+  // Kunde + Adresse aus "Kunde: Firma, Strasse, Ort"
+  const kundeLine = t.match(/(?:kunde)[:\s]+([^\n]+)/i);
+  if (kundeLine) {
+    const parts = kundeLine[1].split(',');
+    p.kunde = parts[0].trim().substring(0,60);
+    if (parts.length > 1) p.adresse = parts.slice(1).join(',').trim();
+  }
+  if (!p.kunde) {
+    const m = t.match(/(?:kontakt)[^\n]*\(([^)]+)\)/i)
+      || t.match(/([A-ZÄÖÜ][A-Za-zäöüÄÖÜß\s&.-]+(?:AG|GmbH|SA|Sàrl|KG|Schreinerei|Bau))/);
+    if (m) p.kunde = m[1].trim().substring(0,60);
   }
 
-  const z = t.match(/(?:start(?:zeit)?|ab|um|beginn)[:\s]*(\d{1,2})[:\.](\d{2})/i)||t.match(/(\d{1,2})[:\.](\d{2})\s*(?:uhr|h\b)/i);
+  // Adresse falls nicht aus Kunde-Zeile
+  if (!p.adresse) {
+    const adr = t.match(/(?:adresse|standort|objekt)[:\s]+([^\n]+)/i)
+      || t.match(/([A-ZÄÖÜ][a-zäöüß]+(?:str(?:asse)?|gasse|weg|allee|platz|ring)\.?\s+\d+[^\n]*)/);
+    if (adr) p.adresse = adr[1].trim();
+  }
+
+  // Datum — "Start DD.MM.YYYY" oder Range
+  const startD = t.match(/(?:start|ab|beginn)[:\s]+(\d{1,2}\.\d{2}\.\d{4})/i);
+  if (startD) { p.von = parseDate(startD[1]); p.bis = p.von; }
+  else {
+    const range = t.match(/(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\s*[-–—]+\s*(\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)/i);
+    if (range) { p.von = parseDate(range[1]); p.bis = parseDate(range[2]); }
+    else {
+      const d = t.match(/(\d{1,2}\.\d{2}\.\d{4})/);
+      if (d) { p.von = parseDate(d[1]); p.bis = p.von; }
+    }
+  }
+
+  // Startzeit — "Ankunft 07:45" oder "07:45 Uhr"
+  const z = t.match(/(?:ankunft|start(?:zeit)?|ab|um|beginn)[:\s]*(\d{1,2})[:\.](\d{2})/i)
+    || t.match(/(\d{1,2})[:\.](\d{2})\s*(?:uhr|h\b)/i);
   if (z) p.startzeit = z[1].padStart(2,'0')+':'+z[2];
 
-  const pos = t.match(/(\d+)\s*(?:monteure?|mann|personen?|stellen?|pos(?:itionen?)?|mitarbeiter)/i);
-  if (pos) p.positionen = parseInt(pos[1]);
+  // Ansprechperson — verschiedene Formate
+  // "Verkäufer: Name email | Tel" oder "Ansprechperson: Name | Tel | Email"
+  const apFormats = [
+    t.match(/(?:verkäufer|verkaefer)[:\s]+([A-ZÄÖÜa-zäöüß\s]+?)(?:\s+[\w.+-]+@[\w-]+\.[a-z]{2,}|\s*\|)/i),
+    t.match(/(?:ansprechperson|kontaktperson|ap)[:\s]+([^|\n]+?)(?:\s*\||\s*[\w.+-]+@)/i),
+    t.match(/(?:kontakt)[:\s]+([^|,\n]+)/i),
+  ];
+  for (const m of apFormats) { if (m) { p.apName = m[1].trim(); break; } }
+  if (!p.apTel) { const tel = t.match(/\|\s*(\+41[\d\s]{10,14})/); if (tel) p.apTel = tel[1].trim().replace(/\s/g,''); }
+  if (!p.apEmail) { const email = t.match(/[\w.+-]+@[\w-]+\.[a-z]{2,}/i); if (email) p.apEmail = email[0]; }
 
-  const adr = t.match(/(?:adresse|ort|standort|objekt|bei)[:\s]+([^\n,]+(?:,\s*\d{4,5}[^\n]*)?)/i)
-    ||t.match(/([A-ZÄÖÜ][a-zäöüß]+(?:str(?:asse)?|gasse|weg|allee|platz|ring|damm)\.?\s+\d+[^\n]*)/);
-  if (adr) p.adresse = adr[1].trim();
+  // Bauleiter als Kontaktperson 2 (im Notizfeld)
+  const bl = t.match(/(?:bauleiter)[:\s]+([^|\n]+)/i);
+  if (bl) p.bauleiter = bl[1].trim();
 
+  // Kunde aus "Ordner: Fust KW22 / AuftragsNr-Kunde..." → Kunde = Teil vor /
+  const ordner = t.match(/(?:ordner|projekt)[:\s]+([^\n/]+)/i);
+  if (ordner) {
+    // Firmenname aus Ordner extrahieren (z.B. "Fust KW 22-2026" → "Fust")
+    const firmaPart = ordner[1].trim().split(/\s+KW|\s+\d{4}/i)[0].trim();
+    if (firmaPart && !p.kunde) p.kunde = firmaPart;
+  }
+  // Baustellen-Name aus Ordner: "121565319-Fust Luzern KW22" → "Fust Luzern"
+  const ordnerName = t.match(/\d{6,}[-–]\s*([^\n(]+)/);
+  if (ordnerName && !p.name) {
+    p.name = ordnerName[1].trim().replace(/\s+KW\d+[-\d]*/i,'').replace(/\s+\(\d+\)$/,'').trim().substring(0,60);
+  }
+
+  // Montagedatum
+  const montageDatum = t.match(/(?:montagedatum|datum)[:\s]+[^,\n\d]*(\d{1,2}\.\d{2}\.\d{4})/i);
+  if (montageDatum && !p.von) { p.von = parseDate(montageDatum[1]); p.bis = p.von; }
+
+  // Montage-Art
   const typen = {
+    'türen|steckzarg|türblatt|zargen': 'Türenmontage',
     'küche|küchenmont|einbauküche': 'Küchenmontage',
     'fenster|verglas': 'Fenstermontage',
     'laden|shop|geschäft|store|ladenb': 'Ladenbau',
     'sanit|wasser|abwasser|rohr': 'Sanitär',
     'bad|fliese|platten|kachel': 'Badplatten',
     'innenausbau|trockenbau': 'Innenausbau',
+    'schreiner|holz': 'Schreinermontage',
     'hochwertig|premium|luxus': 'Hochwertiger Innenausbau'
   };
   for (const [pat, typ] of Object.entries(typen)) {
-    if (new RegExp(pat,'i').test(t)) { p.montageTyp=typ; break; }
+    if (new RegExp(pat,'i').test(t)) { p.montageArt=typ; break; }
   }
 
-  const ap = t.match(/(?:kontakt|ansprechperson|ansprechpartner|ap|herr|frau)[:\s]+([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)/i);
-  if (ap) p.apName = ap[1].trim();
-
-  const tel = t.match(/(?:tel(?:efon)?|mob|natel)?[:\s]*((?:\+41|0041|0)\s?(?:\d[\s\-]?){9,11})/i);
-  if (tel) p.apTel = tel[1].replace(/\s/g,'');
-
-  const email = t.match(/[\w.+-]+@[\w-]+\.[a-z]{2,}/i);
-  if (email) p.apEmail = email[0];
-
-  const lines = t.split('\n').map(l=>l.trim()).filter(Boolean);
-  if (lines.length) {
-    p.name = lines[0].replace(/^(?:auftrag|bestellung|projekt|objekt|betreff)[:\s]*/i,'').trim().substring(0,60);
+  // Falls kein Name: ersten nicht-leeren Zeilen-Satz nehmen
+  if (!p.name) {
+    const lines = t.split('\n').map(l=>l.trim()).filter(l=>l && !/^[-–—]+$/.test(l));
+    if (lines.length) p.name = lines[0].replace(/^(?:auftrag|bestellung|projekt)[:\s]*/i,'').trim().substring(0,60);
   }
-  const kunde = t.match(/(?:kunde|auftraggeber|firma|client)[:\s]+([^\n]+)/i)
-    ||t.match(/([A-ZÄÖÜ][A-Za-zäöüÄÖÜß\s&.-]+(?:AG|GmbH|SA|Sàrl|KG))/);
-  if (kunde) p.kunde = kunde[1].trim().substring(0,60);
+
+  // Offert-Positionen als Tasks extrahieren (z.B. "3 × Steckzargen: CHF 900.–")
+  p.tasks = [];
+  for (const m of t.matchAll(/[-•]\s+(\d+)\s*[×x]\s+([^:\n]+):\s*CHF\s*([\d'.–]+)/gi)) {
+    const chf = parseFloat(m[3].replace(/['.–]/g,'').replace(/–$/,''))||0;
+    p.tasks.push({ name: m[2].trim(), anzahl: parseInt(m[1]), chf });
+  }
 
   return p;
 }
 
 function kiFelder(p) {
-  if (p.kunde)      document.getElementById('bs-kunde').value      = p.kunde;
-  if (p.adresse)    document.getElementById('bs-adresse').value    = p.adresse;
-  if (p.von)        document.getElementById('bs-von').value        = p.von;
-  if (p.bis)        document.getElementById('bs-bis').value        = p.bis;
-  if (p.positionen) document.getElementById('bs-positionen').value = p.positionen;
-  if (p.startzeit)  document.getElementById('bs-startzeit').value  = p.startzeit;
-  if (p.apName)     document.getElementById('bs-ap-name').value    = p.apName;
-  if (p.apTel)      document.getElementById('bs-ap-tel').value     = p.apTel;
-  if (p.apEmail)    document.getElementById('bs-ap-email').value   = p.apEmail;
-  if (p.montageTyp) document.getElementById('bs-montage-typ').value = p.montageTyp;
-  // Name automatisch: Kunde + Ortschaft aus Adresse
-  generiereNameAusKundeOrt();
+  if (p.name)        document.getElementById('bs-name').value        = p.name;
+  if (p.kunde)       document.getElementById('bs-kunde').value       = p.kunde;
+  if (p.adresse)     document.getElementById('bs-adresse').value     = p.adresse;
+  if (p.von)         document.getElementById('bs-von').value         = p.von;
+  if (p.bis)         document.getElementById('bs-bis').value         = p.bis;
+  if (p.startzeit)   document.getElementById('bs-startzeit').value   = p.startzeit;
+  if (p.apName)      document.getElementById('bs-ap-name').value     = p.apName;
+  if (p.apTel)       document.getElementById('bs-ap-tel').value      = p.apTel;
+  if (p.apEmail)     document.getElementById('bs-ap-email').value    = p.apEmail;
+  if (p.bauleiter) {
+    const notizEl = document.getElementById('bs-notiz');
+    if (notizEl) notizEl.value = (notizEl.value ? notizEl.value+'\n' : '') + 'Bauleiter: ' + p.bauleiter;
+  }
+  const montageEl = document.getElementById('bs-montageArt') || document.getElementById('bs-montage-typ');
+  if (montageEl && (p.montageArt || p.montageTyp)) montageEl.value = p.montageArt || p.montageTyp;
+  // Offert-Positionen als Tasks anlegen
+  if (p.tasks && p.tasks.length) {
+    p.tasks.forEach(t => {
+      const taskName = t.anzahl > 1 ? t.anzahl + '× ' + t.name : t.name;
+      // Stunden grob aus CHF schätzen: 90 CHF/h (anpassbar)
+      const std = t.chf ? Math.round(t.chf / 90 * 2) / 2 : 0;
+      tempBsTasks.push({
+        id: 't' + Date.now() + Math.floor(Math.random()*999),
+        name: taskName,
+        hours: std || 4,
+        monteurHours: {}, kwHours: {}, fertig: false
+      });
+    });
+    renderBsTasks();
+    const statusEl = document.getElementById('ki-import-status');
+    if (statusEl) statusEl.textContent += ' · ' + p.tasks.length + ' Positionen angelegt';
+  }
+  if (!p.name) generiereNameAusKundeOrt();
 }
 
 function generiereNameAusKundeOrt() {
