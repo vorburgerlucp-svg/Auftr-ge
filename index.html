@@ -964,6 +964,98 @@
   </div>
 </div>
 
+<!-- BAUSTELLEN-ABSCHLUSS MODAL -->
+<div class="modal-overlay" id="bs-abschluss-modal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title">✅ Baustelle abschliessen</div>
+      <button class="modal-close" onclick="closeBsAbschlussModal()">✕</button>
+    </div>
+    <input type="hidden" id="bsa-id">
+
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:700;font-size:14px" id="bsa-name"></div>
+      <div style="font-size:12px;color:var(--muted)" id="bsa-meta"></div>
+    </div>
+
+    <!-- Automatische Kennzahlen -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px" id="bsa-kennzahlen"></div>
+
+    <hr class="divider">
+    <div class="card-title">📊 Admin-Beurteilung Baustelle</div>
+    <div class="form-row cols-2">
+      <div>
+        <label>Budget-Ergebnis</label>
+        <select id="bsa-budget" style="width:100%">
+          <option value="">— wählen —</option>
+          <option value="plus">✅ Im Plus</option>
+          <option value="ausgeglichen">🟡 Ausgeglichen</option>
+          <option value="minus">🔴 Im Minus</option>
+        </select>
+      </div>
+      <div>
+        <label>Gesamtqualität</label>
+        <select id="bsa-qualitaet" style="width:100%">
+          <option value="">— wählen —</option>
+          <option value="5">⭐⭐⭐⭐⭐ Sehr gut</option>
+          <option value="4">⭐⭐⭐⭐ Gut</option>
+          <option value="3">⭐⭐⭐ Befriedigend</option>
+          <option value="2">⭐⭐ Mangelhaft</option>
+          <option value="1">⭐ Ungenügend</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row cols-1">
+      <div>
+        <label>📝 Bemerkung zur Baustelle</label>
+        <textarea id="bsa-notiz" rows="2" placeholder="z.B. Guter Ablauf, Terminprobleme mit Lieferant…"></textarea>
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div class="card-title" id="bsa-chef-title">👷 Chef-Monteur Bewertung</div>
+    <div id="bsa-chef-block">
+      <div class="form-row cols-2">
+        <div>
+          <label>Organisation & Planung</label>
+          <div id="bsa-s-organisation" class="star-row" data-key="organisation"></div>
+        </div>
+        <div>
+          <label>Kommunikation</label>
+          <div id="bsa-s-kommunikation" class="star-row" data-key="kommunikation"></div>
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div>
+          <label>Qualitätskontrolle</label>
+          <div id="bsa-s-qualitaet" class="star-row" data-key="qualitaet_chef"></div>
+        </div>
+        <div>
+          <label>Umgang mit Reklamationen</label>
+          <div id="bsa-s-reklamation" class="star-row" data-key="reklamation"></div>
+        </div>
+      </div>
+      <div class="form-row cols-1">
+        <div>
+          <label>Selbstorganisation</label>
+          <div id="bsa-s-selbstorg" class="star-row" data-key="selbstorg"></div>
+        </div>
+      </div>
+      <div class="form-row cols-1">
+        <div>
+          <label>📝 Chef-Kommentar (intern)</label>
+          <textarea id="bsa-chef-notiz" rows="2" placeholder="z.B. Gute Führung, Kommunikation ausbaufähig…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-secondary" onclick="closeBsAbschlussModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveBsAbschluss()">✅ Baustelle abschliessen</button>
+    </div>
+  </div>
+</div>
+
 <!-- ARTIKEL MODAL -->
 <div class="modal-overlay" id="art-modal">
   <div class="modal" style="max-width:480px">
@@ -7889,10 +7981,15 @@ function bsToggleBeendet(bauId) {
   if (!istAdmin && !istLeiter) {
     return toast('Keine Berechtigung', 'Nur Admin/Leiter dürfen Baustellen beenden', '⛔');
   }
-  bau.beendet = !bau.beendet;
-  save();
-  renderBaustatusKW();
-  toast(bau.beendet ? 'Beendet' : 'Wieder aktiv', bau.name, bau.beendet ? '✅' : '🏗️');
+  if (!bau.beendet) {
+    // Abschluss-Modal öffnen statt direkt beenden
+    openBsAbschlussModal(bauId);
+  } else {
+    bau.beendet = false;
+    save();
+    renderBaustatusKW();
+    toast('Wieder aktiv', bau.name, '🏗️');
+  }
 }
 
 
@@ -8034,6 +8131,125 @@ function bsSetStern(maId, key, wert) {
     if (el) el.style.color = i<=wert ? '#f59e0b' : '#d1d5db';
   }
   document.getElementById('bsval_'+key+'_'+maId).value = wert;
+}
+
+// ── BAUSTELLEN-ABSCHLUSS MODAL ──────────────────────────────
+const bsaKriterien = [
+  {key:'organisation', el:'bsa-s-organisation'},
+  {key:'kommunikation', el:'bsa-s-kommunikation'},
+  {key:'qualitaet_chef', el:'bsa-s-qualitaet'},
+  {key:'reklamation', el:'bsa-s-reklamation'},
+  {key:'selbstorg', el:'bsa-s-selbstorg'},
+];
+function bsaRenderStars(elId, key) {
+  const container = document.getElementById(elId);
+  if (!container) return;
+  container.innerHTML = '';
+  for (let i=1;i<=5;i++) {
+    const s = document.createElement('span');
+    s.textContent='★'; s.id='bsa_star_'+key+'_'+i;
+    s.style.cssText='cursor:pointer;font-size:22px;color:var(--border);margin-right:2px';
+    s.onclick=()=>bsaSetStern(key,i);
+    container.appendChild(s);
+  }
+  const inp = document.createElement('input');
+  inp.type='hidden'; inp.id='bsa_val_'+key; inp.value=0;
+  container.appendChild(inp);
+}
+function bsaSetStern(key, wert) {
+  const cur = parseInt(document.getElementById('bsa_val_'+key)?.value||0);
+  const neu = cur===wert ? 0 : wert;
+  for(let i=1;i<=5;i++){const el=document.getElementById('bsa_star_'+key+'_'+i);if(el)el.style.color=i<=neu?'var(--accent)':'var(--border)';}
+  document.getElementById('bsa_val_'+key).value=neu;
+}
+function openBsAbschlussModal(bauId) {
+  const bau=(state.baustellen||[]).find(b=>b.id===bauId);
+  if(!bau) return;
+  document.getElementById('bsa-id').value=bauId;
+  document.getElementById('bsa-name').textContent=bau.name;
+  document.getElementById('bsa-budget').value='';
+  document.getElementById('bsa-qualitaet').value='';
+  document.getElementById('bsa-notiz').value='';
+  document.getElementById('bsa-chef-notiz').value='';
+  const von=bau.von?new Date(bau.von+'T12:00').toLocaleDateString('de-CH'):'';
+  const bis=bau.bis?new Date(bau.bis+'T12:00').toLocaleDateString('de-CH'):'';
+  document.getElementById('bsa-meta').textContent=(bau.kunde||'')+(von?' · '+von+' – '+bis:'');
+  // Kennzahlen
+  const tasks=bau.tasks||[];
+  const soll=tasks.reduce((s,t)=>s+(t.hours||0),0);
+  const ist=tasks.reduce((s,t)=>s+Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0),0);
+  const pct=soll>0?Math.round((ist/soll)*100):0;
+  const diffH=+(ist-soll).toFixed(1);
+  const diffCol=diffH<=0?'var(--green)':'var(--red)';
+  const maengel=(bau.maengelListe||[]).length;
+  const naStd=(bau.nacharbeitListe||[]).reduce((s,n)=>s+(n.std||0),0);
+  const fertig=tasks.filter(t=>t.fertig).length;
+  document.getElementById('bsa-kennzahlen').innerHTML=`
+    <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:${pct>100?'var(--red)':pct>=80?'var(--green)':'var(--accent)'}">${pct}%</div>
+      <div style="font-size:10px;color:var(--muted)">Budget genutzt</div>
+      <div style="font-size:11px;color:${diffCol}">${diffH>0?'+':''}${diffH}h</div>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:${maengel>0?'var(--red)':'var(--green)'}">${maengel}</div>
+      <div style="font-size:10px;color:var(--muted)">Mängel</div>
+      <div style="font-size:11px;color:var(--accent)">${naStd.toFixed(1)}h Nacharbeit</div>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:${fertig===tasks.length&&tasks.length>0?'var(--green)':'var(--accent)'}">${fertig}/${tasks.length}</div>
+      <div style="font-size:10px;color:var(--muted)">Positionen fertig</div>
+    </div>`;
+  // Chef
+  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m=>m.id===bau.chefMonteurId):null;
+  document.getElementById('bsa-chef-title').textContent=chefMa?'👷 Chef-Monteur bewerten: '+chefMa.vorname+' '+(chefMa.nachname||''):'👷 Kein Chef-Monteur erfasst';
+  document.getElementById('bsa-chef-block').style.display=chefMa?'':'none';
+  bsaKriterien.forEach(kr=>bsaRenderStars(kr.el,kr.key));
+  document.getElementById('bs-abschluss-modal').classList.add('open');
+}
+function closeBsAbschlussModal() {
+  document.getElementById('bs-abschluss-modal').classList.remove('open');
+}
+function saveBsAbschluss() {
+  const bauId=parseInt(document.getElementById('bsa-id').value);
+  const bau=(state.baustellen||[]).find(b=>b.id===bauId);
+  if(!bau) return;
+  const tasks=bau.tasks||[];
+  const soll=tasks.reduce((s,t)=>s+(t.hours||0),0);
+  const ist=tasks.reduce((s,t)=>s+Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0),0);
+  const pct=soll>0?Math.round((ist/soll)*100):0;
+  const maengel=(bau.maengelListe||[]).length;
+  const naStd=(bau.nacharbeitListe||[]).reduce((s,n)=>s+(n.std||0),0);
+  const bewerterName=currentLoginUser?(currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim():'?';
+  bau.abschluss={
+    datum:new Date().toLocaleDateString('de-CH'),
+    budget:document.getElementById('bsa-budget').value,
+    qualitaet:parseInt(document.getElementById('bsa-qualitaet').value)||0,
+    notiz:document.getElementById('bsa-notiz').value.trim(),
+    pctBudget:pct, istStunden:+ist.toFixed(1), sollStunden:+soll.toFixed(1),
+    diffStunden:+(ist-soll).toFixed(1), maengelAnzahl:maengel,
+    nacharbeitStunden:+naStd.toFixed(1), bewerterName
+  };
+  // Chef-Bewertung
+  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m=>m.id===bau.chefMonteurId):null;
+  if(chefMa && document.getElementById('bsa-chef-block')?.style.display!=='none'){
+    const chefBew={datum:new Date().toLocaleDateString('de-CH'),bauId,bauName:bau.name,bewerterName};
+    let hasWert=false;
+    bsaKriterien.forEach(kr=>{const v=parseInt(document.getElementById('bsa_val_'+kr.key)?.value||0);chefBew[kr.key]=v;if(v>0)hasWert=true;});
+    chefBew.notiz=document.getElementById('bsa-chef-notiz').value.trim();
+    if(hasWert){
+      if(!chefMa.chefBewertungen)chefMa.chefBewertungen=[];
+      chefMa.chefBewertungen.push(chefBew);
+      const all=chefMa.chefBewertungen;
+      if(!chefMa.chefBewertungSchnitt)chefMa.chefBewertungSchnitt={};
+      bsaKriterien.forEach(kr=>{
+        const vals=all.map(e=>e[kr.key]||0).filter(v=>v>0);
+        chefMa.chefBewertungSchnitt[kr.key]=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10:0;
+      });
+    }
+  }
+  bau.beendet=true;
+  save(); closeBsAbschlussModal(); renderBaustatusStatus();
+  toast('Baustelle abgeschlossen',bau.name+' · '+pct+'% Budget','✅');
 }
 
 function bsSaveBewertung(maId) {
