@@ -949,23 +949,50 @@ function renderBaustatus() {
       ${taskRows || '<div class="empty" style="padding:12px">Keine Tasks erfasst</div>'}
       ${istChef ? `
       <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
-        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">📊 Leistungserfassung (Chef)</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div>
-            <label style="font-size:11px;color:var(--muted)">🔴 Mängel</label>
-            <input type="number" id="bs_maengel_${bau.id}" value="${bau.maengel||0}" min="0" style="width:100%;padding:6px;font-size:13px;margin:0" onchange="bsSaveLeistung(${bau.id})">
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--muted)">⏱ Nacharbeitsstunden</label>
-            <input type="number" id="bs_nacharbeit_${bau.id}" value="${bau.nacharbeitStunden||0}" min="0" step="0.5" style="width:100%;padding:6px;font-size:13px;margin:0" onchange="bsSaveLeistung(${bau.id})">
-          </div>
-        </div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px">📊 Leistungserfassung (Chef)</div>
+
         <div style="margin-bottom:10px">
-          <label style="font-size:11px;color:var(--muted)">📝 Bemerkung (intern Chef)</label>
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">🔴 Mangel erfassen</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+            <select id="bs_maengel_ma_${bau.id}" style="padding:6px;font-size:12px;margin:0;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
+              <option value="">— Verursacher —</option>
+              ${team.map(m=>`<option value="${m.id}">${m.vorname} ${m.nachname||''}</option>`).join('')}
+            </select>
+            <input type="text" id="bs_maengel_text_${bau.id}" placeholder="Beschreibung" style="padding:6px;font-size:12px;margin:0">
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="bsAddMangel(${bau.id})">+ Mangel</button>
+          ${(bau.maengelListe||[]).length ? `<div style="margin-top:6px">${(bau.maengelListe||[]).map((mg,idx)=>
+            `<div style="font-size:11px;padding:3px 8px;background:rgba(220,38,38,.08);border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between">
+              <span>🔴 <b>${mg.maName||'?'}</b> · ${mg.text} <span style="color:var(--muted)">(${mg.datum||''})</span></span>
+              <span onclick="bsDelMangel(${bau.id},${idx})" style="cursor:pointer;color:var(--red)">✕</span>
+            </div>`).join('')}</div>` : ''}
+        </div>
+
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:6px">⏱ Nacharbeit erfassen</div>
+          <div style="display:grid;grid-template-columns:1fr 70px 1fr;gap:6px;margin-bottom:6px">
+            <select id="bs_naa_ma_${bau.id}" style="padding:6px;font-size:12px;margin:0;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
+              <option value="">— Monteur —</option>
+              ${team.map(m=>`<option value="${m.id}">${m.vorname} ${m.nachname||''}</option>`).join('')}
+            </select>
+            <input type="number" id="bs_naa_std_${bau.id}" placeholder="Std." step="0.5" min="0" style="padding:6px;font-size:12px;margin:0">
+            <input type="text" id="bs_naa_text_${bau.id}" placeholder="Grund" style="padding:6px;font-size:12px;margin:0">
+          </div>
+          <button class="btn btn-sm" style="border-color:var(--accent);color:var(--accent)" onclick="bsAddNacharbeit(${bau.id})">+ Nacharbeit</button>
+          ${(bau.nacharbeitListe||[]).length ? `<div style="margin-top:6px">${(bau.nacharbeitListe||[]).map((na,idx)=>
+            `<div style="font-size:11px;padding:3px 8px;background:rgba(232,184,75,.08);border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between">
+              <span>⏱ <b>${na.maName||'?'}</b> · ${na.std}h · ${na.text} <span style="color:var(--muted)">(${na.datum||''})</span></span>
+              <span onclick="bsDelNacharbeit(${bau.id},${idx})" style="cursor:pointer;color:var(--red)">✕</span>
+            </div>`).join('')}</div>` : ''}
+        </div>
+
+        <div style="margin-bottom:10px">
+          <label style="font-size:11px;color:var(--muted)">📝 Chef-Notiz (intern)</label>
           <textarea id="bs_chefnotiz_${bau.id}" rows="2" style="width:100%;padding:6px;font-size:12px;resize:none;margin:0" placeholder="z.B. Materialfehler, Terminprobleme…" onchange="bsSaveLeistung(${bau.id})">${bau.chefNotiz||''}</textarea>
         </div>
-        ${bau.maengel||bau.nacharbeitStunden ? `<div style="font-size:11px;color:var(--muted);padding:6px 8px;background:var(--surface2);border-radius:6px">
-          📈 Total: ${bau.maengel||0} Mängel · ${(bau.nacharbeitStunden||0).toFixed(1)}h Nacharbeit
+
+        ${(bau.maengelListe||[]).length || (bau.nacharbeitListe||[]).length ? `<div style="font-size:11px;color:var(--muted);padding:6px 8px;background:var(--surface2);border-radius:6px">
+          📈 Total: ${(bau.maengelListe||[]).length} Mängel · ${(bau.nacharbeitListe||[]).reduce((s,n)=>s+(n.std||0),0).toFixed(1)}h Nacharbeit
         </div>` : ''}
       </div>
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
@@ -1050,6 +1077,46 @@ function bwSpeichern(maId) {
   });
   save();
   toast('Gespeichert', m.vorname+' bewertet', '✅');
+}
+
+function bsAddMangel(bauId) {
+  const bau = state.baustellen.find(b => b.id === bauId); if (!bau) return;
+  const maId = parseInt(document.getElementById('bs_maengel_ma_'+bauId)?.value);
+  const text = document.getElementById('bs_maengel_text_'+bauId)?.value.trim();
+  if (!maId || !text) return toast('Fehler','Monteur und Beschreibung ausfüllen','⚠️');
+  const ma = (state.mitarbeiter||[]).find(m => m.id === maId);
+  if (!bau.maengelListe) bau.maengelListe = [];
+  const entry = { maId, maName:(ma?.vorname+' '+(ma?.nachname||'')).trim(), text, datum:new Date().toLocaleDateString('de-CH'), bauId, bauName:bau.name };
+  bau.maengelListe.push(entry);
+  if (ma) { if (!ma.maengel) ma.maengel = []; ma.maengel.push(entry); }
+  save(); renderBaustatus();
+  toast('Mangel gespeichert', text, '🔴');
+}
+function bsDelMangel(bauId, idx) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau?.maengelListe) return;
+  bau.maengelListe.splice(idx, 1);
+  save(); renderBaustatus();
+}
+function bsAddNacharbeit(bauId) {
+  const bau = state.baustellen.find(b => b.id === bauId); if (!bau) return;
+  const maId = parseInt(document.getElementById('bs_naa_ma_'+bauId)?.value);
+  const std = parseFloat(document.getElementById('bs_naa_std_'+bauId)?.value) || 0;
+  const text = document.getElementById('bs_naa_text_'+bauId)?.value.trim() || '';
+  if (!maId || !std) return toast('Fehler','Monteur und Stunden ausfüllen','⚠️');
+  const ma = (state.mitarbeiter||[]).find(m => m.id === maId);
+  if (!bau.nacharbeitListe) bau.nacharbeitListe = [];
+  const entry = { maId, maName:(ma?.vorname+' '+(ma?.nachname||'')).trim(), std, text, datum:new Date().toLocaleDateString('de-CH'), bauId, bauName:bau.name };
+  bau.nacharbeitListe.push(entry);
+  if (ma) { if (!ma.nacharbeit) ma.nacharbeit = []; ma.nacharbeit.push(entry); }
+  save(); renderBaustatus();
+  toast('Nacharbeit gespeichert', std+'h', '⏱');
+}
+function bsDelNacharbeit(bauId, idx) {
+  const bau = state.baustellen.find(b => b.id === bauId);
+  if (!bau?.nacharbeitListe) return;
+  bau.nacharbeitListe.splice(idx, 1);
+  save(); renderBaustatus();
 }
 
 function bsTaskToggleFertig(bauId, taskId) {
