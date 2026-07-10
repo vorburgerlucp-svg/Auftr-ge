@@ -956,8 +956,9 @@
     <div style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
       🚐 Fahrzeugzuweisung erfolgt in der <strong style="color:var(--text)">Fahrzeugverwaltung</strong>
     </div>
-    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn btn-danger btn-sm" id="ma-delete-btn" onclick="deleteMa()" style="margin-right:auto;display:none">🗑 Löschen</button>
+      <button class="btn btn-secondary btn-sm" id="ma-auswertung-btn" onclick="showMaAuswertung()" style="display:none">📊 Auswertung</button>
       <button class="btn btn-secondary" onclick="closeMaModal()">Abbrechen</button>
       <button class="btn btn-primary" onclick="saveMaModal()">💾 Speichern</button>
     </div>
@@ -3865,6 +3866,8 @@ function showMaModal(id) {
     cb.checked = faehMap.includes(cb.value);
   });
   document.getElementById('ma-delete-btn').style.display = m ? '' : 'none';
+  const auswBtn = document.getElementById('ma-auswertung-btn');
+  if (auswBtn) auswBtn.style.display = (m && (currentLoginUser?.admin || currentLoginUser?.entwickler)) ? '' : 'none';
   document.getElementById('ma-modal').classList.add('open');
 }
 
@@ -3958,6 +3961,97 @@ function saveMaModal() {
   else state.mitarbeiter.push(data);
   save(); closeMaModal(); renderMitarbeiterPage();
   toast('Gespeichert', vorname + ' ' + nachname, '✅');
+}
+
+function showMaAuswertung() {
+  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const m = (state.mitarbeiter||[]).find(x => x.id === id);
+  if (!m) return;
+  const bsKrit = [
+    {key:'sauberkeit',label:'Sauberkeit'},{key:'qualitaet',label:'Qualität'},
+    {key:'eigeninitiative',label:'Eigeninitiative'},{key:'dokumentation',label:'Dokumentation'},
+    {key:'rueckmeldung',label:'Rückmeldung'}
+  ];
+  const bew = m.bewertungen || {};
+  const eintraege = (bew.eintraege || []).slice().reverse();
+  const vals = bsKrit.map(kr=>bew[kr.key]).filter(v=>v>0);
+  const gesamt = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null;
+  const col = !gesamt?'var(--muted)':parseFloat(gesamt)>=4?'var(--green)':parseFloat(gesamt)>=3?'var(--accent)':'var(--red)';
+
+  let html = `<h2 style="margin-bottom:4px">${m.vorname} ${m.nachname||''}</h2>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:16px">${eintraege.length} Bewertungen</p>
+    <div style="text-align:center;margin-bottom:16px">
+      ${gesamt ? `<div style="font-size:36px;font-weight:700;color:${col}">${gesamt}</div>
+      <div style="font-size:11px;color:var(--muted)">Gesamtdurchschnitt</div>` : '<div style="color:var(--muted)">Noch keine Bewertungen</div>'}
+    </div>`;
+
+  if (gesamt) {
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:16px">';
+    bsKrit.forEach(kr => {
+      const v = bew[kr.key]; const c = !v?'var(--muted)':v>=4?'var(--green)':v>=3?'var(--accent)':'var(--red)';
+      const bar = v ? Math.round(v/5*100) : 0;
+      html += `<div style="text-align:center;min-width:80px">
+        <div style="font-size:18px;font-weight:700;color:${c}">${v||'–'}</div>
+        <div style="height:4px;background:var(--border);border-radius:2px;margin:3px 4px"><div style="height:100%;background:${c};width:${bar}%;border-radius:2px"></div></div>
+        <div style="font-size:9px;color:var(--muted)">${kr.label}</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (eintraege.length) {
+    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Alle Bewertungen</div>`;
+    eintraege.forEach(e => {
+      const eVals = bsKrit.map(kr=>e[kr.key]||0).filter(v=>v>0);
+      const eAvg = eVals.length ? (eVals.reduce((a,b)=>a+b,0)/eVals.length).toFixed(1) : '?';
+      const ec = parseFloat(eAvg)>=4?'var(--green)':parseFloat(eAvg)>=3?'var(--accent)':'var(--red)';
+      const stars = bsKrit.map(kr => e[kr.key] ? `<span style="font-size:11px;color:var(--accent)">${kr.label.charAt(0)}:${e[kr.key]}★</span>` : null).filter(Boolean).join('  ');
+      html += `<div style="padding:7px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <div>${e.bauName?`<span style="font-size:12px;font-weight:600">🏗️ ${e.bauName}</span>`:''} <span style="font-size:11px;color:var(--muted)">${e.datum||''}${e.bewerterName?' · von '+e.bewerterName:''}</span></div>
+          <span style="font-size:13px;font-weight:700;color:${ec}">Ø ${eAvg}</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${stars}</div>
+      </div>`;
+    });
+  }
+
+  // Chef-Bewertungen
+  const chefBews = m.chefBewertungen || [];
+  if (chefBews.length) {
+    const chefKrit = [{key:'organisation',label:'Organisation'},{key:'kommunikation',label:'Kommunikation'},{key:'qualitaet_chef',label:'Qualität'},{key:'reklamation',label:'Reklamationen'},{key:'selbstorg',label:'Selbstorg.'}];
+    const chefSchnitt = m.chefBewertungSchnitt || {};
+    const chefVals = chefKrit.map(kr=>chefSchnitt[kr.key]||0).filter(v=>v>0);
+    const chefAvg = chefVals.length ? (chefVals.reduce((a,b)=>a+b,0)/chefVals.length).toFixed(1) : null;
+    const chefCol = !chefAvg?'var(--muted)':parseFloat(chefAvg)>=4?'var(--green)':parseFloat(chefAvg)>=3?'var(--accent)':'var(--red)';
+    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.5px">👷 Als Chef-Monteur</div>
+      ${chefAvg?`<div style="font-size:24px;font-weight:700;color:${chefCol};text-align:center;margin-bottom:10px">Ø ${chefAvg}</div>`:''}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:10px">
+        ${chefKrit.map(kr=>{const v=chefSchnitt[kr.key];const c=!v?'var(--muted)':v>=4?'var(--green)':v>=3?'var(--accent)':'var(--red)';return `<div style="text-align:center;min-width:60px"><div style="font-size:16px;font-weight:700;color:${c}">${v||'–'}</div><div style="font-size:9px;color:var(--muted)">${kr.label}</div></div>`;}).join('')}
+      </div>`;
+    chefBews.slice().reverse().slice(0,5).forEach(e => {
+      const kStr = chefKrit.map(kr=>e[kr.key]?`${kr.label.charAt(0)}:${e[kr.key]}★`:null).filter(Boolean).join(' · ');
+      html += `<div style="font-size:11px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between"><span style="font-weight:600">${e.bauName||''}</span><span style="color:var(--muted)">${e.datum||''}</span></div>
+        <span style="color:var(--accent)">${kStr}</span>${e.notiz?`<div style="color:var(--muted);font-style:italic;font-size:10px">${e.notiz}</div>`:''}
+      </div>`;
+    });
+  }
+
+  // Mängel & Nacharbeit
+  const maengel = m.maengel || [], nacharbeit = m.nacharbeit || [];
+  if (maengel.length || nacharbeit.length) {
+    html += `<div style="font-size:12px;font-weight:700;color:var(--muted);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.5px">Mängel & Nacharbeit</div>`;
+    maengel.forEach(mg => { html += `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);color:var(--red)">🔴 ${mg.datum} · ${mg.bauName||''} · ${mg.text}</div>`; });
+    nacharbeit.forEach(na => { html += `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);color:var(--accent)">⏱ ${na.datum} · ${na.bauName||''} · ${na.std}h · ${na.text||''}</div>`; });
+  }
+
+  html += `<button class="btn btn-secondary btn-block" style="margin-top:16px" onclick="closeMaModal();showMaModal(${m.id})">← Zurück</button>`;
+
+  const modal = document.querySelector('#ma-modal .modal');
+  if (!modal) return;
+  window._maSavedHTML = modal.innerHTML;
+  modal.innerHTML = html;
 }
 
 function deleteMa() {
@@ -8139,7 +8233,10 @@ function renderBaustatusKVP() {
     '<div><label style="font-size:11px;color:var(--muted);">Baustelle</label>' +
     '<select id="kvp-bau" onchange="kvpUpdatePositionen()" style="width:100%;">' +
     '<option value="">-- Baustelle wählen --</option>' +
+    '<option value="__frei__">✏️ Freie Eingabe (nicht im System)...</option>' +
     baustellen.map(b=>'<option value="'+b.id+'">'+b.name+'</option>').join('') + '</select></div>' +
+    '<div id="kvp-bau-frei-wrap" style="display:none"><label style="font-size:11px;color:var(--muted);">Baustellen-Name (frei)</label>' +
+    '<input type="text" id="kvp-bau-frei" placeholder="z.B. Fust Luzern KW22" style="width:100%;"></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Task/Position</label>' +
     '<select id="kvp-task" style="width:100%;"><option value="">-- zuerst Baustelle wählen --</option></select></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Beschreibung</label>' +
@@ -8168,9 +8265,17 @@ function renderBaustatusKVP() {
 }
 
 function kvpUpdatePositionen() {
-  const bauId = parseInt(document.getElementById('kvp-bau').value);
+  const val = document.getElementById('kvp-bau').value;
+  const freiWrap = document.getElementById('kvp-bau-frei-wrap');
   const sel = document.getElementById('kvp-task');
+  if (val === '__frei__') {
+    freiWrap.style.display = '';
+    sel.innerHTML = '<option value="">-- kein Task (freie Baustelle) --</option>';
+    return;
+  }
+  freiWrap.style.display = 'none';
   sel.innerHTML = '<option value="">-- Task wählen --</option>';
+  const bauId = parseInt(val);
   const bau = (state.baustellen||[]).find(b=>b.id===bauId);
   if (!bau) return;
   (bau.tasks||[]).forEach(t => sel.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>');
@@ -8178,24 +8283,27 @@ function kvpUpdatePositionen() {
 
 function kvpSpeichern() {
   const maId = parseInt(document.getElementById('kvp-ma').value);
-  const bauId = parseInt(document.getElementById('kvp-bau').value);
+  const bauVal = document.getElementById('kvp-bau').value;
+  const bauId = bauVal === '__frei__' ? null : parseInt(bauVal);
+  const bauFreiName = bauVal === '__frei__' ? (document.getElementById('kvp-bau-frei')?.value.trim()||'Freie Baustelle') : null;
   const taskId = document.getElementById('kvp-task').value;
   const beschreibung = document.getElementById('kvp-beschreibung').value.trim();
   const stunden = parseFloat(document.getElementById('kvp-stunden').value);
 
   if (!maId) return toast('Fehler','Mitarbeiter wählen','⚠️');
-  if (!bauId) return toast('Fehler','Baustelle wählen','⚠️');
+  if (!bauVal) return toast('Fehler','Baustelle wählen','⚠️');
   if (!beschreibung) return toast('Fehler','Beschreibung eingeben','⚠️');
   if (!stunden || stunden<=0) return toast('Fehler','Stunden eingeben','⚠️');
 
   const ma = state.mitarbeiter.find(m=>m.id===maId);
-  const bau = state.baustellen.find(b=>b.id===bauId);
-  const task = (bau.tasks||[]).find(t=>t.id===taskId);
+  const bau = bauId ? state.baustellen.find(b=>b.id===bauId) : null;
+  const task = bau ? (bau.tasks||[]).find(t=>t.id===taskId) : null;
+  const bauName = bau ? bau.name : (bauFreiName || 'Freie Baustelle');
 
   if (!ma.kvp) ma.kvp = [];
   ma.kvp.push({
     id: 'kvp'+Date.now(),
-    baustelle: bau.name,
+    baustelle: bauName,
     task: task?task.name:'',
     beschreibung, stunden,
     datum: new Date().toLocaleDateString('de-CH')
