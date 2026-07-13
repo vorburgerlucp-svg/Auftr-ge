@@ -216,10 +216,11 @@
   <h1>🛒 Bestellung</h1>
   <p class="subtitle">Artikel anfordern – Lager wird automatisch geprüft</p>
 
-  <div style="display:flex;gap:6px;margin-bottom:14px">
+  <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
     <button class="btn btn-sm" id="best-tab-bestellen-btn" onclick="switchBestTab('bestellen')">Bestellen</button>
     <button class="btn btn-sm" id="best-tab-offen-btn" onclick="switchBestTab('offen')">Offen <span id="best-offen-badge"></span></button>
     <button class="btn btn-sm" id="best-tab-geliefert-btn" onclick="switchBestTab('geliefert')">Geliefert</button>
+    <button class="btn btn-sm" id="best-tab-jahresbericht-btn" onclick="switchBestTab('jahresbericht')">💰 Kontrolle</button>
   </div>
 
   <div id="best-tab-bestellen">
@@ -230,6 +231,7 @@
 
   <div id="best-tab-offen" class="hidden"></div>
   <div id="best-tab-geliefert" class="hidden"></div>
+  <div id="best-tab-jahresbericht" class="hidden"></div>
 </div>
 
 <!-- CART BAR -->
@@ -711,7 +713,7 @@ function showPage(id, silent) {
 // ════════════════════════════════════════════════════════
 function switchBestTab(tab) {
   bestTab = tab;
-  ['bestellen','offen','geliefert'].forEach(t => {
+  ['bestellen','offen','geliefert','jahresbericht'].forEach(t => {
     document.getElementById('best-tab-'+t).classList.toggle('hidden', t !== tab);
     const btn = document.getElementById('best-tab-'+t+'-btn');
     if (btn) btn.className = 'btn btn-sm' + (t===tab ? ' btn-primary' : '');
@@ -719,6 +721,7 @@ function switchBestTab(tab) {
   document.getElementById('cart-bar').classList.toggle('show', tab === 'bestellen' && cart.length > 0);
   if (tab === 'offen') renderOrderList('offen');
   if (tab === 'geliefert') renderOrderList('geliefert');
+  if (tab === 'jahresbericht') renderMonteurKontrolle();
 }
 
 function renderKatPills() {
@@ -1418,7 +1421,7 @@ function updateVerrechnungReminder() {
   const jahrFilter = new Date().getFullYear().toString();
   if (!state.verrechnungen) state.verrechnungen = {};
   if (!state.verrechnungsPos) state.verrechnungsPos = {};
-  const fzgKey = meinFzg ? meinFzg.name : '(kein Fahrzeug)';
+  const fzgKey = meinFzg ? meinFzg.name : ('ma_' + ma.id);
   const vKey = (art) => fzgKey + '||' + art + '||' + jahrFilter;
   const pk = fzgKey + '||' + jahrFilter + '||pos';
 
@@ -1451,6 +1454,68 @@ function updateVerrechnungReminder() {
     if (offeneFreie > 0) txt.push(offeneFreie + ' freie Position(en) offen');
     textEl.textContent = txt.join(' · ') + ' → Kontrolle öffnen';
   }
+}
+
+// Read-only Kontroll-Ansicht für den Monteur selbst — zeigt was bereits verrechnet wurde
+// (gleiche state.verrechnungen-Daten wie in der Admin-Ansicht, hier nur zur Einsicht).
+function renderMonteurKontrolle() {
+  const el = document.getElementById('best-tab-jahresbericht');
+  if (!el || !currentLoginUser) return;
+  const ma = currentLoginUser;
+  const meinFzg = getMaFahrzeug(ma);
+  const jahrFilter = new Date().getFullYear().toString();
+  if (!state.verrechnungen) state.verrechnungen = {};
+  if (!state.verrechnungsPos) state.verrechnungsPos = {};
+  const fzgKey = meinFzg ? meinFzg.name : ('ma_' + ma.id);
+  const fzgLabel = meinFzg ? meinFzg.name : '(kein Fahrzeug)';
+  const vKey = (art) => fzgKey + '||' + art + '||' + jahrFilter;
+  const pk = fzgKey + '||' + jahrFilter + '||pos';
+
+  const meineOrders = (state.orders||[]).filter(o => {
+    if (!o.datum || !o.datum.includes(jahrFilter)) return false;
+    return (meinFzg && (o.fahrzeug===meinFzg.name || o.fahrzeugId===meinFzg.id)) || o.maId===ma.id;
+  });
+
+  if (!meineOrders.length) { el.innerHTML = '<div class="empty">Keine Bestellungen im ' + jahrFilter + '</div>'; return; }
+
+  const itemMap = {};
+  meineOrders.forEach(o => (o.items||[]).forEach(i => {
+    if (!itemMap[i.name]) itemMap[i.name] = { menge: 0, einheit: i.einheit||'Stk' };
+    itemMap[i.name].menge += i.menge;
+  }));
+
+  const rows = Object.entries(itemMap).sort((a,b) => b[1].menge - a[1].menge).map(([name, info]) => {
+    const key = vKey(name);
+    const verr = state.verrechnungen[key] ?? 0;
+    const verrEinheit = state.verrechnungen[key+'||einheit'] ?? info.einheit;
+    const offen = Math.max(0, info.menge - verr);
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 4px">${name}</td>
+      <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge} ${info.einheit}</td>
+      <td style="padding:6px 4px;text-align:right;color:var(--green)">${verr>0 ? verr+' '+verrEinheit : '–'}</td>
+      <td style="padding:6px 4px;text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen > 0 ? offen+' '+info.einheit : '✅'}</td>
+    </tr>`;
+  }).join('');
+
+  const freiePos = state.verrechnungsPos[pk] || [];
+  const freiePosRows = freiePos.map(p => `
+    <tr style="border-bottom:1px solid var(--border);background:rgba(75,159,232,.04)">
+      <td style="padding:6px 4px" colspan="2">${p.beschrieb||'(ohne Beschrieb)'}</td>
+      <td style="padding:6px 4px;text-align:right" colspan="2">${p.status==='verrechnet' ? '✅ Verrechnet' : '⏳ Offen'}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `<div class="card">
+    <div style="font-weight:700;margin-bottom:10px">${fzgLabel} · ${jahrFilter}</div>
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
+        <th style="text-align:left;padding:4px">Artikel</th>
+        <th style="text-align:right;padding:4px">Bestellt</th>
+        <th style="text-align:right;padding:4px">Verrechnet</th>
+        <th style="text-align:right;padding:4px">Offen</th>
+      </tr></thead>
+      <tbody>${rows}${freiePosRows}</tbody>
+    </table>
+  </div>`;
 }
 
 function updateMeldungenBadge() {
