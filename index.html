@@ -479,6 +479,9 @@
       <div><label>Mindestbestand (Warnung)</label><input type="number" id="art-min" placeholder="5" min="0"></div>
       <div><label>Artikel-Nr. (optional)</label><input type="text" id="art-nr" placeholder="A-0001"></div>
     </div>
+    <div class="form-row cols-3">
+      <div><label>Preis pro Stk (CHF, optional)</label><input type="number" id="art-preis" placeholder="z.B. 0.09" min="0" step="0.001"></div>
+    </div>
     <button class="btn btn-primary" onclick="addArtikel()">+ Artikel hinzufügen</button>
   </div>
 
@@ -1144,8 +1147,9 @@
       <div><label>Aktueller Bestand</label><input type="number" id="art-modal-bestand" min="0"></div>
       <div><label>Meldebestand (Warnung ab)</label><input type="number" id="art-modal-min" min="0"></div>
     </div>
-    <div class="form-row cols-1">
+    <div class="form-row cols-2">
       <div><label>Artikel-Nr.</label><input type="text" id="art-modal-nr"></div>
+      <div><label>Preis pro Stk (CHF, optional)</label><input type="number" id="art-modal-preis" placeholder="z.B. 0.09" min="0" step="0.001"></div>
     </div>
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-danger btn-sm" id="art-modal-delete-btn" onclick="deleteArtikelAusModal()" style="margin-right:auto">🗑 Löschen</button>
@@ -1719,6 +1723,81 @@ function migrationKategorienReorganisation() {
   save();
 }
 
+// Preis pro Stk für Artikel hinterlegen (aus Lieferanten-Preislisten, CHF exkl. MwSt).
+// PREIS_MAP wird bei Bedarf mit weiteren Artikelnummern ergänzt (nr -> CHF pro Stk).
+// Läuft bei jedem Start (kein einmaliges Flag), damit neue Einträge sofort greifen
+// und bestehende Preise bei Aktualisierung überschrieben werden.
+const PREIS_MAP = {
+  // Senkkopfschrauben ohne Schaft / Vollgewinde (82.1012.xxxxx)
+  '82.1012.30012': 0.035, '82.1012.30016': 0.033, '82.1012.30020': 0.035, '82.1012.30025': 0.039, '82.1012.30030': 0.048,
+  '82.1012.35015': 0.037, '82.1012.35020': 0.034, '82.1012.35030': 0.047, '82.1012.35035': 0.052, '82.1012.35040': 0.063, '82.1012.35045': 0.076,
+  '82.1012.40015': 0.050, '82.1012.40016': 0.047, '82.1012.40020': 0.049, '82.1012.40025': 0.054, '82.1012.40030': 0.063, '82.1012.40035': 0.069, '82.1012.40040': 0.074, '82.1012.40045': 0.083, '82.1012.40050': 0.096,
+  '82.1012.45020': 0.067, '82.1012.45025': 0.073, '82.1012.45030': 0.080, '82.1012.45035': 0.090, '82.1012.45040': 0.095, '82.1012.45045': 0.106, '82.1012.45050': 0.118, '82.1012.45060': 0.178, '82.1012.45070': 0.193,
+  '82.1012.50020': 0.098, '82.1012.50025': 0.107, '82.1012.50030': 0.114, '82.1012.50035': 0.126, '82.1012.50040': 0.112, '82.1012.50045': 0.124, '82.1012.50050': 0.125, '82.1012.50060': 0.166, '82.1012.50070': 0.175, '82.1012.50080': 0.211,
+  '82.1012.60050': 0.210, '82.1012.60060': 0.232, '82.1012.60070': 0.288, '82.1012.60080': 0.311,
+
+  // Senkkopfschrauben mit Schaft (82.1020.xxxxx)
+  '82.1020.30025': 0.0045, '82.1020.30030': 0.0054, '82.1020.30035': 0.0063, '82.1020.30040': 0.0090,
+  '82.1020.35025': 0.0072, '82.1020.35030': 0.0072, '82.1020.35035': 0.0063, '82.1020.35040': 0.0072, '82.1020.35045': 0.0081, '82.1020.35050': 0.0090,
+  '82.1020.40025': 0.0063, '82.1020.40030': 0.0072, '82.1020.40035': 0.0081, '82.1020.40040': 0.0090, '82.1020.40045': 0.0117, '82.1020.40050': 0.0117, '82.1020.40055': 0.0126, '82.1020.40060': 0.0144, '82.1020.40070': 0.0162,
+  '82.1020.45030': 0.0117, '82.1020.45035': 0.0108, '82.1020.45040': 0.0126, '82.1020.45045': 0.0135, '82.1020.45050': 0.0153, '82.1020.45055': 0.0153, '82.1020.45060': 0.0180, '82.1020.45070': 0.0207, '82.1020.45080': 0.0243,
+  '82.1020.50030': 0.0126, '82.1020.50035': 0.0135, '82.1020.50040': 0.0171, '82.1020.50045': 0.0171, '82.1020.50050': 0.0171, '82.1020.50055': 0.0198, '82.1020.50060': 0.0216, '82.1020.50065': 0.0243, '82.1020.50070': 0.0252, '82.1020.50080': 0.0279, '82.1020.50090': 0.0306, '82.1020.50100': 0.0531, '82.1020.50120': 0.0594,
+  '82.1020.60040': 0.0216, '82.1020.60050': 0.0270, '82.1020.60060': 0.0306, '82.1020.60070': 0.0351, '82.1020.60080': 0.0405, '82.1020.60090': 0.0441, '82.1020.60100': 0.0531, '82.1020.60110': 0.0630, '82.1020.60120': 0.0738, '82.1020.60130': 0.0666, '82.1020.60140': 0.0846, '82.1020.60150': 0.0909, '82.1020.60160': 0.1197, '82.1020.60180': 0.1557, '82.1020.60200': 0.1944, '82.1020.60220': 0.2106, '82.1020.60240': 0.1809,
+
+  // Top-Roc 6mm (82.5010.6xxxx)
+  '82.5010.60060': 0.64, '82.5010.60080': 0.72, '82.5010.60100': 0.87, '82.5010.60120': 0.98, '82.5010.60150': 1.26, '82.5010.60180': 1.62, '82.5010.60200': 1.98, '82.5010.60230': 1.49, '82.5010.60250': 2.80, '82.5010.60300': 3.55, '82.5010.60350': 4.15, '82.5010.60400': 5.35, '82.5010.60450': 7.89, '82.5010.60500': 6.50, '82.5010.60600': 7.20,
+
+  // Rafix mit Kopf TX 7.5mm (82.5405.75xxx)
+  '82.5405.75042': 0.11, '82.5405.75052': 0.162, '82.5405.75062': 0.173, '82.5405.75072': 0.179, '82.5405.75082': 0.198, '82.5405.75092': 0.226, '82.5405.75100': 0.259, '82.5405.75112': 0.277, '82.5405.75120': 0.308, '82.5405.75132': 0.351, '82.5405.75152': 0.389, '82.5405.75182': 0.476, '82.5405.75212': 0.769, '82.5405.75252': 1.743, '82.5405.75302': 1.946,
+
+  // Kunststoffdübel Fischer (86.1115.xxxxx)
+  '86.1115.05025': 0.0513, '86.1115.06030': 0.0731, '86.1115.06050': 0.1525, '86.1115.08040': 0.1055, '86.1115.08065': 0.178, '86.1115.10050': 0.2026, '86.1115.10080': 0.3455, '86.1115.12060': 0.3344, '86.1115.14070': 0.601,
+
+  // Abdeckband PERMAFIX 710 (81.7303.xxxx)
+  '81.7303.2024': 6.20, '81.7303.2030': 7.40, '81.7303.2036': 9.40, '81.7303.2048': 12.30,
+
+  // Rafix ohne Kopf TX 7.5mm (82.5406.75xxx) — korrigierte Nr, ersetzt alte 82.5416.75xxx
+  '82.5406.75042': 0.11, '82.5406.75052': 0.145, '82.5406.75062': 0.173, '82.5406.75072': 0.179, '82.5406.75082': 0.198, '82.5406.75092': 0.226,
+  '82.5406.75112': 0.277, '82.5406.75132': 0.351, '82.5406.75152': 0.389, '82.5406.75182': 0.476, '82.5406.75212': 0.769, '82.5406.75252': 2.326, '82.5406.75302': 2.594,
+
+  // Verbindungsplättchen LAMELLO (80.1351.xxxx) — 1000 Stk pro Packung
+  '80.1351.0000': 0.0314, '80.1351.0010': 0.0321, '80.1351.0020': 0.0326,
+
+  // Rollenware (Preis pro Rolle/Stk, Netto nach Rabatt)
+  '81.7682.2050': 61.74,   // Abdeckvlies PETERHANS
+  '81.7106.0911': 8.23,    // Montageband/Klebeband PERMAFIX 620/1780
+};
+function applyArtikelPreise() {
+  if (!Array.isArray(state.artikel)) return;
+  let n = 0;
+  state.artikel.forEach(a => {
+    if (a.nr && PREIS_MAP[a.nr] !== undefined) { a.preis = PREIS_MAP[a.nr]; n++; }
+  });
+  if (n > 0) save();
+}
+
+// Korrigiert die Artikel-Nr von "Rafix ohne Kopf": alte Nr 82.5416.75xxx existiert beim
+// Lieferanten nicht (Tippfehler bei Ersterfassung) — korrekt ist 82.5406.75xxx.
+function fixRafixOhneKopfNr() {
+  if (!Array.isArray(state.artikel)) return;
+  let n = 0;
+  state.artikel.forEach(a => {
+    if (a.nr && a.nr.startsWith('82.5416.75')) { a.nr = a.nr.replace('82.5416.75', '82.5406.75'); n++; }
+  });
+  if (n > 0) save();
+}
+
+// Einmalige Ergänzung: Abdeckband PERMAFIX 710 38mm fehlte im System
+function migrationAbdeckband38mm() {
+  if (!Array.isArray(state.artikel)) return;
+  if (state._abdeckband38Migriert) return;
+  if (!state.artikel.some(a => a.nr === '81.7303.2036')) {
+    state.artikel.push({ id: Date.now()+Math.floor(Math.random()*99999), name: 'Abdeckband PERMAFIX 710 38mm', nr: '81.7303.2036', kat: 'Abdeckung & Schutz', einheit: 'Stk', bestand: 0, min: 5 });
+  }
+  state._abdeckband38Migriert = true;
+  save();
+}
+
 function migrationSchraubenNeu() {
   if (state._schraubenNeuMigriert2) return;
   // Zusätzlich prüfen ob noch alte Schrauben drin sind — wenn ja, nochmal laufen
@@ -1942,6 +2021,9 @@ function load() {
   migrationKlebstoffeEtc();
   migrationSpanplattenschrauben();
   migrationSchraubenNeu();
+  migrationAbdeckband38mm();
+  fixRafixOhneKopfNr();
+  applyArtikelPreise();
   migrationDistanzplatten();
   migrationMeldungenMaIdReparatur();
   migrationTopRocRafixTX();
@@ -2730,6 +2812,7 @@ function addArtikel() {
   const name = document.getElementById('art-name').value.trim();
   const bestand = parseInt(document.getElementById('art-bestand').value) || 0;
   if (!name) return toast('Fehler', 'Bitte Artikelname eingeben', '⚠️');
+  const preisVal = document.getElementById('art-preis').value;
   state.artikel.push({
     id: Date.now(),
     name,
@@ -2737,10 +2820,11 @@ function addArtikel() {
     einheit: document.getElementById('art-einheit').value,
     bestand,
     min: parseInt(document.getElementById('art-min').value) || 0,
-    nr: document.getElementById('art-nr').value.trim()
+    nr: document.getElementById('art-nr').value.trim(),
+    preis: preisVal !== '' ? parseFloat(preisVal) : undefined
   });
   save(); renderAll();
-  ['art-name','art-bestand','art-min','art-nr'].forEach(id => document.getElementById(id).value = '');
+  ['art-name','art-bestand','art-min','art-nr','art-preis'].forEach(id => document.getElementById(id).value = '');
   toast('Artikel hinzugefügt', name, '✅');
 }
 
@@ -2775,6 +2859,7 @@ function showArtModal(id) {
   document.getElementById('art-modal-bestand').value = a.bestand ?? 0;
   document.getElementById('art-modal-min').value = a.min ?? 0;
   document.getElementById('art-modal-nr').value = a.nr || '';
+  document.getElementById('art-modal-preis').value = a.preis ?? '';
   document.getElementById('art-modal').classList.add('open');
 }
 
@@ -2794,6 +2879,8 @@ function saveArtModal() {
   a.bestand = Math.max(0, parseInt(document.getElementById('art-modal-bestand').value) || 0);
   a.min = Math.max(0, parseInt(document.getElementById('art-modal-min').value) || 0);
   a.nr = document.getElementById('art-modal-nr').value.trim();
+  const preisVal = document.getElementById('art-modal-preis').value;
+  a.preis = preisVal !== '' ? parseFloat(preisVal) : undefined;
   save(); renderAll();
   closeArtModal();
   toast('Gespeichert', name, '✅');
@@ -2861,7 +2948,7 @@ function renderArtikelTable() {
       const color = zero ? '#e8574b' : low ? '#e8b84b' : '#4be88a';
       return `<tr onclick="showArtModal(${a.id})" style="cursor:pointer">
         <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${a.nr || '—'}</td>
-        <td><div style="font-weight:600">${a.name}</div><div style="font-size:11px;color:var(--muted)">${a.einheit}</div></td>
+        <td><div style="font-weight:600">${a.name}</div><div style="font-size:11px;color:var(--muted)">${a.einheit}${a.preis ? ' · CHF '+a.preis.toFixed(a.preis<1?4:2) : ''}</div></td>
         <td style="font-size:12px;color:var(--muted)">${a.kat}</td>
         <td>
           <div style="display:flex;align-items:center;gap:8px">
@@ -3588,10 +3675,15 @@ function renderJahresbericht() {
     const rows = Object.entries(data.items).sort((a,b) => b[1].menge - a[1].menge).map(([name, info]) => {
       const key = vKey(fzg, name);
       const verr = state.verrechnungen[key] ?? 0;
-      const verrChf = state.verrechnungen[key+'||chf'] ?? '';
       const verrEinheit = state.verrechnungen[key+'||einheit'] ?? info.einheit;
+      const artikelObj = (state.artikel||[]).find(a => a.name === name);
+      const autoChf = artikelObj?.preis ? verr * artikelObj.preis : null;
+      const manuelChf = state.verrechnungen[key+'||chf'];
+      const chfIstManuell = manuelChf !== undefined && manuelChf !== '';
+      const verrChf = chfIstManuell ? manuelChf : (autoChf !== null ? autoChf.toFixed(2) : '');
+      const abgehakt = !!state.verrechnungen[key+'||done'];
       const offen = Math.max(0, info.menge - verr);
-      const pct = info.menge > 0 ? Math.min(100, Math.round(verr/info.menge*100)) : 100;
+      const fertig = abgehakt || offen === 0;
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:6px 4px">${name}</td>
         <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge}</td>
@@ -3606,11 +3698,17 @@ function renderJahresbericht() {
             onchange="saveVerrechnung('${(key+'||einheit').replace(/'/g,"\\'")}', this.value)">
         </td>
         <td style="padding:6px 4px;text-align:right">
-          <input type="text" value="${verrChf}" placeholder="CHF"
-            style="width:70px;text-align:right;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
+          <input type="text" value="${verrChf}" placeholder="${autoChf!==null?autoChf.toFixed(2):'CHF'}"
+            style="width:65px;text-align:right;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:${chfIstManuell?'var(--text)':'var(--muted)'};border-radius:4px"
+            title="${autoChf!==null && !chfIstManuell ? 'automatisch berechnet (Preis hinterlegt)' : ''}"
             onchange="saveVerrechnung('${(key+'||chf').replace(/'/g,"\\'")}', this.value)">
         </td>
-        <td style="padding:6px 4px;text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen > 0 ? offen+' '+info.einheit : '✅'}</td>` : ''}
+        <td style="padding:6px 4px;text-align:right;font-weight:700;color:${offen>0 && !abgehakt?'var(--red)':'var(--green)'}">${offen > 0 && !abgehakt ? offen+' '+info.einheit : '✅'}</td>
+        <td style="padding:6px 4px;text-align:center">
+          <input type="checkbox" ${abgehakt?'checked':''} title="Als verrechnet abhaken (unabhängig von Stk-Zahl)"
+            style="width:16px;height:16px;cursor:pointer;accent-color:var(--green)"
+            onchange="saveVerrechnung('${(key+'||done').replace(/'/g,"\\'")}', this.checked)">
+        </td>` : ''}
       </tr>`;
     }).join('');
 
@@ -3630,7 +3728,7 @@ function renderJahresbericht() {
             style="width:100%;padding:3px 5px;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px"
             onchange="saveFreePos('${pk.replace(/'/g,"\\'")}', ${idx}, 'chf', this.value)">
         </td>
-        <td style="padding:6px 4px;text-align:right">
+        <td style="padding:6px 4px;text-align:right" colspan="3">
           <select onchange="saveFreePos('${pk.replace(/'/g,"\\'")}', ${idx}, 'status', this.value)"
             style="padding:3px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px">
             <option value="offen" ${(!p.status||p.status==='offen')?'selected':''}>⏳ Offen</option>
@@ -3645,9 +3743,20 @@ function renderJahresbericht() {
     // Totals
     const totalBestellt = Object.values(data.items).reduce((s,i) => s+i.menge, 0);
     const totalVerr = Object.entries(data.items).reduce((s,[name]) => s+(state.verrechnungen[vKey(fzg,name)]||0), 0);
-    const totalOffen = Math.max(0, totalBestellt - totalVerr);
+    const totalOffen = Object.entries(data.items).reduce((s,[name,info]) => {
+      const k = vKey(fzg,name);
+      if (state.verrechnungen[k+'||done']) return s; // manuell abgehakt zählt nicht mehr als offen
+      return s + Math.max(0, info.menge - (state.verrechnungen[k]||0));
+    }, 0);
     const totalChf = Object.entries(data.items)
-      .map(([name]) => parseFloat(state.verrechnungen[vKey(fzg,name)+'||chf'])||0)
+      .map(([name]) => {
+        const k = vKey(fzg,name);
+        const manuel = state.verrechnungen[k+'||chf'];
+        if (manuel !== undefined && manuel !== '') return parseFloat(manuel)||0;
+        const artikelObj = (state.artikel||[]).find(a => a.name === name);
+        const verr = state.verrechnungen[k]||0;
+        return artikelObj?.preis ? verr*artikelObj.preis : 0;
+      })
       .reduce((s,v)=>s+v,0)
       + freiePos.filter(p=>p.chf).reduce((s,p)=>s+(parseFloat(p.chf)||0),0);
     const offeneFreie = freiePos.filter(p => !p.status || p.status === 'offen').length;
@@ -3667,7 +3776,7 @@ function renderJahresbericht() {
           <th style="text-align:left;padding:4px">Artikel</th>
           <th style="text-align:right;padding:4px">Bestellt</th>
           <th style="padding:4px">Einheit</th>
-          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">CHF</th><th style="text-align:right;padding:4px">Offen</th>' : ''}
+          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">CHF</th><th style="text-align:right;padding:4px">Offen</th><th style="text-align:center;padding:4px">✓</th>' : ''}
         </tr></thead>
         <tbody>${rows}${freiePosRows}</tbody>
       </table>
