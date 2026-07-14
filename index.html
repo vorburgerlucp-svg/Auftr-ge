@@ -3685,7 +3685,7 @@ function renderJahresbericht() {
       const offen = Math.max(0, info.menge - verr);
       const fertig = abgehakt || offen === 0;
       return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:6px 4px">${name}</td>
+        <td style="padding:6px 4px">${name}${artikelObj?.preis ? `<div style="font-size:10px;color:var(--accent2)">à CHF ${artikelObj.preis.toFixed(artikelObj.preis<1?4:2)}/${info.einheit}</div>` : `<div style="font-size:10px;color:var(--muted)">kein Preis hinterlegt</div>`}</td>
         <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge}</td>
         <td style="padding:6px 4px;color:var(--muted)">${info.einheit}</td>
         ${istAdmin ? `
