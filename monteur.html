@@ -911,6 +911,9 @@ function renderBaustatus() {
     const pct = soll>0 ? Math.round((ist/soll)*100) : 0;
     const istChef = istChefMonteurFn(bau);
     const montageInfo = [bau.montageArt, bau.montageDetail].filter(Boolean).join(' – ');
+    const team = [...new Set([...(bau.teamMonteurIds||[]), bau.chefMonteurId].filter(Boolean))]
+      .map(id => (state.mitarbeiter||[]).find(m => m.id === id))
+      .filter(Boolean);
 
     const taskRows = tasks.map(t => {
       const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
