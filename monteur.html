@@ -1484,34 +1484,46 @@ function renderMonteurKontrolle() {
     itemMap[i.name].menge += i.menge;
   }));
 
+  let totalOffenChf = 0;
   const rows = Object.entries(itemMap).sort((a,b) => b[1].menge - a[1].menge).map(([name, info]) => {
     const key = vKey(name);
     const verr = state.verrechnungen[key] ?? 0;
     const verrEinheit = state.verrechnungen[key+'||einheit'] ?? info.einheit;
     const offen = Math.max(0, info.menge - verr);
+    const abgehakt = !!state.verrechnungen[key+'||done'];
+    const artikelObj = (state.artikel||[]).find(a => a.name === name);
+    const preisHtml = artikelObj?.preis ? `<div style="font-size:10px;color:var(--accent2)">à CHF ${artikelObj.preis.toFixed(artikelObj.preis<1?4:2)}/${info.einheit}</div>` : `<div style="font-size:10px;color:var(--muted)">kein Preis hinterlegt</div>`;
+    const offenChf = (artikelObj?.preis && offen > 0 && !abgehakt) ? offen * artikelObj.preis : 0;
+    if (offenChf) totalOffenChf += offenChf;
+    const zeigOffen = offen > 0 && !abgehakt;
     return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:6px 4px">${name}</td>
+      <td style="padding:6px 4px">${name}${preisHtml}</td>
       <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge} ${info.einheit}</td>
       <td style="padding:6px 4px;text-align:right;color:var(--green)">${verr>0 ? verr+' '+verrEinheit : '–'}</td>
-      <td style="padding:6px 4px;text-align:right;font-weight:700;color:${offen>0?'var(--red)':'var(--green)'}">${offen > 0 ? offen+' '+info.einheit : '✅'}</td>
+      <td style="padding:6px 4px;text-align:right;font-weight:700;color:${zeigOffen?'var(--red)':'var(--green)'}">${zeigOffen ? offen+' '+info.einheit : '✅'}</td>
+      <td style="padding:6px 4px;text-align:right;font-weight:700;color:${zeigOffen?'var(--red)':'var(--muted)'}">${zeigOffen && offenChf ? 'CHF '+offenChf.toFixed(2) : (zeigOffen ? '–' : '')}</td>
     </tr>`;
   }).join('');
 
   const freiePos = state.verrechnungsPos[pk] || [];
   const freiePosRows = freiePos.map(p => `
     <tr style="border-bottom:1px solid var(--border);background:rgba(75,159,232,.04)">
-      <td style="padding:6px 4px" colspan="2">${p.beschrieb||'(ohne Beschrieb)'}</td>
+      <td style="padding:6px 4px" colspan="3">${p.beschrieb||'(ohne Beschrieb)'}</td>
       <td style="padding:6px 4px;text-align:right" colspan="2">${p.status==='verrechnet' ? '✅ Verrechnet' : '⏳ Offen'}</td>
     </tr>`).join('');
 
   el.innerHTML = `<div class="card">
-    <div style="font-weight:700;margin-bottom:10px">${fzgLabel} · ${jahrFilter}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div style="font-weight:700">${fzgLabel} · ${jahrFilter}</div>
+      ${totalOffenChf > 0 ? `<div style="font-size:13px;font-weight:700;color:var(--red)">Noch nicht verrechnet: CHF ${totalOffenChf.toFixed(2)}</div>` : ''}
+    </div>
     <table style="width:100%;font-size:12px;border-collapse:collapse">
       <thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase">
         <th style="text-align:left;padding:4px">Artikel</th>
         <th style="text-align:right;padding:4px">Bestellt</th>
         <th style="text-align:right;padding:4px">Verrechnet</th>
         <th style="text-align:right;padding:4px">Offen</th>
+        <th style="text-align:right;padding:4px">Offen CHF</th>
       </tr></thead>
       <tbody>${rows}${freiePosRows}</tbody>
     </table>
