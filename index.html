@@ -3766,7 +3766,7 @@ function renderJahresbericht() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:700">${data.fzgLabel} · ${data.monteur||''} <span style="color:var(--muted);font-weight:400">(${data.count} Bestellungen)</span></div>
         <div style="display:flex;gap:10px;font-size:12px;flex-wrap:wrap">
-          ${totalChf > 0 ? `<span style="color:var(--accent2);font-weight:700">💰 CHF ${totalChf.toFixed(2)}</span>` : ''}
+          ${totalChf > 0 ? `<span style="color:var(--accent2);font-weight:700">💰 Gesamtpreis: CHF ${totalChf.toFixed(2)}</span>` : ''}
           <span style="color:var(--green)">✅ ${totalVerr.toFixed(1)} verrechnet</span>
           <span style="color:${totalOffen>0||offeneFreie>0?'var(--red)':'var(--green)'}">📋 ${totalOffen > 0 ? totalOffen+' Stk' : ''}${offeneFreie > 0 ? (totalOffen>0?' + ':'')+offeneFreie+' Pos.' : ''} offen</span>
         </div>
@@ -3776,7 +3776,7 @@ function renderJahresbericht() {
           <th style="text-align:left;padding:4px">Artikel</th>
           <th style="text-align:right;padding:4px">Bestellt</th>
           <th style="padding:4px">Einheit</th>
-          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">CHF</th><th style="text-align:right;padding:4px">Offen</th><th style="text-align:center;padding:4px">✓</th>' : ''}
+          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">Gesamtpreis</th><th style="text-align:right;padding:4px">Offen</th><th style="text-align:center;padding:4px">✓</th>' : ''}
         </tr></thead>
         <tbody>${rows}${freiePosRows}</tbody>
       </table>
