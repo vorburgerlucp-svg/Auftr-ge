@@ -3654,6 +3654,7 @@ function renderJahresbericht() {
 
   if (!state.verrechnungen) state.verrechnungen = {};
   if (!state.verrechnungsPos) state.verrechnungsPos = {}; // Freie Positionen pro Fahrzeug+Jahr
+  if (!state.retouren) state.retouren = {}; // zurückgebuchte Menge pro Artikel/Fahrzeug/Jahr
   const vKey = (fzg, art) => fzg + '||' + art + '||' + jahrFilter;
   const posKey = (fzg) => fzg + '||' + jahrFilter + '||pos';
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
@@ -3682,7 +3683,8 @@ function renderJahresbericht() {
       const chfIstManuell = manuelChf !== undefined && manuelChf !== '';
       const verrChf = chfIstManuell ? manuelChf : (autoChf !== null ? autoChf.toFixed(2) : '');
       const abgehakt = !!state.verrechnungen[key+'||done'];
-      const offen = Math.max(0, info.menge - verr);
+      const retour = state.retouren[key] || 0;
+      const offen = Math.max(0, info.menge - verr - retour);
       const fertig = abgehakt || offen === 0;
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:6px 4px">${name}${artikelObj?.preis ? `<div style="font-size:10px;color:var(--accent2)">à CHF ${artikelObj.preis.toFixed(artikelObj.preis<1?4:2)}/${info.einheit}</div>` : `<div style="font-size:10px;color:var(--muted)">kein Preis hinterlegt</div>`}</td>
@@ -3708,6 +3710,10 @@ function renderJahresbericht() {
           <input type="checkbox" ${abgehakt?'checked':''} title="Als verrechnet abhaken (unabhängig von Stk-Zahl)"
             style="width:16px;height:16px;cursor:pointer;accent-color:var(--green)"
             onchange="saveVerrechnung('${(key+'||done').replace(/'/g,"\\'")}', this.checked)">
+        </td>
+        <td style="padding:6px 4px;text-align:center">
+          ${offen > 0 ? `<button title="Nicht benötigte Menge zurück ins Lager buchen" onclick="bookRetour('${key.replace(/'/g,"\\'")}', '${name.replace(/'/g,"\\'")}', ${offen})" style="background:none;border:1px solid var(--border);color:var(--accent2);cursor:pointer;font-size:11px;padding:3px 6px;border-radius:4px;white-space:nowrap">↩ Retour</button>` : ''}
+          ${retour > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${retour} ${info.einheit} zurück</div>` : ''}
         </td>` : ''}
       </tr>`;
     }).join('');
@@ -3746,7 +3752,7 @@ function renderJahresbericht() {
     const totalOffen = Object.entries(data.items).reduce((s,[name,info]) => {
       const k = vKey(fzg,name);
       if (state.verrechnungen[k+'||done']) return s; // manuell abgehakt zählt nicht mehr als offen
-      return s + Math.max(0, info.menge - (state.verrechnungen[k]||0));
+      return s + Math.max(0, info.menge - (state.verrechnungen[k]||0) - (state.retouren[k]||0));
     }, 0);
     const totalChf = Object.entries(data.items)
       .map(([name]) => {
@@ -3776,13 +3782,31 @@ function renderJahresbericht() {
           <th style="text-align:left;padding:4px">Artikel</th>
           <th style="text-align:right;padding:4px">Bestellt</th>
           <th style="padding:4px">Einheit</th>
-          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">Gesamtpreis</th><th style="text-align:right;padding:4px">Offen</th><th style="text-align:center;padding:4px">✓</th>' : ''}
+          ${istAdmin ? '<th style="text-align:right;padding:4px">Verrechnet</th><th style="text-align:right;padding:4px">Gesamtpreis</th><th style="text-align:right;padding:4px">Offen</th><th style="text-align:center;padding:4px">✓</th><th style="text-align:center;padding:4px">Retour</th>' : ''}
         </tr></thead>
         <tbody>${rows}${freiePosRows}</tbody>
       </table>
       ${istAdmin ? `<button onclick="addFreePos('${pk.replace(/'/g,"\\'")}', '${fzg}')" class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:11px">+ Freie Position hinzufügen</button>` : ''}
     </div>`;
   }).join('');
+}
+
+function bookRetour(key, artikelName, maxMenge) {
+  if (!maxMenge || maxMenge <= 0) return toast('Info', 'Keine offene Menge zum Zurückbuchen', 'ℹ️');
+  const input = prompt(`Wie viel von "${artikelName}" zurück ins Lager buchen? (max ${maxMenge})`, maxMenge);
+  if (input === null) return;
+  const menge = parseFloat(input.replace(',', '.'));
+  if (!menge || menge <= 0) return;
+  const buchMenge = Math.min(menge, maxMenge);
+  const artikel = (state.artikel||[]).find(a => a.name === artikelName);
+  if (artikel) artikel.bestand = (artikel.bestand || 0) + buchMenge;
+  if (!state.retouren) state.retouren = {};
+  state.retouren[key] = (state.retouren[key] || 0) + buchMenge;
+  save();
+  renderJahresbericht();
+  if (typeof renderArtikelTable === 'function') renderArtikelTable();
+  if (typeof renderArtikelGrid === 'function') renderArtikelGrid();
+  toast('Zurückgebucht', buchMenge + ' zurück ins Lager (' + artikelName + ')', '↩');
 }
 
 function saveVerrechnung(key, val) {
