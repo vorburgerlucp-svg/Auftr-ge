@@ -4469,33 +4469,54 @@ function wzBestaetigen(id, neuerStatus) {
     document.getElementById('popup-title').textContent = `🔔 Werkzeug zurück: ${w.name}`;
     document.getElementById('popup-msg').textContent = `${w.name} (${w.fahrzeugName}) ist aus der Reparatur zurück und muss im Lager abgeholt werden!${info ? '\n\n' + info : ''}`;
     document.getElementById('rueckgabe-popup').classList.add('open');
-    // Meldung für den Monteur des Fahrzeugs anlegen
-    const fzg = (state.fahrzeuge||[]).find(f=>f.name===w.fahrzeugName);
-    const ma = fzg ? (state.mitarbeiter||[]).find(m=>{
-      const mf=getMaFahrzeug(m); return mf?.id===fzg.id || mf?.name===fzg.name;
-    }) : null;
+    // Meldung für den Monteur anlegen: zuerst über w.maId (Werkzeug ohne Fahrzeug), sonst über das Fahrzeug
+    let ma = w.maId ? (state.mitarbeiter||[]).find(m => m.id === w.maId) : null;
+    if (!ma) {
+      const fzg = (state.fahrzeuge||[]).find(f=>f.name===w.fahrzeugName);
+      ma = fzg ? (state.mitarbeiter||[]).find(m=>{
+        const mf=getMaFahrzeug(m); return mf?.id===fzg.id || mf?.name===fzg.name;
+      }) : null;
+    }
     if (!state.monteurMeldungen) state.monteurMeldungen=[];
     state.monteurMeldungen.push({
       id: Date.now(),
-      typ: 'abholbereit',
-      titel: '📦 Artikel abholbereit',
-      text: `${w.name} ist aus der Reparatur zurück und kann im Lager abgeholt werden.${info?'\n'+info:''}`,
+      typ: 'geliefert',
+      titel: '🔨 Werkzeug geliefert',
+      text: `${w.name} wurde geliefert und ist wieder einsatzbereit.${info?'\n'+info:''}`,
       maId: ma?.id||null,
       wzId: w.id,
       datum: new Date().toISOString(),
       gelesen: false,
       quittiert: false
     });
+    setTimeout(updateMeldungenBadge, 100);
   }
 
-  // Bei Reparatur: Meldung für Office anlegen
+  // Bei Reparatur: Mail an Office
   if (neuerStatus === 'reparatur') {
-    if (!state.monteurMeldungen) state.monteurMeldungen=[];
-    // Markiere als "gemeldet" — Office sieht das
+    sendWerkzeugMail(w, aktionText, info);
   }
 
   save(); closeWzModal(); renderWerkzeugPage(); renderFahrzeugePage();
   toast(aktionText, w.name, neuerStatus === 'ausgebucht' ? '❌' : '✅');
+}
+
+async function sendWerkzeugMail(w, aktionText, info) {
+  const email = state.config?.email;
+  if (!email) return;
+  const params = {
+    to_email: email,
+    subject: `[Werkzeug] ${aktionText}: ${w.name} – ${w.fahrzeugName}`,
+    fahrzeug: w.fahrzeugName,
+    monteur: '',
+    datum: new Date().toLocaleDateString('de-CH'),
+    lager_liste: '',
+    bestell_liste: '',
+    bemerkung: info || '—',
+    message: `Werkzeug: ${w.name}\nFahrzeug: ${w.fahrzeugName}\nStatus: ${aktionText}\nDatum: ${new Date().toLocaleDateString('de-CH')}\n\nGrund/Info: ${info || '—'}`
+  };
+  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); toast('E-Mail gesendet!', `An ${email}`, '📧'); }
+  catch (err) { console.error(err); }
 }
 
 function wzHistorie(id) {
