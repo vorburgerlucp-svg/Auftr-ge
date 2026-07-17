@@ -53,6 +53,7 @@
     --accent2: #4b9fe8;
     --green: #4be88a;
     --red: #e8574b;
+    --teal: #4be8d4;
     --text: #e8eaf0;
     --muted: #6b7490;
     --mono: 'IBM Plex Mono', monospace;
@@ -140,6 +141,8 @@
   .badge-green { background: rgba(75,232,138,.1); color: var(--green); border: 1px solid rgba(75,232,138,.25); }
   .badge-red { background: rgba(232,87,75,.1); color: var(--red); border: 1px solid rgba(232,87,75,.25); }
   .badge-yellow { background: rgba(232,184,75,.1); color: var(--accent); border: 1px solid rgba(232,184,75,.25); }
+  .badge-blue { background: rgba(75,159,232,.1); color: var(--accent2); border: 1px solid rgba(75,159,232,.25); }
+  .badge-teal { background: rgba(75,232,212,.1); color: var(--teal); border: 1px solid rgba(75,232,212,.25); }
 
   /* STOCK INDICATOR */
   .stock-bar { width: 80px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
@@ -193,6 +196,8 @@
   .stat-val.green { color: var(--green); }
   .stat-val.red { color: var(--red); }
   .stat-val.yellow { color: var(--accent); }
+  .stat-val.blue { color: var(--accent2); }
+  .stat-val.teal { color: var(--teal); }
 
   /* EMAIL CONFIG */
   .email-config { background: rgba(75,159,232,.05); border: 1px solid rgba(75,159,232,.2); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
@@ -629,7 +634,9 @@
       <select id="wz-filter-status" onchange="renderWerkzeugPage()" style="width:160px">
         <option value="">Alle Status</option>
         <option value="ok">✅ Im Fahrzeug</option>
+        <option value="angefragt">📩 Angefragt</option>
         <option value="reparatur">🔧 In Reparatur</option>
+        <option value="repariert">🛠️ Repariert</option>
         <option value="ausgebucht">❌ Ausgebucht</option>
       </select>
       <input type="text" id="wz-search" placeholder="🔍 Suchen..." oninput="renderWerkzeugPage()" style="flex:1;min-width:160px">
@@ -637,9 +644,11 @@
   </div>
 
   <!-- Stats -->
-  <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stats" style="grid-template-columns:repeat(5,1fr)">
     <div class="stat"><div class="stat-val green" id="wz-stat-ok">0</div><div class="stat-label">Im Fahrzeug</div></div>
+    <div class="stat"><div class="stat-val blue" id="wz-stat-anfr">0</div><div class="stat-label">Angefragt</div></div>
     <div class="stat"><div class="stat-val yellow" id="wz-stat-rep">0</div><div class="stat-label">In Reparatur</div></div>
+    <div class="stat"><div class="stat-val teal" id="wz-stat-repariert">0</div><div class="stat-label">Repariert</div></div>
     <div class="stat"><div class="stat-val red" id="wz-stat-aus">0</div><div class="stat-label">Ausgebucht</div></div>
   </div>
 
@@ -4371,7 +4380,9 @@ function renderWerkzeugPage() {
 
   // Stats
   document.getElementById('wz-stat-ok').textContent = state.werkzeug.filter(w => w.status === 'ok').length;
+  document.getElementById('wz-stat-anfr').textContent = state.werkzeug.filter(w => w.status === 'angefragt').length;
   document.getElementById('wz-stat-rep').textContent = state.werkzeug.filter(w => w.status === 'reparatur').length;
+  document.getElementById('wz-stat-repariert').textContent = state.werkzeug.filter(w => w.status === 'repariert').length;
   document.getElementById('wz-stat-aus').textContent = state.werkzeug.filter(w => w.status === 'ausgebucht').length;
 
   const el = document.getElementById('wz-list');
@@ -4385,31 +4396,45 @@ function renderWerkzeugPage() {
     byFzg[key].push(w);
   });
 
+  const badges = {
+    ok: '<span class="badge badge-green">✅ Im Fahrzeug</span>',
+    angefragt: '<span class="badge badge-blue">📩 Angefragt</span>',
+    reparatur: '<span class="badge badge-yellow">🔧 In Reparatur</span>',
+    repariert: '<span class="badge badge-teal">🛠️ Repariert</span>',
+    ausgebucht: '<span class="badge badge-red">❌ Ausgebucht</span>'
+  };
+
   el.innerHTML = Object.entries(byFzg).map(([fzg, items]) => `
     <div class="card">
       <div class="card-title">🚐 ${fzg}</div>
       ${items.map(w => {
-        const statusBadge = w.status === 'ok'
-          ? `<span class="badge badge-green">✅ Im Fahrzeug</span>`
-          : w.status === 'reparatur'
-          ? `<span class="badge badge-yellow">🔧 In Reparatur</span>`
-          : `<span class="badge badge-red">❌ Ausgebucht</span>`;
+        const statusBadge = badges[w.status] || badges.ok;
         const lastHist = w.historie?.slice(-1)[0];
+        let actions = '';
+        if (w.status === 'ok') {
+          actions = `
+            <button class="btn btn-secondary btn-sm" onclick="wzAktion(${w.id},'reparatur')" title="Zur Reparatur">🔧 Reparatur</button>
+            <button class="btn btn-danger btn-sm" onclick="wzAktion(${w.id},'ausbuchen')" title="Ausbuchen">❌ Ausbuchen</button>`;
+        } else if (w.status === 'angefragt') {
+          actions = `
+            <button class="btn btn-primary btn-sm" onclick="wzAktion(${w.id},'reparatur')" title="In Reparatur nehmen">🔧 In Reparatur nehmen</button>
+            <button class="btn btn-secondary btn-sm" onclick="wzAktion(${w.id},'ablehnen')" title="Anfrage ablehnen">↩️ Ablehnen</button>`;
+        } else if (w.status === 'reparatur') {
+          actions = `<button class="btn btn-primary btn-sm" onclick="wzAktion(${w.id},'repariert')" title="Als repariert markieren">🛠️ Repariert</button>`;
+        } else if (w.status === 'repariert') {
+          actions = `<button class="btn btn-primary btn-sm" onclick="wzAktion(${w.id},'zurueck')" title="Ausliefern">📦 Ausliefern</button>`;
+        } else {
+          actions = `<button class="btn btn-secondary btn-sm" onclick="wzAktion(${w.id},'reaktivieren')" title="Reaktivieren">↩️ Reaktivieren</button>`;
+        }
         return `<div class="wz-item status-${w.status}">
           <div style="flex:1">
             <div class="wz-name">${w.name} ${w.serial ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted)">#${w.serial}</span>` : ''}</div>
-            <div class="wz-meta">${w.kat}${w.bemerkung ? ' · ' + w.bemerkung : ''}${lastHist ? ' · ' + lastHist.datum + ': ' + lastHist.aktion : ''}</div>
+            <div class="wz-meta">${w.kat}${w.bemerkung ? ' · ' + w.bemerkung : ''}${lastHist ? ' · ' + lastHist.datum + ': ' + lastHist.aktion + (lastHist.info ? ' (' + lastHist.info + ')' : '') : ''}</div>
           </div>
           ${statusBadge}
           <div class="wz-actions">
-            ${w.status === 'ok' ? `
-              <button class="btn btn-secondary btn-sm" onclick="wzAktion(${w.id},'reparatur')" title="Zur Reparatur">🔧</button>
-              <button class="btn btn-danger btn-sm" onclick="wzAktion(${w.id},'ausbuchen')" title="Ausbuchen">❌</button>
-            ` : w.status === 'reparatur' ? `
-              <button class="btn btn-primary btn-sm" onclick="wzAktion(${w.id},'zurueck')" title="Zurück">✅</button>
-            ` : `
-              <button class="btn btn-secondary btn-sm" onclick="wzAktion(${w.id},'reaktivieren')" title="Reaktivieren">↩️</button>
-            `}
+            ${actions}
+            <button class="btn btn-secondary btn-sm" onclick="wzEdit(${w.id})" title="Bearbeiten">✏️</button>
             <button class="btn btn-secondary btn-sm" onclick="wzHistorie(${w.id})" title="Historie">📋</button>
           </div>
         </div>`;
@@ -4426,11 +4451,23 @@ function wzAktion(id, aktion) {
   document.getElementById('wz-modal-id').value = id;
 
   if (aktion === 'reparatur') {
-    document.getElementById('wz-modal-title').textContent = '🔧 Zur Reparatur senden';
+    document.getElementById('wz-modal-title').textContent = w.status === 'angefragt' ? '🔧 In Reparatur nehmen' : '🔧 Zur Reparatur senden';
     document.getElementById('wz-modal-content').innerHTML = `
       <p style="font-size:13px;margin-bottom:12px;color:var(--muted)"><strong style="color:var(--text)">${w.name}</strong> wird als "In Reparatur" markiert.</p>
       <div><label>Werkstatt / Grund</label><input type="text" id="wz-aktion-info" placeholder="z.B. Garage Müller – Defekt Akku"></div>`;
     document.getElementById('wz-modal-confirm').onclick = () => wzBestaetigen(id, 'reparatur');
+  } else if (aktion === 'ablehnen') {
+    document.getElementById('wz-modal-title').textContent = '↩️ Anfrage ablehnen';
+    document.getElementById('wz-modal-content').innerHTML = `
+      <p style="font-size:13px;margin-bottom:12px;color:var(--muted)"><strong style="color:var(--text)">${w.name}</strong> wird zurück auf "Im Fahrzeug" gesetzt.</p>
+      <div><label>Bemerkung</label><input type="text" id="wz-aktion-info" placeholder="z.B. Kein Defekt gefunden"></div>`;
+    document.getElementById('wz-modal-confirm').onclick = () => wzBestaetigen(id, 'ablehnen');
+  } else if (aktion === 'repariert') {
+    document.getElementById('wz-modal-title').textContent = '🛠️ Als repariert markieren';
+    document.getElementById('wz-modal-content').innerHTML = `
+      <p style="font-size:13px;margin-bottom:12px;color:var(--muted)"><strong style="color:var(--text)">${w.name}</strong> ist aus der Werkstatt zurück, aber noch nicht ausgeliefert.</p>
+      <div><label>Bemerkung</label><input type="text" id="wz-aktion-info" placeholder="z.B. Abholbereit im Lager"></div>`;
+    document.getElementById('wz-modal-confirm').onclick = () => wzBestaetigen(id, 'repariert');
   } else if (aktion === 'ausbuchen') {
     document.getElementById('wz-modal-title').textContent = '❌ Werkzeug ausbuchen';
     document.getElementById('wz-modal-content').innerHTML = `
@@ -4438,9 +4475,9 @@ function wzAktion(id, aktion) {
       <div><label>Grund *</label><input type="text" id="wz-aktion-info" placeholder="z.B. Verloren auf Baustelle Basel"></div>`;
     document.getElementById('wz-modal-confirm').onclick = () => wzBestaetigen(id, 'ausgebucht');
   } else if (aktion === 'zurueck') {
-    document.getElementById('wz-modal-title').textContent = '✅ Werkzeug zurück';
+    document.getElementById('wz-modal-title').textContent = '📦 Werkzeug ausliefern';
     document.getElementById('wz-modal-content').innerHTML = `
-      <p style="font-size:13px;margin-bottom:12px;color:var(--muted)"><strong style="color:var(--text)">${w.name}</strong> kommt aus der Reparatur zurück.</p>
+      <p style="font-size:13px;margin-bottom:12px;color:var(--muted)"><strong style="color:var(--text)">${w.name}</strong> wird ausgeliefert und zurück ins Fahrzeug gebucht.</p>
       <div><label>Bemerkung</label><input type="text" id="wz-aktion-info" placeholder="z.B. Repariert, einsatzbereit"></div>`;
     document.getElementById('wz-modal-confirm').onclick = () => wzBestaetigen(id, 'zurueck');
   } else if (aktion === 'reaktivieren') {
@@ -4458,8 +4495,17 @@ function wzBestaetigen(id, neuerStatus) {
 
   if (neuerStatus === 'ausgebucht' && !info) return toast('Fehler', 'Bitte Grund eingeben', '⚠️');
 
-  const aktionText = neuerStatus === 'reparatur' ? 'Zur Reparatur' : neuerStatus === 'ausgebucht' ? 'Ausgebucht' : neuerStatus === 'zurueck' ? 'Zurück aus Reparatur' : 'Reaktiviert';
-  w.status = neuerStatus === 'zurueck' ? 'ok' : neuerStatus;
+  const aktionTextMap = {
+    reparatur: 'In Reparatur',
+    ablehnen: 'Anfrage abgelehnt',
+    repariert: 'Repariert',
+    ausgebucht: 'Ausgebucht',
+    zurueck: 'Ausgeliefert',
+    ok: 'Reaktiviert'
+  };
+  const statusMap = { reparatur: 'reparatur', ablehnen: 'ok', repariert: 'repariert', ausgebucht: 'ausgebucht', zurueck: 'ok', ok: 'ok' };
+  const aktionText = aktionTextMap[neuerStatus] || neuerStatus;
+  w.status = statusMap[neuerStatus] ?? neuerStatus;
   if (!w.historie) w.historie = [];
   w.historie.push({ datum, aktion: aktionText, info });
 
@@ -4517,6 +4563,53 @@ async function sendWerkzeugMail(w, aktionText, info) {
   };
   try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); toast('E-Mail gesendet!', `An ${email}`, '📧'); }
   catch (err) { console.error(err); }
+}
+
+function wzEdit(id) {
+  const w = state.werkzeug.find(x => x.id === id);
+  if (!w) return;
+  document.getElementById('wz-modal-title').textContent = `✏️ Bearbeiten: ${w.name}`;
+  document.getElementById('wz-modal-content').innerHTML = `
+    <div><label>Werkzeugname *</label><input type="text" id="wz-edit-name" value="${(w.name||'').replace(/"/g,'&quot;')}"></div>
+    <div><label>Seriennummer / Nr.</label><input type="text" id="wz-edit-serial" value="${(w.serial||'').replace(/"/g,'&quot;')}"></div>
+    <div><label>Fahrzeug</label><select id="wz-edit-fahrzeug">
+      <option value="">— Ohne Fahrzeug —</option>
+      ${state.fahrzeuge.map(f => `<option value="${f.id}" ${w.fahrzeugId===f.id?'selected':''}>${f.name} (${f.monteur})</option>`).join('')}
+    </select></div>
+    <div><label>Kategorie</label><select id="wz-edit-kat">
+      ${['Elektrowerkzeug','Handwerkzeug','Messgerät','Sonstiges'].map(k => `<option ${w.kat===k?'selected':''}>${k}</option>`).join('')}
+    </select></div>
+    <div><label>Bemerkung</label><input type="text" id="wz-edit-bemerkung" value="${(w.bemerkung||'').replace(/"/g,'&quot;')}"></div>
+    <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="wzLoeschen(${w.id})">🗑️ Werkzeug löschen</button>`;
+  document.getElementById('wz-modal-confirm').style.display = '';
+  document.getElementById('wz-modal-confirm').onclick = () => wzEditSpeichern(id);
+  document.getElementById('wz-modal').classList.add('open');
+}
+
+function wzEditSpeichern(id) {
+  const w = state.werkzeug.find(x => x.id === id);
+  if (!w) return;
+  const name = document.getElementById('wz-edit-name').value.trim();
+  if (!name) return toast('Fehler', 'Werkzeugname erforderlich', '⚠️');
+  const fzgId = document.getElementById('wz-edit-fahrzeug').value;
+  const fzg = fzgId ? state.fahrzeuge.find(f => f.id === parseInt(fzgId)) : null;
+  w.name = name;
+  w.serial = document.getElementById('wz-edit-serial').value.trim();
+  w.kat = document.getElementById('wz-edit-kat').value;
+  w.bemerkung = document.getElementById('wz-edit-bemerkung').value.trim();
+  w.fahrzeugId = fzg ? fzg.id : null;
+  w.fahrzeugName = fzg ? fzg.name : 'Ohne Fahrzeug';
+  save(); closeWzModal(); renderWerkzeugPage(); renderFahrzeugePage();
+  toast('Gespeichert', w.name, '✏️');
+}
+
+function wzLoeschen(id) {
+  const w = state.werkzeug.find(x => x.id === id);
+  if (!w) return;
+  if (!confirm(`"${w.name}" wirklich löschen?`)) return;
+  state.werkzeug = state.werkzeug.filter(x => x.id !== id);
+  save(); closeWzModal(); renderWerkzeugPage(); renderFahrzeugePage();
+  toast('Gelöscht', w.name, '🗑️');
 }
 
 function wzHistorie(id) {
