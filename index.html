@@ -3444,7 +3444,9 @@ function toggleCart(artId) {
 function changeCartQty(id, delta) {
   const c = cart.find(x => x.artikelId === id);
   if (!c) return;
-  c.menge = Math.max(1, c.menge + delta);
+  const neu = c.menge + delta;
+  if (neu <= 0) { cart = cart.filter(x => x.artikelId !== id); }
+  else { c.menge = neu; }
   renderArtikelGrid();
   renderBestCart();
 }
