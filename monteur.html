@@ -1616,9 +1616,11 @@ function updateVerrechnungReminder() {
     });
   });
   let offeneArtikel = 0, totalBestellt = 0;
+  if (!state.retouren) state.retouren = {};
   Object.entries(itemMap).forEach(([name, info]) => {
     const verr = parseFloat(state.verrechnungen[vKey(name)])||0;
-    const offen = Math.max(0, info.menge - verr);
+    const retour = state.retouren[vKey(name)] || 0;
+    const offen = Math.max(0, info.menge - verr - retour);
     totalBestellt += info.menge;
     offeneArtikel += offen;
   });
@@ -1667,19 +1669,22 @@ function renderMonteurKontrolle() {
   }));
 
   let totalOffenChf = 0;
+  if (!state.retouren) state.retouren = {};
   const rows = Object.entries(itemMap).sort((a,b) => b[1].menge - a[1].menge).map(([name, info]) => {
     const key = vKey(name);
     const verr = state.verrechnungen[key] ?? 0;
     const verrEinheit = state.verrechnungen[key+'||einheit'] ?? info.einheit;
-    const offen = Math.max(0, info.menge - verr);
+    const retour = state.retouren[key] || 0;
+    const offen = Math.max(0, info.menge - verr - retour);
     const abgehakt = !!state.verrechnungen[key+'||done'];
     const artikelObj = (state.artikel||[]).find(a => a.name === name);
     const preisHtml = artikelObj?.preis ? `<div style="font-size:10px;color:var(--accent2)">à CHF ${artikelObj.preis.toFixed(artikelObj.preis<1?4:2)}/${info.einheit}</div>` : `<div style="font-size:10px;color:var(--muted)">kein Preis hinterlegt</div>`;
+    const retourHtml = retour > 0 ? `<div style="font-size:10px;color:var(--muted)">${retour} ${info.einheit} zurückgebucht</div>` : '';
     const offenChf = (artikelObj?.preis && offen > 0 && !abgehakt) ? offen * artikelObj.preis : 0;
     if (offenChf) totalOffenChf += offenChf;
     const zeigOffen = offen > 0 && !abgehakt;
     return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:6px 4px">${name}${preisHtml}</td>
+      <td style="padding:6px 4px">${name}${preisHtml}${retourHtml}</td>
       <td style="padding:6px 4px;text-align:right;font-weight:700">${info.menge} ${info.einheit}</td>
       <td style="padding:6px 4px;text-align:right;color:var(--green)">${verr>0 ? verr+' '+verrEinheit : '–'}</td>
       <td style="padding:6px 4px;text-align:right;font-weight:700;color:${zeigOffen?'var(--red)':'var(--green)'}">${zeigOffen ? offen+' '+info.einheit : '✅'}</td>
