@@ -483,6 +483,8 @@ function load() {
   if (!Array.isArray(state.kategorien)) state.kategorien = [];
   if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
   if (!state.plan) state.plan = {};
+  if (!state.config) state.config = {};
+  if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
 }
 
 function stripLargeData(s) {
@@ -623,6 +625,8 @@ function startFirebaseListener() {
           if (!Array.isArray(state.kategorien)) state.kategorien = [];
           if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
           if (!state.plan) state.plan = {};
+          if (!state.config) state.config = {};
+          if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
           migrationTestBaustelle();
           markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
@@ -906,7 +910,8 @@ async function sendNotification(order) {
     lager_liste, bestell_liste, bemerkung: order.bemerkung || '—',
     message: `Fahrzeug: ${order.fahrzeug}\nMonteur: ${order.monteur}\nDatum: ${order.datum}\n\n✅ AUS LAGER:\n${lager_liste}\n\n🛒 BESTELLEN:\n${bestell_liste}\n\nBemerkung: ${order.bemerkung||'—'}`
   };
-  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); } catch(e) {}
+  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); }
+  catch(e) { console.error('E-Mail fehlgeschlagen:', e); toast('⚠️ E-Mail fehlgeschlagen', (e?.text||e?.message||'Unbekannter Fehler'), '📧'); }
 }
 
 function renderOrderList(filter) {
@@ -1057,7 +1062,8 @@ async function sendWerkzeugMail(w, aktionText, info) {
     bemerkung: info || '—',
     message: `Werkzeug: ${w.name}\nFahrzeug: ${w.fahrzeugName}\nMonteur: ${monteurName}\nStatus: ${aktionText}\nDatum: ${new Date().toLocaleDateString('de-CH')}\n\nGrund/Info: ${info || '—'}`
   };
-  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); } catch(e) {}
+  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); }
+  catch(e) { console.error('E-Mail fehlgeschlagen:', e); toast('⚠️ E-Mail fehlgeschlagen', (e?.text||e?.message||'Unbekannter Fehler'), '📧'); }
 }
 
 function closeWzModal() {
