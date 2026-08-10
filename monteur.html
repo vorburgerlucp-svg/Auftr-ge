@@ -1777,8 +1777,9 @@ function renderProfil() {
   }
   html += '</div>';
 
-  // Chef-Monteur-Bewertungen (durch Admin bei Baustellen-Abschluss)
-  const chefBews = ma.chefBewertungen || [];
+  // Chef-Monteur-Bewertungen — nur sichtbar wenn der Monteur selbst Chef-Monteur war
+  const istChefAufEinerBaustelle = (state.baustellen||[]).some(b => b.chefMonteurId === ma.id);
+  const chefBews = (istChefAufEinerBaustelle ? ma.chefBewertungen : []) || [];
   if (chefBews.length) {
     const chefSchnitt = ma.chefBewertungSchnitt || {};
     const chefKrit = [
