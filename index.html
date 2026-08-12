@@ -3791,13 +3791,16 @@ function renderJahresbericht() {
   const posKey = (fzg) => fzg + '||' + jahrFilter + '||pos';
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
 
-  // Gruppieren nach Fahrzeug
+  // Gruppieren nach Fahrzeug — NUR gelieferte Artikel zählen
   const perFzg = {};
   orders.forEach(o => {
     const groupKey = o.maId ? ('ma_' + o.maId) : o.fahrzeug;
     if (!perFzg[groupKey]) perFzg[groupKey] = { fzgLabel: o.fahrzeug, monteur: o.monteur, items: {}, count: 0 };
     perFzg[groupKey].count++;
     (o.items||[]).forEach(i => {
+      // Nur zählen wenn Bestellung komplett geliefert ODER Artikel einzeln als geliefert markiert
+      const istGeliefert = o.status === 'geliefert' || i.geliefert === true;
+      if (!istGeliefert) return;
       if (!perFzg[groupKey].items[i.name]) perFzg[groupKey].items[i.name] = { menge: 0, einheit: i.einheit||'Stk' };
       perFzg[groupKey].items[i.name].menge += i.menge;
     });
