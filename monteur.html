@@ -1613,10 +1613,12 @@ function updateVerrechnungReminder() {
   const vKey = (art) => fzgKey + '||' + art + '||' + jahrFilter;
   const pk = fzgKey + '||' + jahrFilter + '||pos';
 
-  // Offene Artikel summieren
+  // Offene Artikel summieren — nur gelieferte zählen
   const itemMap = {};
   meineOrders.forEach(o => {
     (o.items||[]).forEach(i => {
+      const istGeliefert = o.status === 'geliefert' || i.geliefert === true;
+      if (!istGeliefert) return;
       if (!itemMap[i.name]) itemMap[i.name] = { menge:0, einheit:i.einheit||'Stk' };
       itemMap[i.name].menge += i.menge;
     });
@@ -1670,6 +1672,8 @@ function renderMonteurKontrolle() {
 
   const itemMap = {};
   meineOrders.forEach(o => (o.items||[]).forEach(i => {
+    const istGeliefert = o.status === 'geliefert' || i.geliefert === true;
+    if (!istGeliefert) return;
     if (!itemMap[i.name]) itemMap[i.name] = { menge: 0, einheit: i.einheit||'Stk' };
     itemMap[i.name].menge += i.menge;
   }));
