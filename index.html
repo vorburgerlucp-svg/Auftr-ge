@@ -3605,10 +3605,36 @@ function renderOrderList(filter) {
     const expanded = orderExpanded[o.id] || false;
     const statusBtn = o.status === 'geliefert'
       ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'offen')" style="font-size:11px">↩ Zurück</button>`
-      : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'geliefert')" style="font-size:11px">✅ Geliefert</button>`;
+      : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); toggleOrderStatus(${o.id}, 'geliefert')" style="font-size:11px">✅ Alle geliefert</button>`;
     const deleteBtn = `<button class="btn btn-secondary btn-sm" style="color:var(--red);border-color:var(--red);font-size:11px" onclick="event.stopPropagation(); deleteOrder(${o.id})">🗑</button>`;
-    const itemCount = (o.items||[]).length;
-    const itemSummary = itemCount === 1 ? o.items[0].name : itemCount + ' Artikel';
+    const items = o.items || [];
+    const offeneItems = items.filter(i => !i.geliefert);
+    const itemCount = offeneItems.length;
+    const itemSummary = items.length === 1 ? items[0].name : items.length + ' Artikel' + (offeneItems.length < items.length ? ` (${offeneItems.length} offen)` : '');
+
+    let expandedHtml = '';
+    if (expanded && o.status !== 'geliefert') {
+      // Teillieferung: Checkboxen pro Artikel
+      expandedHtml = `<div style="padding:10px 12px 12px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Angehakte Artikel als geliefert markieren:</div>
+        ${items.map((it, idx) => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer;${it.geliefert?'opacity:0.4;text-decoration:line-through':''}">
+          <input type="checkbox" ${it.geliefert?'disabled checked':''} ${!it.geliefert?'checked':''} id="item_${o.id}_${idx}"
+            style="width:18px;height:18px;accent-color:var(--green);flex-shrink:0">
+          <span style="flex:1;font-size:13px">${it.name}</span>
+          <span style="font-size:12px;color:var(--muted)">× ${it.menge} ${it.einheit||'Stk'}</span>
+          ${it.geliefert ? '<span style="font-size:10px;color:var(--green)">✅ geliefert</span>' : ''}
+        </label>`).join('')}
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onclick="teilLieferung(${o.id})">✅ Markierte als geliefert</button>
+          <button class="btn btn-secondary btn-sm" onclick="alleAbwählen(${o.id}, ${items.length})">Alle abwählen</button>
+        </div>
+      </div>`;
+    } else if (expanded && o.status === 'geliefert') {
+      expandedHtml = `<div style="padding:8px 12px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px">
+        ${items.map(i => `<span class="badge ${i.geliefert ? 'badge-green' : 'badge-red'}">${i.name} × ${i.menge}${i.geliefert?' ✅':''}</span>`).join('')}
+      </div>`;
+    }
+
     return `<div class="card" style="margin-bottom:8px;padding:0;overflow:hidden">
       <div onclick="orderExpanded[${o.id}]=!${expanded};renderOrderList('${filter}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;gap:10px">
         <div style="min-width:0;flex:1">
@@ -3620,11 +3646,58 @@ function renderOrderList(filter) {
           <span style="color:var(--muted);font-size:13px">${expanded ? '▲' : '▼'}</span>
         </div>
       </div>
-      ${expanded ? `<div style="padding:8px 12px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px">
-        ${(o.items||[]).map(i => `<span class="badge ${i.inStock ? 'badge-green' : 'badge-red'}">${i.name} × ${i.menge}</span>`).join('')}
-      </div>` : ''}
+      ${expandedHtml}
     </div>`;
   }).join('');
+}
+
+// Einzelne Artikel als geliefert markieren
+function teilLieferung(orderId) {
+  const o = (state.orders||[]).find(x => x.id === orderId);
+  if (!o) return;
+  const items = o.items || [];
+  let anyChecked = false;
+  items.forEach((it, idx) => {
+    if (it.geliefert) return; // bereits geliefert
+    const cb = document.getElementById('item_'+orderId+'_'+idx);
+    if (cb?.checked) { it.geliefert = true; anyChecked = true; }
+  });
+  if (!anyChecked) return toast('Nichts gewählt', 'Bitte mindestens einen Artikel anwählen', '⚠️');
+
+  const alleGeliefert = items.every(i => i.geliefert);
+  if (alleGeliefert) {
+    // Alle geliefert → Bestellung komplett abschliessen
+    toggleOrderStatus(orderId, 'geliefert');
+  } else {
+    // Teillieferung → Meldung mit nur den gelieferten Artikeln
+    o.teilgeliefert = true;
+    const gelieferteItems = items.filter(i => i.geliefert);
+    let ma = o.maId ? (state.mitarbeiter||[]).find(m => m.id === o.maId) : null;
+    if (!ma) {
+      const fzg = (state.fahrzeuge||[]).find(f => f.name === o.fahrzeug || f.id === o.fahrzeugId);
+      ma = fzg ? (state.mitarbeiter||[]).find(m => { const mf = getMaFahrzeug(m); return mf?.id === fzg.id; }) : null;
+    }
+    const artikelText = gelieferteItems.map(i => `• ${i.name} × ${i.menge}`).join('\n');
+    if (!state.monteurMeldungen) state.monteurMeldungen = [];
+    state.monteurMeldungen.push({
+      id: Date.now(), typ: 'geliefert',
+      titel: '📦 Teillieferung bereit',
+      text: `Folgende Artikel aus deiner Bestellung vom ${o.datum||''} sind bereit:\n${artikelText}\n\n(Restliche Artikel folgen noch)`,
+      maId: ma?.id || null, fahrzeug: o.fahrzeug || '', orderId: o.id,
+      datum: new Date().toISOString(), gelesen: false, quittiert: false
+    });
+    save();
+    renderOrderList('offen');
+    updateOffenCount();
+    toast('Teillieferung', gelieferteItems.length + ' Artikel als geliefert markiert', '📦');
+  }
+}
+
+function alleAbwählen(orderId, count) {
+  for (let i = 0; i < count; i++) {
+    const cb = document.getElementById('item_'+orderId+'_'+i);
+    if (cb && !cb.disabled) cb.checked = false;
+  }
 }
 
 function toggleOrderStatus(orderId, newStatus) {
