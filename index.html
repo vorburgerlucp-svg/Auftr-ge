@@ -555,10 +555,11 @@
   <h2>Mitarbeiter</h2>
   <p class="subtitle">Kontakte, Fahrzeugzuweisung und Profile verwalten</p>
 
-  <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
     <div class="stat"><div class="stat-val green" id="ma-stat-total">0</div><div class="stat-label">Mitarbeiter</div></div>
     <div class="stat"><div class="stat-val" id="ma-stat-mit-fzg">0</div><div class="stat-label">Mit Fahrzeug</div></div>
     <div class="stat"><div class="stat-val yellow" id="ma-stat-ohne-fzg">0</div><div class="stat-label">Ohne Fahrzeug</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--red)" id="ma-stat-abgemeldet">0</div><div class="stat-label">Abgemeldet</div></div>
   </div>
 
   <div class="card" style="padding:14px;margin-bottom:16px">
@@ -569,6 +570,13 @@
   </div>
 
   <div id="ma-grid"></div>
+
+  <div id="ma-grid-abgemeldet-wrap" style="display:none;margin-top:24px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <h3 style="margin:0;color:var(--muted)">🔴 Abgemeldete Mitarbeiter</h3>
+    </div>
+    <div id="ma-grid-abgemeldet"></div>
+  </div>
 </div>
 
 <div id="page-fahrzeuge" class="page">
@@ -971,11 +979,31 @@
     <div style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
       🚐 Fahrzeugzuweisung erfolgt in der <strong style="color:var(--text)">Fahrzeugverwaltung</strong>
     </div>
+    <div id="ma-abmelde-info" style="display:none;margin-top:16px;padding:12px 14px;background:rgba(232,87,75,.08);border:1px solid rgba(232,87,75,.25);border-radius:8px"></div>
+
+    <div id="ma-abmelde-form" style="display:none;margin-top:16px;padding:12px 14px;background:var(--surface2);border-radius:8px">
+      <div class="card-title" style="margin-bottom:8px">🔴 Mitarbeiter abmelden</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Bewertung und Infotext werden dauerhaft gespeichert, damit bei einer allfälligen Wiedereinstellung nachvollziehbar ist, wie der Mitarbeiter war und weshalb er ausgeschieden ist.</div>
+      <div style="margin-bottom:10px">
+        <label>Bewertung (1–5) *</label>
+        <div id="ma-abmelde-sterne" style="display:flex;gap:6px;margin-top:4px"></div>
+      </div>
+      <div class="form-row cols-1">
+        <div><label>Infoschreiben / Kündigungsgrund *</label><textarea id="ma-abmelde-grund" rows="3" placeholder="z.B. Grund der Kündigung, Verhalten, Empfehlung für später..."></textarea></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px">
+        <button class="btn btn-secondary btn-sm" onclick="cancelAbmeldung()">Abbrechen</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmAbmeldung()">🔴 Abmeldung bestätigen</button>
+      </div>
+    </div>
+
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn btn-danger btn-sm" id="ma-delete-btn" onclick="deleteMa()" style="margin-right:auto;display:none">🗑 Löschen</button>
+      <button class="btn btn-secondary btn-sm" id="ma-reaktivieren-btn" onclick="reaktiviereMa()" style="display:none">↩️ Wieder anmelden</button>
+      <button class="btn btn-danger btn-sm" id="ma-abmelden-btn" onclick="openAbmeldeForm()" style="display:none">🔴 Abmelden</button>
       <button class="btn btn-secondary btn-sm" id="ma-auswertung-btn" onclick="showMaAuswertung()" style="display:none">📊 Auswertung</button>
       <button class="btn btn-secondary" onclick="closeMaModal()">Abbrechen</button>
-      <button class="btn btn-primary" onclick="saveMaModal()">💾 Speichern</button>
+      <button class="btn btn-primary" id="ma-save-btn" onclick="saveMaModal()">💾 Speichern</button>
     </div>
   </div>
 </div>
@@ -4061,40 +4089,27 @@ function findFahrzeugFuerMitarbeiterId(maId, excludeFzgId) {
   return state.fahrzeuge.find(f => f.monteurId === maId && f.id !== excludeFzgId) || null;
 }
 
-function renderMitarbeiterPage() {
-  if (!state.mitarbeiter) state.mitarbeiter = [];
-  const q = (document.getElementById('ma-search')?.value || '').toLowerCase();
-  const list = state.mitarbeiter.filter(m =>
-    !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q) ||
-    (m.funktion||'').toLowerCase().includes(q) ||
-    (m.fahrzeugHint||'').toLowerCase().includes(q)
-  );
-
-  // Stats
-  const mitFzg = state.mitarbeiter.filter(m => getMaFahrzeug(m)).length;
-  document.getElementById('ma-stat-total').textContent = state.mitarbeiter.length;
-  document.getElementById('ma-stat-mit-fzg').textContent = mitFzg;
-  document.getElementById('ma-stat-ohne-fzg').textContent = state.mitarbeiter.length - mitFzg;
-
-  const grid = document.getElementById('ma-grid');
-  if (!list.length) { grid.innerHTML = '<div class="empty">Noch keine Mitarbeiter. Klicke auf "+ Neuer Mitarbeiter".</div>'; return; }
-
-  grid.innerHTML = `<div class="ma-grid">${list.map(m => {
-    const fzg = getMaFahrzeug(m);
-    const initials = (m.vorname[0]||'') + (m.nachname[0]||'');
-    const avatar = m.foto
-      ? `<img class="ma-avatar" src="${m.foto}" alt="${initials}">`
-      : `<div class="ma-avatar-placeholder">${initials}</div>`;
-    return `<div class="ma-card" onclick="showMaModal(${m.id})">
-      <div style="display:flex;gap:12px;align-items:center">
-        ${avatar}
-        <div>
-          <div class="ma-name">${m.vorname} ${m.nachname}</div>
-          <div class="ma-info">${m.funktion || 'Monteur'}</div>
-          ${m.eintritt ? `<div class="ma-info">Seit ${new Date(m.eintritt).toLocaleDateString('de-CH')}</div>` : ''}
-        </div>
+function maCardHtml(m) {
+  const fzg = getMaFahrzeug(m);
+  const initials = (m.vorname[0]||'') + (m.nachname[0]||'');
+  const avatar = m.foto
+    ? `<img class="ma-avatar" src="${m.foto}" alt="${initials}">`
+    : `<div class="ma-avatar-placeholder">${initials}</div>`;
+  const abg = m.abgemeldet;
+  return `<div class="ma-card" onclick="showMaModal(${m.id})" style="${abg?'opacity:.72':''}">
+    <div style="display:flex;gap:12px;align-items:center">
+      ${avatar}
+      <div>
+        <div class="ma-name">${m.vorname} ${m.nachname} ${abg?'<span class="badge badge-red" style="font-size:9px;vertical-align:middle">🔴 Abgemeldet</span>':''}</div>
+        <div class="ma-info">${m.funktion || 'Monteur'}</div>
+        ${m.eintritt ? `<div class="ma-info">Seit ${new Date(m.eintritt).toLocaleDateString('de-CH')}</div>` : ''}
       </div>
-      <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:5px">
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:5px">
+      ${abg ? `
+        ${m.abmeldeDatum ? `<div style="font-size:12px">📅 Abgemeldet am ${new Date(m.abmeldeDatum).toLocaleDateString('de-CH')}</div>` : ''}
+        ${m.abmeldeBewertung ? `<div style="font-size:12px">⭐ Bewertung: <strong>${m.abmeldeBewertung}/5</strong></div>` : ''}
+      ` : `
         ${m.tel ? `<div style="font-size:12px">📞 <a href="tel:${m.tel}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.tel}</a></div>` : ''}
         ${m.email ? `<div style="font-size:12px">✉️ <a href="mailto:${m.email}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.email}</a></div>` : ''}
         ${m.adresse ? `<div style="font-size:12px">🏠 ${m.adresse}</div>` : ''}
@@ -4106,9 +4121,45 @@ function renderMitarbeiterPage() {
         ${m.kontaktName ? `<div style="font-size:11px;color:var(--muted)">👤 ${m.kontaktName}${m.kontaktTel ? ` · <a href="tel:${m.kontaktTel}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.kontaktTel}</a>` : ''}</div>` : ''}
         ${m.notfall ? `<div style="font-size:11px;color:var(--muted)">🆘 ${m.notfall}</div>` : ''}
         ${(m.docs||[]).length ? `<div style="font-size:11px;color:var(--muted)">📁 ${m.docs.length} Dokument(e)</div>` : ''}
-      </div>
-    </div>`;
-  }).join('')}</div>`;
+      `}
+    </div>
+  </div>`;
+}
+
+function renderMitarbeiterPage() {
+  if (!state.mitarbeiter) state.mitarbeiter = [];
+  const q = (document.getElementById('ma-search')?.value || '').toLowerCase();
+  const matches = m => !q || (m.vorname+' '+m.nachname).toLowerCase().includes(q) ||
+    (m.funktion||'').toLowerCase().includes(q) ||
+    (m.fahrzeugHint||'').toLowerCase().includes(q);
+
+  const aktive = state.mitarbeiter.filter(m => !m.abgemeldet && matches(m));
+  const abgemeldete = state.mitarbeiter.filter(m => m.abgemeldet && matches(m));
+
+  // Stats (nur aktive Mitarbeiter zählen)
+  const mitFzg = aktive.filter(m => getMaFahrzeug(m)).length;
+  document.getElementById('ma-stat-total').textContent = aktive.length;
+  document.getElementById('ma-stat-mit-fzg').textContent = mitFzg;
+  document.getElementById('ma-stat-ohne-fzg').textContent = aktive.length - mitFzg;
+  const stAbg = document.getElementById('ma-stat-abgemeldet');
+  if (stAbg) stAbg.textContent = state.mitarbeiter.filter(m => m.abgemeldet).length;
+
+  const grid = document.getElementById('ma-grid');
+  grid.innerHTML = aktive.length
+    ? `<div class="ma-grid">${aktive.map(m => maCardHtml(m)).join('')}</div>`
+    : '<div class="empty">Noch keine Mitarbeiter. Klicke auf "+ Neuer Mitarbeiter".</div>';
+
+  const abgWrap = document.getElementById('ma-grid-abgemeldet-wrap');
+  const abgGrid = document.getElementById('ma-grid-abgemeldet');
+  if (abgWrap && abgGrid) {
+    if (abgemeldete.length) {
+      abgWrap.style.display = '';
+      abgGrid.innerHTML = `<div class="ma-grid">${abgemeldete.map(m => maCardHtml(m)).join('')}</div>`;
+    } else {
+      abgWrap.style.display = 'none';
+      abgGrid.innerHTML = '';
+    }
+  }
 }
 
 function showMaModal(id) {
@@ -4149,7 +4200,93 @@ function showMaModal(id) {
   document.getElementById('ma-delete-btn').style.display = m ? '' : 'none';
   const auswBtn = document.getElementById('ma-auswertung-btn');
   if (auswBtn) auswBtn.style.display = (m && (currentLoginUser?.admin || currentLoginUser?.entwickler)) ? '' : 'none';
+
+  // Abmelden / Wieder anmelden / Abmelde-Historie
+  document.getElementById('ma-abmelde-form').style.display = 'none';
+  tempAbmeldeBewertung = 0;
+  const isPersonalVerantw = currentLoginUser?.admin || currentLoginUser?.entwickler;
+  const abmeldenBtn = document.getElementById('ma-abmelden-btn');
+  const reaktBtn = document.getElementById('ma-reaktivieren-btn');
+  const infoBox = document.getElementById('ma-abmelde-info');
+  abmeldenBtn.style.display = (m && !m.abgemeldet && isPersonalVerantw) ? '' : 'none';
+  reaktBtn.style.display = (m && m.abgemeldet && isPersonalVerantw) ? '' : 'none';
+
+  const historie = (m?.abmeldungen || []).slice().reverse();
+  if (isPersonalVerantw && (m?.abgemeldet || historie.length)) {
+    let h = m.abgemeldet
+      ? `<div style="font-weight:700;color:var(--red);margin-bottom:6px">🔴 Aktuell abgemeldet${m.abmeldeDatum?' seit '+new Date(m.abmeldeDatum).toLocaleDateString('de-CH'):''}</div>`
+      : `<div style="font-weight:700;color:var(--muted);margin-bottom:6px">ℹ️ Frühere Abmeldung(en) vorhanden</div>`;
+    historie.forEach(a => {
+      h += `<div style="padding:6px 0;border-top:1px solid rgba(232,87,75,.2);font-size:12px">
+        <div><strong>${new Date(a.datum).toLocaleDateString('de-CH')}</strong> · ⭐ Bewertung: ${a.bewertung}/5</div>
+        <div style="color:var(--muted);margin-top:2px;white-space:pre-wrap">${a.grund}</div>
+      </div>`;
+    });
+    infoBox.innerHTML = h;
+    infoBox.style.display = '';
+  } else {
+    infoBox.style.display = 'none';
+  }
+
   document.getElementById('ma-modal').classList.add('open');
+}
+
+let tempAbmeldeBewertung = 0;
+
+function renderAbmeldeSterne() {
+  const wrap = document.getElementById('ma-abmelde-sterne');
+  if (!wrap) return;
+  wrap.innerHTML = [1,2,3,4,5].map(n =>
+    `<span onclick="setAbmeldeBewertung(${n})" style="cursor:pointer;font-size:26px;color:${n<=tempAbmeldeBewertung?'var(--accent)':'var(--border)'}">★</span>`
+  ).join('');
+}
+
+function setAbmeldeBewertung(n) {
+  tempAbmeldeBewertung = n;
+  renderAbmeldeSterne();
+}
+
+function openAbmeldeForm() {
+  tempAbmeldeBewertung = 0;
+  document.getElementById('ma-abmelde-grund').value = '';
+  renderAbmeldeSterne();
+  document.getElementById('ma-abmelde-form').style.display = '';
+  document.getElementById('ma-abmelde-form').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function cancelAbmeldung() {
+  document.getElementById('ma-abmelde-form').style.display = 'none';
+}
+
+function confirmAbmeldung() {
+  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const m = (state.mitarbeiter||[]).find(x => x.id === id);
+  if (!m) return;
+  const grund = document.getElementById('ma-abmelde-grund').value.trim();
+  if (!tempAbmeldeBewertung) return toast('Fehler', 'Bitte Bewertung (1-5 Sterne) auswählen', '⚠️');
+  if (!grund) return toast('Fehler', 'Bitte Infoschreiben / Kündigungsgrund eingeben', '⚠️');
+  if (!confirm(`${m.vorname} ${m.nachname} wirklich abmelden?`)) return;
+
+  const eintrag = { datum: new Date().toISOString().slice(0,10), bewertung: tempAbmeldeBewertung, grund };
+  if (!m.abmeldungen) m.abmeldungen = [];
+  m.abmeldungen.push(eintrag);
+  m.abgemeldet = true;
+  m.abmeldeDatum = eintrag.datum;
+  m.abmeldeBewertung = eintrag.bewertung;
+  m.abmeldeGrund = eintrag.grund;
+
+  save(); closeMaModal(); renderMitarbeiterPage();
+  toast('Abgemeldet', `${m.vorname} ${m.nachname} wurde abgemeldet`, '🔴');
+}
+
+function reaktiviereMa() {
+  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const m = (state.mitarbeiter||[]).find(x => x.id === id);
+  if (!m) return;
+  if (!confirm(`${m.vorname} ${m.nachname} wieder anmelden?`)) return;
+  m.abgemeldet = false;
+  save(); closeMaModal(); renderMitarbeiterPage();
+  toast('Wieder angemeldet', `${m.vorname} ${m.nachname} ist wieder aktiv`, '✅');
 }
 
 function closeMaModal() {
