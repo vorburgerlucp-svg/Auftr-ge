@@ -432,6 +432,7 @@
     <button class="nav-btn" onclick="showPage('fahrzeuge')">Fahrzeuge</button>
     <button class="nav-btn" onclick="showPage('werkzeug')">Werkzeug</button>
     <button class="nav-btn" onclick="showPage('bestellung')">Bestellung</button>
+    <button class="nav-btn" onclick="showPage('todo')">✅ To-Do</button>
     <button class="nav-btn" onclick="officeSyncExport()" title="Daten für Monteur-App exportieren">📱 Sync</button>
     <button class="nav-btn" onclick="showPage('einstellungen')">⚙️</button>
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
@@ -725,6 +726,32 @@
     </div>
     <div id="jahresbericht-content"></div>
   </div>
+</div>
+
+<div id="page-todo" class="page">
+  <h2>✅ To-Do</h2>
+  <p class="subtitle">Offene Punkte aus Mails, Rapporten und Baustellen – mit Zuständigkeit und Erledigt-Status</p>
+
+  <div class="stats" style="grid-template-columns:repeat(2,1fr)">
+    <div class="stat"><div class="stat-val yellow" id="todo-stat-offen">0</div><div class="stat-label">Offen</div></div>
+    <div class="stat"><div class="stat-val green" id="todo-stat-erledigt">0</div><div class="stat-label">Erledigt</div></div>
+  </div>
+
+  <div class="card" style="padding:14px;margin-bottom:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="todo-neu-text" placeholder="Neuer Punkt..." style="flex:2;min-width:200px">
+      <input type="text" id="todo-neu-zustaendig" placeholder="Zuständig (z.B. Luc oder Tobias)" style="flex:1;min-width:160px">
+      <button class="btn btn-primary" onclick="addTodoItem()">+ Hinzufügen</button>
+    </div>
+  </div>
+
+  <div class="tabs" style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="nav-btn active" id="todo-filter-offen" onclick="setTodoFilter('offen')">Offen</button>
+    <button class="nav-btn" id="todo-filter-alle" onclick="setTodoFilter('alle')">Alle</button>
+    <button class="nav-btn" id="todo-filter-erledigt" onclick="setTodoFilter('erledigt')">Erledigt</button>
+  </div>
+
+  <div id="todo-list"></div>
 </div>
 
 <div id="page-meldungen" class="page">
@@ -2685,6 +2712,108 @@ function showPage(id) {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
     renderEinstellungen();
   }
+  if (id === 'todo') renderTodoPage();
+}
+
+// ============================================================
+// TO-DO RUBRIK
+// ============================================================
+let todoFilter = 'offen';
+
+function setTodoFilter(f) {
+  todoFilter = f;
+  ['offen','alle','erledigt'].forEach(k => {
+    const b = document.getElementById('todo-filter-'+k);
+    if (b) b.classList.toggle('active', k===f);
+  });
+  renderTodoPage();
+}
+
+function initialenVon(name) {
+  if (!name) return '?';
+  const teile = name.trim().split(/\s+/);
+  return teile.map(t => t[0]).join('').toUpperCase().slice(0,3);
+}
+
+function renderTodoPage() {
+  if (!state.todos) state.todos = [];
+  const offen = state.todos.filter(t => !t.erledigt).length;
+  const erledigt = state.todos.filter(t => t.erledigt).length;
+  document.getElementById('todo-stat-offen').textContent = offen;
+  document.getElementById('todo-stat-erledigt').textContent = erledigt;
+
+  let liste = state.todos.slice().sort((a,b) => (b.erstelltAm||'').localeCompare(a.erstelltAm||''));
+  if (todoFilter === 'offen') liste = liste.filter(t => !t.erledigt);
+  if (todoFilter === 'erledigt') liste = liste.filter(t => t.erledigt);
+
+  const wrap = document.getElementById('todo-list');
+  if (!liste.length) {
+    wrap.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Keine Eintr\u00e4ge</div>';
+    return;
+  }
+  wrap.innerHTML = liste.map(t => {
+    const bs = t.bsId ? (state.baustellen||[]).find(b => b.id === t.bsId) : null;
+    const bsHtml = bs ? '<span onclick="showBsModal('+bs.id+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
+    const erledigtInfo = t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
+    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+'">'
+      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" style="margin-top:3px;width:18px;height:18px;flex-shrink:0">'
+      + '<div style="flex:1">'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+bsHtml+'<span style="font-weight:700'+(t.erledigt?';text-decoration:line-through':'')+'">'+(t.text||'')+'</span></div>'
+      + '<div style="font-size:12px;color:var(--muted);margin-top:4px">\ud83d\udc64 '+(t.zustaendig||'\u2013')+'</div>'
+      + '<input type="text" value="'+(t.notiz||'').replace(/"/g,'&quot;')+'" placeholder="Notiz..." onchange="setTodoNotiz('+t.id+',this.value)" style="margin-top:6px;width:100%;font-size:12px;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px">'
+      + erledigtInfo
+      + '</div>'
+      + '<button onclick="deleteTodoItem('+t.id+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
+      + '</div>';
+  }).join('');
+}
+
+function toggleTodo(id) {
+  const t = (state.todos||[]).find(x => x.id === id);
+  if (!t) return;
+  t.erledigt = !t.erledigt;
+  if (t.erledigt) {
+    const name = currentLoginUser ? (currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'') : '';
+    t.erledigtDurch = initialenVon(name) || 'LV';
+    t.erledigtAm = new Date().toLocaleDateString('de-CH');
+  } else {
+    t.erledigtDurch = null;
+    t.erledigtAm = null;
+  }
+  save();
+  renderTodoPage();
+}
+
+function setTodoNotiz(id, val) {
+  const t = (state.todos||[]).find(x => x.id === id);
+  if (!t) return;
+  t.notiz = val;
+  save();
+}
+
+function addTodoItem() {
+  const textEl = document.getElementById('todo-neu-text');
+  const zustEl = document.getElementById('todo-neu-zustaendig');
+  const text = textEl.value.trim();
+  if (!text) return toast('Fehler','Text erforderlich','\u26a0\ufe0f');
+  if (!state.todos) state.todos = [];
+  state.todos.push({
+    id: Date.now(), text, bsId: null,
+    zustaendig: zustEl.value.trim() || '\u2013',
+    erledigt: false, erledigtDurch: null, erledigtAm: null,
+    notiz: '', erstelltAm: new Date().toISOString().slice(0,10)
+  });
+  textEl.value = ''; zustEl.value = '';
+  save();
+  renderTodoPage();
+  toast('To-Do hinzugef\u00fcgt', text, '\u2705');
+}
+
+function deleteTodoItem(id) {
+  if (!confirm('To-Do l\u00f6schen?')) return;
+  state.todos = (state.todos||[]).filter(t => t.id !== id);
+  save();
+  renderTodoPage();
 }
 
 function renderEinstellungen() {
@@ -5027,7 +5156,7 @@ function renderWochenplan() {
     'KW '+kw+' · '+fmtDE(wpBaseMonday)+' – '+fmtDE(addDays(wpBaseMonday,6))+' · '+wpBaseMonday.getFullYear();
   renderWpLegende();
 
-  let monteure = (state.mitarbeiter||[]).filter(m=>m.vorname);
+  let monteure = (state.mitarbeiter||[]).filter(m=>m.vorname && !m.abgemeldet);
   if (wpSortGruppiert) {
     monteure = monteure.slice().sort((a,b) =>
       wpGetMonteuerSortKey(a, allDates).localeCompare(wpGetMonteuerSortKey(b, allDates))
