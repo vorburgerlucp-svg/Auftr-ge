@@ -394,6 +394,20 @@
   .bs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; margin: 2px; }
   .bs-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 </style>
+<style id="gpt-assistant-style">
+  #gpt-assistant-toggle{position:fixed;right:22px;bottom:22px;z-index:10050;width:58px;height:58px;border-radius:50%;border:1px solid var(--border);background:var(--accent);color:#0f1117;font-size:24px;font-weight:700;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  #gpt-assistant-panel{display:none;position:fixed;right:22px;bottom:90px;z-index:10049;width:min(430px,calc(100vw - 28px));height:min(620px,calc(100vh - 120px));background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 18px 55px rgba(0,0,0,.55);overflow:hidden;flex-direction:column}
+  #gpt-assistant-panel.open{display:flex}
+  .gpt-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--surface2)}
+  .gpt-head-title{font-weight:700;flex:1}.gpt-head-sub{font-size:10px;color:var(--muted);margin-top:2px}
+  #gpt-sync-dot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block}.gpt-sync-ok{background:var(--green)!important}
+  #gpt-messages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .gpt-msg{max-width:88%;padding:9px 11px;border-radius:10px;font-size:13px;line-height:1.4;white-space:pre-wrap;word-break:break-word}.gpt-msg.user{align-self:flex-end;background:rgba(75,159,232,.16);border:1px solid rgba(75,159,232,.35)}.gpt-msg.ai{align-self:flex-start;background:var(--bg);border:1px solid var(--border)}.gpt-msg.err{align-self:flex-start;background:rgba(232,87,75,.08);border:1px solid rgba(232,87,75,.35);color:#f5a8a8}
+  .gpt-input-wrap{padding:12px;border-top:1px solid var(--border);background:var(--surface2)}
+  .gpt-input-row{display:flex;gap:8px;align-items:flex-end}.gpt-input-row textarea{min-height:42px;max-height:110px;resize:vertical}.gpt-round{width:42px;height:42px;flex:0 0 42px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:18px}.gpt-round.listening{border-color:var(--red);color:var(--red)}
+  .gpt-foot{font-size:10px;color:var(--muted);margin-top:7px;display:flex;justify-content:space-between;gap:10px}
+  @media(max-width:600px){#gpt-assistant-toggle{right:14px;bottom:14px}#gpt-assistant-panel{right:14px;bottom:82px;width:calc(100vw - 28px);height:calc(100vh - 100px)}}
+</style>
 </head>
 <body>
 
@@ -9335,6 +9349,189 @@ function forceSave() {
   } else {
     toast('Offline', 'Nur lokal gespeichert (Firebase nicht verbunden)', '⚠️');
   }
+}
+</script>
+
+
+<!-- GPT Arbeitsassistent -->
+<button id="gpt-assistant-toggle" type="button" onclick="toggleGptAssistant()" title="GPT Arbeitsassistent">🤖</button>
+<div id="gpt-assistant-panel" aria-label="GPT Arbeitsassistent">
+  <div class="gpt-head">
+    <span id="gpt-sync-dot"></span>
+    <div><div class="gpt-head-title">GPT Arbeitsassistent</div><div class="gpt-head-sub" id="gpt-sync-text">Warte auf Firebase-Sync…</div></div>
+    <button class="btn btn-secondary btn-sm" type="button" onclick="toggleGptAssistant()">✕</button>
+  </div>
+  <div id="gpt-messages"></div>
+  <div class="gpt-input-wrap">
+    <div class="gpt-input-row">
+      <textarea id="gpt-input" placeholder="z.B. Fahrzeug B3 am 18.09. in die Garage…" onkeydown="gptInputKeydown(event)"></textarea>
+      <button id="gpt-mic" class="gpt-round" type="button" onclick="gptToggleSpeech()" title="Spracheingabe">🎤</button>
+      <button class="gpt-round" type="button" onclick="gptSend()" title="Senden">➤</button>
+    </div>
+    <div class="gpt-foot"><span>Jede GPT-Änderung → To-do/Protokoll</span><span id="gpt-actor">–</span></div>
+  </div>
+</div>
+<script id="gpt-assistant-script">
+const GPT_ASSISTANT_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/';
+let gptBusy = false;
+let gptRecognition = null;
+let gptListening = false;
+
+function toggleGptAssistant(){
+  const p=document.getElementById('gpt-assistant-panel');
+  p.classList.toggle('open');
+  if(p.classList.contains('open')){
+    gptUpdateSyncState();
+    const m=document.getElementById('gpt-messages');
+    if(m && !m.dataset.welcome){
+      m.dataset.welcome='1';
+      gptAddMessage('ai','Bereit. Du kannst mir Arbeitsaufträge schreiben oder diktieren. Änderungen werden erst nach erfolgreichem Firebase-Sync ausgeführt und automatisch in der To-do-Liste protokolliert.');
+    }
+    setTimeout(()=>document.getElementById('gpt-input')?.focus(),50);
+  }
+}
+
+function gptUpdateSyncState(){
+  const ok=!!(dbRef && hasReceivedFirebaseSync);
+  document.getElementById('gpt-sync-dot')?.classList.toggle('gpt-sync-ok',ok);
+  const t=document.getElementById('gpt-sync-text'); if(t) t.textContent=ok?'Firebase synchronisiert – Änderungen erlaubt':'Warte auf Firebase-Sync – nur Lesen';
+  const a=document.getElementById('gpt-actor'); if(a) a.textContent=currentLoginUser ? ((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim() : 'nicht eingeloggt';
+}
+setInterval(gptUpdateSyncState,1500);
+
+function gptAddMessage(type,text){
+  const box=document.getElementById('gpt-messages'); if(!box) return;
+  const d=document.createElement('div'); d.className='gpt-msg '+type; d.textContent=text; box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+function gptInputKeydown(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); gptSend(); } }
+
+function gptContext(){
+  const slimEmp=(state.mitarbeiter||[]).map(m=>({id:String(m.id),name:((m.vorname||'')+' '+(m.nachname||'')).trim(),rolle:m.rolle||'',aktiv:m.abgemeldet?false:true}));
+  const slimVeh=(state.fahrzeuge||[]).map(f=>({id:String(f.id),name:f.name||'',schild:f.schild||'',marke:f.marke||'',monteur:f.monteur||'',monteurId:f.monteurId??null}));
+  const slimSites=(state.baustellen||[]).map(b=>({id:String(b.id),name:b.name||'',kunde:b.kunde||'',adresse:b.adresse||'',von:b.von||'',bis:b.bis||'',chefMonteurId:b.chefMonteurId??null,teamMonteurIds:b.teamMonteurIds||[],notiz:b.notiz||''}));
+  const upcomingTodos=(state.todos||[]).filter(t=>!t.erledigt).slice(-80).map(t=>({id:String(t.id),text:t.text||'',zustaendig:t.zustaendig||'',bsId:t.bsId??null,erstelltAm:t.erstelltAm||''}));
+  return {today:new Date().toISOString().slice(0,10),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Europe/Zurich',firebaseSynced:!!(dbRef&&hasReceivedFirebaseSync),mitarbeiter:slimEmp,fahrzeuge:slimVeh,baustellen:slimSites,todos:upcomingTodos};
+}
+function gptActor(){ return currentLoginUser ? {id:String(currentLoginUser.id),name:((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim()} : {id:'unknown',name:'Unbekannt'}; }
+
+async function gptSend(){
+  const inp=document.getElementById('gpt-input'); const message=(inp?.value||'').trim();
+  if(!message||gptBusy) return;
+  if(!currentLoginUser){ gptAddMessage('err','Bitte zuerst im LagerTool einloggen.'); return; }
+  gptBusy=true; inp.value=''; inp.disabled=true; gptAddMessage('user',message); gptAddMessage('ai','…');
+  const box=document.getElementById('gpt-messages'); const pending=box?.lastElementChild;
+  try{
+    const r=await fetch(GPT_ASSISTANT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,context:gptContext(),actor:gptActor()})});
+    let data={}; try{data=await r.json();}catch(_){ }
+    if(!r.ok||!data.ok) throw new Error(data.error||('HTTP '+r.status));
+    if(pending) pending.remove();
+    if(data.reply) gptAddMessage('ai',data.reply);
+    const actions=Array.isArray(data.actions)?data.actions:[];
+    if(actions.length){
+      if(!(dbRef&&hasReceivedFirebaseSync)){
+        gptAddMessage('err','Ich habe die Anweisung verstanden, aber noch nichts geändert: Firebase ist noch nicht vollständig synchronisiert. Bitte in einigen Sekunden erneut senden.');
+      }else{
+        const result=gptExecuteActions(actions,message);
+        if(result.applied.length) gptAddMessage('ai','Ausgeführt:\n• '+result.applied.join('\n• '));
+        if(result.errors.length) gptAddMessage('err','Nicht ausgeführt:\n• '+result.errors.join('\n• '));
+      }
+    }
+  }catch(e){ if(pending) pending.remove(); gptAddMessage('err','GPT-Verbindung fehlgeschlagen: '+(e?.message||e)); }
+  finally{gptBusy=false; inp.disabled=false; inp.focus(); gptUpdateSyncState();}
+}
+
+function gptNorm(v){return String(v??'').trim().toLowerCase();}
+function gptFindEmployee(a){
+  if(a.employee_id){const x=(state.mitarbeiter||[]).find(m=>String(m.id)===String(a.employee_id)); if(x)return x;}
+  const n=gptNorm(a.employee_name||a.target_name); if(!n)return null;
+  return (state.mitarbeiter||[]).find(m=>{const full=gptNorm((m.vorname||'')+' '+(m.nachname||''));return full===n||full.includes(n)||n.includes(full);})||null;
+}
+function gptFindVehicle(a){
+  if(a.vehicle_id){const x=(state.fahrzeuge||[]).find(f=>String(f.id)===String(a.vehicle_id)); if(x)return x;}
+  const n=gptNorm(a.vehicle_name||a.target_name); if(!n)return null;
+  return (state.fahrzeuge||[]).find(f=>[f.name,f.schild,f.marke].some(v=>gptNorm(v)===n)) || (state.fahrzeuge||[]).find(f=>[f.name,f.schild].some(v=>gptNorm(v).includes(n)||n.includes(gptNorm(v)))) || null;
+}
+function gptFindSite(a){
+  if(a.site_id){const x=(state.baustellen||[]).find(b=>String(b.id)===String(a.site_id)); if(x)return x;}
+  const n=gptNorm(a.site_name||a.target_name); if(!n)return null;
+  return (state.baustellen||[]).find(b=>gptNorm(b.name)===n) || (state.baustellen||[]).find(b=>gptNorm(b.name).includes(n)||n.includes(gptNorm(b.name))) || null;
+}
+function gptTodo(text,responsible,bsId,source='GPT'){
+  if(!state.todos) state.todos=[];
+  state.todos.push({id:Date.now()+Math.floor(Math.random()*10000),text,bsId:bsId||null,zustaendig:responsible||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:new Date().toISOString().slice(0,10),quelle:source,erstelltDurch:gptActor().name});
+}
+function gptAudit(text,bsId){ gptTodo('🤖 '+text,gptActor().name,bsId,'GPT-Änderung'); }
+function gptPlanAssign(emp,site,date,note){
+  if(!date) throw new Error('Datum fehlt');
+  if(!state.plan) state.plan={}; if(!state.plan[date]) state.plan[date]={};
+  const key='ma'+emp.id+'_'+date;
+  state.plan[date][key]={maId:emp.id,bsId:site.id,farbeHex:site.farbeHex||'#1a6b3a',notiz:note||''};
+}
+
+function gptExecuteActions(actions,originalMessage){
+  const applied=[],errors=[];
+  const mutations=actions.filter(a=>a&&a.type!=='create_todo');
+  const standaloneTodos=actions.filter(a=>a&&a.type==='create_todo');
+  for(const a of mutations){
+    try{
+      if(a.type==='set_vehicle_garage_appointment'){
+        const f=gptFindVehicle(a); if(!f) throw new Error('Fahrzeug nicht eindeutig gefunden'); if(!a.date) throw new Error('Garagendatum fehlt');
+        if(!f.service) f.service=[];
+        const beschr=(a.text||a.note||'Garagentermin').trim();
+        f.service.push({id:Date.now()+Math.floor(Math.random()*1000),typ:'reminder',datum:a.date,km:'',beschreibung:beschr,kosten:'',reminderDate:a.date,reminderKm:'',erstelltDurch:gptActor().name,quelle:'GPT'});
+        gptAudit('Fahrzeug '+(f.name||f.schild)+' – Garagentermin '+a.date+(a.time?' '+a.time:'')+(beschr&&beschr!=='Garagentermin'?' – '+beschr:''),null);
+        applied.push('Garagentermin für '+(f.name||f.schild)+' am '+a.date+' eingetragen');
+      } else if(a.type==='assign_employee' || a.type==='move_employee'){
+        const emp=gptFindEmployee(a), site=gptFindSite(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden'); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
+        gptPlanAssign(emp,site,a.date,a.note||'');
+        gptAudit(((a.type==='move_employee')?'Mitarbeiter verschoben: ':'Mitarbeiter eingeplant: ')+((emp.vorname||'')+' '+(emp.nachname||'')).trim()+' → '+site.name+' am '+a.date,site.id);
+        applied.push(((emp.vorname||'')+' '+(emp.nachname||'')).trim()+' am '+a.date+' bei '+site.name+' eingeplant');
+      } else if(a.type==='add_note'){
+        const site=gptFindSite(a); if(!site) throw new Error('Baustelle für Notiz nicht eindeutig gefunden'); const note=(a.note||a.text||'').trim(); if(!note) throw new Error('Notiz fehlt');
+        site.notiz=(site.notiz?site.notiz+'\n':'')+note;
+        gptAudit('Notiz bei '+site.name+' ergänzt: '+note,site.id); applied.push('Notiz bei '+site.name+' ergänzt');
+      } else if(a.type==='update_site'){
+        const site=gptFindSite(a); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
+        const note=(a.note||a.text||'').trim();
+        if(a.date){site.von=a.date; if(!site.bis||site.bis<site.von)site.bis=a.date;}
+        if(note) site.notiz=(site.notiz?site.notiz+'\n':'')+note;
+        gptAudit('Baustelle geändert: '+site.name+(a.date?' – Datum '+a.date:'')+(note?' – '+note:''),site.id); applied.push('Baustelle '+site.name+' aktualisiert');
+      } else if(a.type==='create_site'){
+        const name=(a.site_name||a.target_name||a.text||'').trim(); if(!name) throw new Error('Baustellenname fehlt');
+        const id=Date.now()+Math.floor(Math.random()*1000); const site={id,name,kunde:'',adresse:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',fahrtzeitMin:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',hotelName:'',hotelAdresse:'',hotelDaten:'',notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
+        if(!state.baustellen)state.baustellen=[]; state.baustellen.push(site); gptAudit('Baustelle erstellt: '+name+(a.date?' – '+a.date:''),id); applied.push('Baustelle '+name+' erstellt');
+      } else { throw new Error('Aktion nicht freigegeben: '+a.type); }
+    }catch(e){errors.push((a.type||'Aktion')+': '+(e?.message||e));}
+  }
+  // Wenn der Benutzer ausdrücklich nur ein To-do verlangt, führen wir es aus.
+  // Bei fachlichen Änderungen erzeugt der Browser selbst exakt ein Audit-To-do pro Änderung, damit nichts doppelt erscheint.
+  if(!mutations.length){
+    for(const a of standaloneTodos){
+      const text=(a.text||a.note||a.target_name||originalMessage||'').trim(); if(!text)continue;
+      const site=gptFindSite(a); gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do'); applied.push('To-do erstellt: '+text);
+    }
+  }
+  if(applied.length){
+    save();
+    try{renderTodoPage();}catch(_){ }
+    try{renderWochenplan();}catch(_){ }
+    try{renderFahrzeugePage();}catch(_){ }
+    try{renderAll();}catch(_){ }
+  }
+  return {applied,errors};
+}
+
+function gptToggleSpeech(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){gptAddMessage('err','Spracheingabe wird von diesem Browser nicht unterstützt. Du kannst den Text normal eintippen.');return;}
+  if(gptListening && gptRecognition){gptRecognition.stop();return;}
+  const r=new SR(); gptRecognition=r; r.lang='de-CH'; r.interimResults=true; r.continuous=false;
+  const btn=document.getElementById('gpt-mic'); const inp=document.getElementById('gpt-input'); let finalText='';
+  r.onstart=()=>{gptListening=true;btn?.classList.add('listening');};
+  r.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=t;else interim+=t;}if(inp)inp.value=(finalText+' '+interim).trim();};
+  r.onerror=e=>gptAddMessage('err','Spracheingabe: '+e.error);
+  r.onend=()=>{gptListening=false;btn?.classList.remove('listening');};
+  r.start();
 }
 </script>
 
