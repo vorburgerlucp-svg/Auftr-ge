@@ -558,6 +558,7 @@
   <div class="tabs" id="baustatus-tabs" style="display:flex; gap:8px; margin-bottom:16px; border-bottom:1px solid var(--border); flex-wrap:wrap;">
     <button class="nav-btn active" onclick="switchBaustatusTab('status')">📋 Status</button>
     <button class="nav-btn" onclick="switchBaustatusTab('kw')">📅 KW</button>
+    <button class="nav-btn" onclick="switchBaustatusTab('archiv')">📦 Archiv</button>
     <button class="nav-btn" onclick="switchBaustatusTab('kvp')">🔧 Nacharbeit</button>
     <button class="nav-btn" onclick="switchBaustatusTab('bewertung')">⭐ Bewertungen</button>
   </div>
@@ -5175,6 +5176,10 @@ function renderWochenplan() {
     monteure = monteure.slice().sort((a,b) =>
       wpGetMonteuerSortKey(a, allDates).localeCompare(wpGetMonteuerSortKey(b, allDates))
     );
+  } else {
+    monteure = monteure.slice().sort((a,b) =>
+      (a.vorname+' '+a.nachname).localeCompare(b.vorname+' '+b.nachname, 'de', {sensitivity:'base'})
+    );
   }
   const baustellen = (state.baustellen||[]).filter(bs=>{
     const von=bs.von||'0000-00-00', bis=bs.bis||'9999-12-31';
@@ -6355,6 +6360,7 @@ function renderWpLegende() {
     el.innerHTML = `<span style="font-size:12px;color:var(--muted)">Keine Baustellen diese Woche</span>`;
     return;
   }
+  dieseWoche.sort((a, b) => (a.name||'').localeCompare(b.name||'', 'de', {sensitivity:'base'}));
   el.innerHTML = dieseWoche.map(b => {
     const hex = getHex(b);
     const tc = textCol(hex);
@@ -8473,12 +8479,13 @@ function bsZugewieseneMonteure(bauId) {
 function switchBaustatusTab(tab) {
   baustatusTab = tab;
   document.querySelectorAll('#baustatus-tabs .nav-btn').forEach(b => b.classList.remove('active'));
-  const idx = ['status','kw','kvp','bewertung'].indexOf(tab);
+  const idx = ['status','kw','archiv','kvp','bewertung'].indexOf(tab);
   const btns = document.querySelectorAll('#baustatus-tabs .nav-btn');
   if (btns[idx]) btns[idx].classList.add('active');
 
   if (tab === 'status') renderBaustatusStatus();
   else if (tab === 'kw') renderBaustatusKW();
+  else if (tab === 'archiv') renderBaustatusArchiv();
   else if (tab === 'kvp') renderBaustatusKVP();
   else if (tab === 'bewertung') renderBaustatusBewertung();
 }
@@ -8895,10 +8902,97 @@ function bsToggleBeendet(bauId) {
 }
 
 
+// ============================================================
+// TAB: ARCHIV (alle beendeten Baustellen, unabhaengig von KW-Range)
+// ============================================================
+function renderBaustatusArchiv() {
+  if (!window.bsArchivSuche) window.bsArchivSuche = '';
+  const alle = (state.baustellen||[]).filter(b => b.beendet);
+
+  let html = '<div style="margin-bottom:12px">' +
+    '<input type="text" id="bs-archiv-suche" placeholder="Suche nach Name, Kunde, Adresse..." ' +
+    'value="' + (window.bsArchivSuche||'').replace(/"/g,'&quot;') + '" ' +
+    'oninput="window.bsArchivSuche=this.value;renderBaustatusArchiv();" ' +
+    'style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">' +
+    '</div>';
+
+  const q = (window.bsArchivSuche||'').toLowerCase().trim();
+  let gefiltert = alle.filter(bau => !q ||
+    (bau.name||'').toLowerCase().includes(q) ||
+    (bau.kunde||'').toLowerCase().includes(q) ||
+    (bau.adresse||'').toLowerCase().includes(q)
+  );
+  // Neueste zuerst (nach bis-Datum, dann von-Datum)
+  gefiltert = gefiltert.slice().sort((a,b) => (b.bis||b.von||'').localeCompare(a.bis||a.von||''));
+
+  if (gefiltert.length === 0) {
+    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">' +
+      (alle.length === 0 ? 'Noch keine abgeschlossenen Baustellen.' : 'Keine Treffer fuer "' + q + '".') + '</div>';
+    document.getElementById('baustatus-content').innerHTML = html;
+    return;
+  }
+
+  gefiltert.forEach(bau => {
+    const { soll, ist, pct } = bsSollIst(bau);
+    const docsCount = (bau.docs||[]).length;
+    html += '<div class="card" onclick="showBsModal(' + bau.id + ')" style="margin-bottom:8px;border-left:4px solid #6b7280;padding:12px 14px;cursor:pointer;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">' +
+        '<div style="min-width:0">' +
+          '<div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✅ ' + bau.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">' +
+            (bau.kunde ? bau.kunde + ' · ' : '') +
+            (bau.von ? bau.von + (bau.bis ? ' – ' + bau.bis : '') : '') +
+            (soll>0 ? ' · ' + soll.toFixed(1) + 'h Soll · ' + ist.toFixed(1) + 'h gebucht (' + pct + '%)' : '') +
+            (docsCount ? ' · 📎 ' + docsCount : '') +
+          '</div>' +
+          (bau.adresse ? '<div style="font-size:11px;color:var(--muted)">📍 ' + bau.adresse + '</div>' : '') +
+        '</div>' +
+        '<span style="color:var(--muted);font-size:14px;flex-shrink:0">›</span>' +
+      '</div>' +
+    '</div>';
+  });
+
+  document.getElementById('baustatus-content').innerHTML = html;
+}
+
 
 // ============================================================
 // TAB 3: KVP / NACHARBEIT
 // ============================================================
+let kvpJahr = new Date().getFullYear();
+let kvpDetailMaId = null;
+
+function kvpJahrVon(datum) {
+  // datum ist 'de-CH' formatiert: DD.MM.YYYY
+  const teile = (datum||'').split('.');
+  return teile.length===3 ? parseInt(teile[2]) : new Date().getFullYear();
+}
+function kvpDatumSortWert(datum) {
+  const teile = (datum||'').split('.');
+  return teile.length===3 ? teile[2]+teile[1].padStart(2,'0')+teile[0].padStart(2,'0') : '';
+}
+function kvpAlleJahre() {
+  const jahre = new Set([new Date().getFullYear()]);
+  (state.mitarbeiter||[]).forEach(m => (m.kvp||[]).forEach(e => jahre.add(kvpJahrVon(e.datum))));
+  return [...jahre].sort((a,b)=>b-a);
+}
+function kvpJahrWaehlen(j) {
+  kvpJahr = parseInt(j);
+  renderBaustatusKVP();
+}
+function kvpToggleDetail(maId) {
+  kvpDetailMaId = (kvpDetailMaId === maId) ? null : maId;
+  renderBaustatusKVP();
+}
+function kvpEntryLoeschen(maId, entryId) {
+  if (!confirm('Nacharbeit-Eintrag löschen?')) return;
+  const ma = state.mitarbeiter.find(m=>m.id===maId);
+  if (!ma) return;
+  ma.kvp = (ma.kvp||[]).filter(e=>e.id!==entryId);
+  save();
+  renderBaustatusKVP();
+}
+
 function renderBaustatusKVP() {
   const baustellen = (state.baustellen||[]).filter(b => (b.tasks||[]).length > 0);
   let html = '<div class="card" style="padding:14px;margin-bottom:1rem;">' +
@@ -8923,17 +9017,43 @@ function renderBaustatusKVP() {
     '<div style="display:flex;align-items:flex-end;"><button class="btn btn-primary" style="width:100%;" onclick="kvpSpeichern()">💾 Speichern</button></div>' +
     '</div></div></div>';
 
-  // Übersicht aller KVP-Einträge pro Mitarbeiter
+  // Übersicht aller KVP-Einträge pro Mitarbeiter, gefiltert nach Jahr (Zähler startet jedes Jahr neu)
+  const jahre = kvpAlleJahre();
   html += '<div class="card" style="padding:14px;">' +
-    '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">👥 Nacharbeit-Übersicht je Mitarbeiter</div>';
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
+    '<div style="font-size:14px;font-weight:700;">👥 Nacharbeit-Übersicht je Mitarbeiter</div>' +
+    '<select onchange="kvpJahrWaehlen(this.value)" style="font-size:12px;padding:4px 8px;">' +
+    jahre.map(j=>'<option value="'+j+'"'+(j===kvpJahr?' selected':'')+'>'+j+(j===new Date().getFullYear()?' (laufend)':'')+'</option>').join('') +
+    '</select></div>';
+
   (state.mitarbeiter||[]).forEach(m => {
-    const eintraege = m.kvp || [];
+    const alleEintraege = m.kvp || [];
+    const eintraege = alleEintraege.filter(e => kvpJahrVon(e.datum) === kvpJahr);
     const totalH = eintraege.reduce((s,e)=>s+(e.stunden||0),0);
     const farbe = totalH===0?'#059669':totalH<2?'#d97706':'#dc2626';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;">' +
-      '<span>' + m.vorname + ' ' + m.nachname + '</span>' +
+    const offen = kvpDetailMaId === m.id;
+    html += '<div style="border-bottom:1px solid var(--border);">' +
+      '<div onclick="kvpToggleDetail('+m.id+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;font-size:12px;">' +
+      '<span>'+(offen?'▼ ':'› ')+ m.vorname + ' ' + m.nachname + '</span>' +
       '<span style="color:'+farbe+';font-weight:600;">' + eintraege.length + ' Einträge · ' + totalH.toFixed(1) + 'h</span>' +
     '</div>';
+    if (offen) {
+      if (!eintraege.length) {
+        html += '<div style="padding:8px 10px 12px 20px;font-size:11px;color:var(--muted);">Keine Nacharbeit-Einträge in '+kvpJahr+'.</div>';
+      } else {
+        html += '<div style="padding:0 10px 10px 20px;">';
+        eintraege.slice().sort((a,b)=>kvpDatumSortWert(b.datum).localeCompare(kvpDatumSortWert(a.datum))).forEach(e => {
+          html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:11px;padding:5px 0;border-bottom:1px dashed var(--border);">' +
+            '<div><span style="color:var(--muted)">'+e.datum+'</span> · <b>'+(e.baustelle||'')+'</b>'+(e.task?' · '+e.task:'')+
+            '<div style="color:var(--text2,var(--muted));margin-top:2px;">'+(e.beschreibung||'')+'</div></div>' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
+            '<span style="font-weight:700;">'+(e.stunden||0).toFixed(1)+'h</span>' +
+            '<span onclick="event.stopPropagation();kvpEntryLoeschen('+m.id+',\''+e.id+'\')" style="cursor:pointer;color:var(--red);">🗑</span>' +
+            '</div></div>';
+        });
+        html += '</div>';
+      }
+    }
   });
   html += '</div>';
 
@@ -8989,6 +9109,8 @@ function kvpSpeichern() {
   document.getElementById('kvp-beschreibung').value = '';
   document.getElementById('kvp-stunden').value = '';
   toast('Gespeichert', 'Nacharbeit-Eintrag für ' + ma.vorname + ' gespeichert', '✅');
+  kvpJahr = new Date().getFullYear();
+  kvpDetailMaId = maId; // Detailansicht des Mitarbeiters direkt aufklappen
   renderBaustatusKVP();
 }
 
