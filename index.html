@@ -2770,10 +2770,11 @@ function renderTodoPage() {
     const bs = t.bsId ? (state.baustellen||[]).find(b => b.id === t.bsId) : null;
     const bsHtml = bs ? '<span onclick="showBsModal('+bs.id+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
     const erledigtInfo = t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
+    const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
     return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+'">'
       + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" style="margin-top:3px;width:18px;height:18px;flex-shrink:0">'
       + '<div style="flex:1">'
-      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+bsHtml+'<span style="font-weight:700'+(t.erledigt?';text-decoration:line-through':'')+'">'+(t.text||'')+'</span></div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+bsHtml+dueHtml+'<span style="font-weight:700'+(t.erledigt?';text-decoration:line-through':'')+'">'+(t.text||'')+'</span></div>'
       + '<div style="font-size:12px;color:var(--muted);margin-top:4px">\ud83d\udc64 '+(t.zustaendig||'\u2013')+'</div>'
       + '<input type="text" value="'+(t.notiz||'').replace(/"/g,'&quot;')+'" placeholder="Notiz..." onchange="setTodoNotiz('+t.id+',this.value)" style="margin-top:6px;width:100%;font-size:12px;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px">'
       + erledigtInfo
@@ -5332,12 +5333,15 @@ function renderWochenplan() {
           const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
           const label=bs?bs.name:'?';
           const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
+          const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
+          const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
+          const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell" draggable="true" '
             +'data-key="'+planKey+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
             +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:28px;cursor:grab" '
             +'onclick="wpMaCellClick('+m.id+',\''+ds+'\')">'
-            +label+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
+            +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
             +'</div></td>';
         } else if(statusE?.status){
           const sHex=statusE.farbeHex||statusHex(statusE.status), sTc=textCol(sHex);
@@ -9531,12 +9535,38 @@ function gptAddMessage(type,text){
 }
 function gptInputKeydown(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); gptSend(); } }
 
+// NEU: kompakter Ausschnitt aus state.plan (Zuteilungen + Abwesenheitsstatus)
+// für ein Zeitfenster um heute, damit Worker/Modell Doppelbelegungen und
+// Verfügbarkeit einschätzen können. Bewusst zeitlich begrenzt, damit der
+// Request nicht unbegrenzt wächst.
+function gptPlanWindow(){
+  const out=[];
+  const today=new Date(); today.setHours(0,0,0,0);
+  const start=new Date(today); start.setDate(start.getDate()-3);
+  const end=new Date(today); end.setDate(end.getDate()+30);
+  const plan=state.plan||{};
+  for(const ds in plan){
+    const d=new Date(ds+'T00:00:00');
+    if(isNaN(d)||d<start||d>end) continue;
+    const dayObj=plan[ds]||{};
+    for(const key in dayObj){
+      const e=dayObj[key]; if(!e) continue;
+      if(key.indexOf('status_ma')===0){
+        out.push({kind:'status',maId:String(e.maId),date:ds,status:e.status||''});
+      } else if(key.indexOf('ma')===0 && e.bsId!=null){
+        out.push({kind:'assign',maId:String(e.maId),date:ds,bsId:String(e.bsId),start:e.startzeit||null,end:e.endzeit||null,fahrzeugId:e.fahrzeugId!=null?String(e.fahrzeugId):null});
+      }
+    }
+  }
+  return out;
+}
+
 function gptContext(){
   const slimEmp=(state.mitarbeiter||[]).map(m=>({id:String(m.id),name:((m.vorname||'')+' '+(m.nachname||'')).trim(),rolle:m.rolle||'',aktiv:m.abgemeldet?false:true}));
   const slimVeh=(state.fahrzeuge||[]).map(f=>({id:String(f.id),name:f.name||'',schild:f.schild||'',marke:f.marke||'',monteur:f.monteur||'',monteurId:f.monteurId??null}));
   const slimSites=(state.baustellen||[]).map(b=>({id:String(b.id),name:b.name||'',kunde:b.kunde||'',adresse:b.adresse||'',von:b.von||'',bis:b.bis||'',chefMonteurId:b.chefMonteurId??null,teamMonteurIds:b.teamMonteurIds||[],notiz:b.notiz||''}));
-  const upcomingTodos=(state.todos||[]).filter(t=>!t.erledigt).slice(-80).map(t=>({id:String(t.id),text:t.text||'',zustaendig:t.zustaendig||'',bsId:t.bsId??null,erstelltAm:t.erstelltAm||''}));
-  return {today:new Date().toISOString().slice(0,10),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Europe/Zurich',firebaseSynced:!!(dbRef&&hasReceivedFirebaseSync),mitarbeiter:slimEmp,fahrzeuge:slimVeh,baustellen:slimSites,todos:upcomingTodos};
+  const upcomingTodos=(state.todos||[]).filter(t=>!t.erledigt).slice(-80).map(t=>({id:String(t.id),text:t.text||'',zustaendig:t.zustaendig||'',bsId:t.bsId??null,erstelltAm:t.erstelltAm||'',dueDate:t.dueDate||null,dueTime:t.dueTime||null,kind:t.kind||'arbeit'}));
+  return {today:new Date().toISOString().slice(0,10),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Europe/Zurich',firebaseSynced:!!(dbRef&&hasReceivedFirebaseSync),mitarbeiter:slimEmp,fahrzeuge:slimVeh,baustellen:slimSites,todos:upcomingTodos,planEntries:gptPlanWindow()};
 }
 function gptActor(){ return currentLoginUser ? {id:String(currentLoginUser.id),name:((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim()} : {id:'unknown',name:'Unbekannt'}; }
 
@@ -9587,22 +9617,123 @@ function gptFindSite(a){
   const n=gptNorm(a.site_name||a.target_name); if(!n)return null;
   return (state.baustellen||[]).find(b=>gptNorm(b.name)===n) || (state.baustellen||[]).find(b=>gptNorm(b.name).includes(n)||n.includes(gptNorm(b.name))) || null;
 }
-function gptTodo(text,responsible,bsId,source='GPT'){
+// dueDate/dueTime optional (Fälligkeit), kind unterscheidet 'arbeit' (vom
+// Benutzer verlangte Aufgabe) von 'audit' (automatisches Änderungsprotokoll).
+function gptTodo(text,responsible,bsId,source='GPT',dueDate,dueTime,kind){
   if(!state.todos) state.todos=[];
-  state.todos.push({id:Date.now()+Math.floor(Math.random()*10000),text,bsId:bsId||null,zustaendig:responsible||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:new Date().toISOString().slice(0,10),quelle:source,erstelltDurch:gptActor().name});
+  state.todos.push({id:Date.now()+Math.floor(Math.random()*10000),text,bsId:bsId||null,zustaendig:responsible||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:new Date().toISOString().slice(0,10),quelle:source,erstelltDurch:gptActor().name,dueDate:dueDate||null,dueTime:dueTime||null,kind:kind||'arbeit'});
 }
-function gptAudit(text,bsId){ gptTodo('🤖 '+text,gptActor().name,bsId,'GPT-Änderung'); }
-function gptPlanAssign(emp,site,date,note){
+function gptAudit(text,bsId){ gptTodo('🤖 '+text,gptActor().name,bsId,'GPT-Änderung',null,null,'audit'); }
+
+// Prüft/normalisiert eine Uhrzeit im Format HH:MM. Ungültiges/leeres ->
+// null (nie eine erfundene Zeit einsetzen).
+function gptNormTime(v){
+  const s=String(v??'').trim();
+  const m=s.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if(!m) return null;
+  return (m[1].length===1?'0'+m[1]:m[1])+':'+m[2];
+}
+function gptNormDate(v){
+  const s=String(v??'').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+// Klassifiziert ein Zeitintervall: 'defined' (Start+Ende bekannt), 'open'
+// (nur Start bekannt) oder 'full' (nichts bekannt = ganztägig).
+function gptClassifyInterval(start,end){
+  if(start&&end) return 'defined';
+  if(start&&!end) return 'open';
+  return 'full';
+}
+// Vergleicht zwei Intervalle. Nur wenn BEIDE vollständig definiert sind,
+// wird eine echte Überschneidung berechnet. Andernfalls wird NIE
+// stillschweigend Konfliktfreiheit angenommen ('ambiguous').
+function gptIntervalsConflict(aStart,aEnd,bStart,bEnd){
+  const ca=gptClassifyInterval(aStart,aEnd), cb=gptClassifyInterval(bStart,bEnd);
+  if(ca==='defined'&&cb==='defined') return (aStart<bEnd && bStart<aEnd) ? 'conflict' : 'ok';
+  return 'ambiguous';
+}
+
+const GPT_BLOCKING_STATUSES=['Urlaub','Krank','Frei','NBU','BU','Unentschuldigt'];
+const GPT_AMBIGUOUS_STATUSES=['Info folgt'];
+
+function gptEmployeeAbsence(empId,date){
+  const e=(state.plan||{})[date]?.['status_ma'+empId];
+  return e?.status || null;
+}
+
+// Prüft Doppelbelegung eines Mitarbeiters am selben Tag (ausser bei der
+// gleichen Baustelle - das ist eine Aktualisierung/kein Konflikt).
+// Rückgabe: {conflict:false} | {conflict:true, ambiguous:bool, existing}
+function gptEmployeeConflict(empId,date,start,end,excludeSiteId){
+  const dayPlan=(state.plan||{})[date]||{};
+  for(const key in dayPlan){
+    if(key.indexOf('status_ma')===0) continue;
+    const e=dayPlan[key]; if(!e||String(e.maId)!==String(empId)||e.bsId==null) continue;
+    if(excludeSiteId!=null && String(e.bsId)===String(excludeSiteId)) continue;
+    const cmp=gptIntervalsConflict(start,end,e.startzeit||null,e.endzeit||null);
+    if(cmp!=='ok') return {conflict:true,ambiguous:cmp==='ambiguous',existing:e};
+  }
+  return {conflict:false};
+}
+
+// Prüft Doppelbelegung eines Fahrzeugs am selben Tag (ausser beim selben
+// Mitarbeiter - das ist eine Aktualisierung). 'privat' wird nie geprüft.
+function gptVehicleConflict(vehicleId,date,start,end,excludeEmpId){
+  if(!vehicleId||vehicleId==='privat') return {conflict:false};
+  const dayPlan=(state.plan||{})[date]||{};
+  for(const key in dayPlan){
+    if(key.indexOf('status_ma')===0) continue;
+    const e=dayPlan[key]; if(!e||e.fahrzeugId==null||String(e.fahrzeugId)!==String(vehicleId)) continue;
+    if(excludeEmpId!=null && String(e.maId)===String(excludeEmpId)) continue;
+    const cmp=gptIntervalsConflict(start,end,e.startzeit||null,e.endzeit||null);
+    if(cmp!=='ok') return {conflict:true,ambiguous:cmp==='ambiguous',existing:e};
+  }
+  return {conflict:false};
+}
+
+function gptFindTodoById(id){
+  if(id==null) return null;
+  return (state.todos||[]).find(t=>String(t.id)===String(id))||null;
+}
+
+// Löst eine Fahrzeug-Referenz auf: bestehendes gptFindVehicle plus
+// Sonderfall "Privatfahrzeug" (kein Datensatz, bewusstes Sentinel).
+function gptResolveVehicleRef(a){
+  const nameNorm=gptNorm(a.vehicle_name);
+  if(!a.vehicle_id && nameNorm && nameNorm.indexOf('privat')!==-1){
+    return {id:'privat',name:'Privatfahrzeug'};
+  }
+  const f=gptFindVehicle(a);
+  return f ? {id:String(f.id),name:f.name||f.schild||''} : null;
+}
+
+function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugName){
   if(!date) throw new Error('Datum fehlt');
   if(!state.plan) state.plan={}; if(!state.plan[date]) state.plan[date]={};
   const key='ma'+emp.id+'_'+date;
-  state.plan[date][key]={maId:emp.id,bsId:site.id,farbeHex:site.farbeHex||'#1a6b3a',notiz:note||''};
+  const prev=state.plan[date][key]||{};
+  state.plan[date][key]={
+    maId:emp.id,bsId:site.id,farbeHex:site.farbeHex||prev.farbeHex||'#1a6b3a',
+    notiz: note!==undefined ? note : (prev.notiz||''),
+    startzeit: startzeit!==undefined ? startzeit : (prev.startzeit||null),
+    endzeit: endzeit!==undefined ? endzeit : (prev.endzeit||null),
+    fahrzeugId: fahrzeugId!==undefined ? fahrzeugId : (prev.fahrzeugId??null),
+    fahrzeugName: fahrzeugName!==undefined ? fahrzeugName : (prev.fahrzeugName||'')
+  };
 }
 
 function gptExecuteActions(actions,originalMessage){
   const applied=[],errors=[];
   const mutations=actions.filter(a=>a&&a.type!=='create_todo');
   const standaloneTodos=actions.filter(a=>a&&a.type==='create_todo');
+  // Texte der in diesem Durchlauf automatisch erzeugten Audit-To-dos, um
+  // ein vom Modell zusätzlich mitgeschicktes "Pflicht"-create_todo (das
+  // nur die NO-CHANGE-WITHOUT-TODO-Regel formal erfüllen sollte) nicht
+  // doppelt als eigenen Arbeits-To-do abzulegen. Ein echter, inhaltlich
+  // eigenständiger Arbeits-To-do wird dadurch NIE unterdrückt.
+  const auditedTextsThisBatch=[];
+
   for(const a of mutations){
     try{
       if(a.type==='set_vehicle_garage_appointment'){
@@ -9610,38 +9741,184 @@ function gptExecuteActions(actions,originalMessage){
         if(!f.service) f.service=[];
         const beschr=(a.text||a.note||'Garagentermin').trim();
         f.service.push({id:Date.now()+Math.floor(Math.random()*1000),typ:'reminder',datum:a.date,km:'',beschreibung:beschr,kosten:'',reminderDate:a.date,reminderKm:'',erstelltDurch:gptActor().name,quelle:'GPT'});
-        gptAudit('Fahrzeug '+(f.name||f.schild)+' – Garagentermin '+a.date+(a.time?' '+a.time:'')+(beschr&&beschr!=='Garagentermin'?' – '+beschr:''),null);
+        const auditText='Fahrzeug '+(f.name||f.schild)+' – Garagentermin '+a.date+(a.time?' '+a.time:'')+(beschr&&beschr!=='Garagentermin'?' – '+beschr:'');
+        gptAudit(auditText,null); auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Garagentermin für '+(f.name||f.schild)+' am '+a.date+' eingetragen');
+
       } else if(a.type==='assign_employee' || a.type==='move_employee'){
-        const emp=gptFindEmployee(a), site=gptFindSite(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden'); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
-        gptPlanAssign(emp,site,a.date,a.note||'');
-        gptAudit(((a.type==='move_employee')?'Mitarbeiter verschoben: ':'Mitarbeiter eingeplant: ')+((emp.vorname||'')+' '+(emp.nachname||'')).trim()+' → '+site.name+' am '+a.date,site.id);
-        applied.push(((emp.vorname||'')+' '+(emp.nachname||'')).trim()+' am '+a.date+' bei '+site.name+' eingeplant');
+        const emp=gptFindEmployee(a), site=gptFindSite(a);
+        if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
+        if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
+        if(!a.date) throw new Error('Datum fehlt');
+        const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
+
+        // Verfügbarkeit prüfen - bestehende Abwesenheit nie still überschreiben.
+        const absence=gptEmployeeAbsence(emp.id,a.date);
+        if(absence && GPT_BLOCKING_STATUSES.includes(absence)){
+          throw new Error(empName+' ist am '+a.date+' als "'+absence+'" markiert – keine Einplanung möglich');
+        }
+        if(absence && GPT_AMBIGUOUS_STATUSES.includes(absence)){
+          throw new Error('Status "'+absence+'" für '+empName+' am '+a.date+' ist unklar – bitte zuerst klären');
+        }
+
+        const startzeit=gptNormTime(a.time);
+        const endzeit=gptNormTime(a.end_time);
+
+        // No-Op: bereits exakt so eingeplant -> nichts tun, keine Meldung als Fehler.
+        const existingKey='ma'+emp.id+'_'+a.date;
+        const existing=(state.plan[a.date]||{})[existingKey];
+        if(existing && String(existing.bsId)===String(site.id) && (existing.startzeit||null)===startzeit && (existing.endzeit||null)===endzeit){
+          applied.push(empName+' ist am '+a.date+' bereits so bei '+site.name+' eingeplant – keine Änderung nötig');
+        } else {
+          // Doppelbelegungsprüfung (ausser bei derselben Baustelle = Aktualisierung).
+          const conflict=gptEmployeeConflict(emp.id,a.date,startzeit,endzeit,site.id);
+          if(conflict.conflict){
+            if(conflict.ambiguous) throw new Error('Zeitliche Überschneidung für '+empName+' am '+a.date+' nicht ausschliessbar (unvollständige Zeitangaben) – bitte Zeiten klären');
+            throw new Error('Zeitkonflikt: '+empName+' ist am '+a.date+' bereits anderweitig eingeplant (überschneidende Zeit)');
+          }
+
+          // Optional strukturiertes Fahrzeug direkt bei der Zuweisung.
+          let vehRef=null;
+          if(a.vehicle_id || a.vehicle_name){
+            vehRef=gptResolveVehicleRef(a);
+            if(!vehRef) throw new Error('Fahrzeug nicht eindeutig gefunden');
+            if(vehRef.id!=='privat'){
+              const vConflict=gptVehicleConflict(vehRef.id,a.date,startzeit,endzeit,emp.id);
+              if(vConflict.conflict){
+                if(vConflict.ambiguous) throw new Error('Belegung von '+vehRef.name+' am '+a.date+' nicht ausschliessbar (unvollständige Zeitangaben) – bitte klären');
+                throw new Error('Fahrzeugkonflikt: '+vehRef.name+' ist am '+a.date+' bereits einem anderen Mitarbeiter zugewiesen');
+              }
+            }
+          }
+
+          gptPlanAssign(emp,site,a.date,a.note||'',startzeit,endzeit,vehRef?vehRef.id:undefined,vehRef?vehRef.name:undefined);
+
+          const zeitStr=startzeit?(' um '+startzeit+(endzeit?'–'+endzeit:' (offen bis)')):(endzeit?' bis '+endzeit:'');
+          const vehStr=vehRef?(' – Fahrzeug: '+vehRef.name):'';
+          const auditText=((a.type==='move_employee')?'Mitarbeiter verschoben: ':'Mitarbeiter eingeplant: ')+empName+' → '+site.name+' am '+a.date+zeitStr+vehStr;
+          gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
+          applied.push(empName+' am '+a.date+' bei '+site.name+zeitStr+' eingeplant');
+
+          // Wenn keine Zeit bekannt ist und der Benutzer das explizit als offen
+          // markiert hat (kein time/end_time gesetzt), zusätzlich einen
+          // Klärungs-Arbeits-To-do anlegen (Ziel 1: "offene" Startzeit).
+          if(!startzeit && !endzeit && a.time===null){
+            const clarifyText='Startzeit '+empName+' für '+site.name+' am '+a.date+' noch klären.';
+            gptTodo(clarifyText,gptActor().name,site.id,'GPT-To-do',null,null,'arbeit');
+            applied.push('Klärungs-To-do erstellt: '+clarifyText);
+          }
+        }
+
+      } else if(a.type==='remove_employee_assignment'){
+        const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
+        if(!a.date) throw new Error('Datum fehlt');
+        const key='ma'+emp.id+'_'+a.date;
+        const existing=(state.plan[a.date]||{})[key];
+        if(!existing) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden');
+        const site=a.site_id||a.site_name ? gptFindSite(a) : null;
+        if(site && String(existing.bsId)!==String(site.id)) throw new Error('Bestehende Einplanung betrifft eine andere Baustelle');
+        const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
+        const oldSite=(state.baustellen||[]).find(b=>String(b.id)===String(existing.bsId));
+        delete state.plan[a.date][key];
+        const auditText=empName+' aus '+(oldSite?oldSite.name:'Einsatz')+' am '+a.date+' entfernt.';
+        gptAudit(auditText,existing.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push(empName+' am '+a.date+' aus der Planung entfernt');
+
+      } else if(a.type==='assign_vehicle'){
+        const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
+        if(!a.date) throw new Error('Datum fehlt');
+        const key='ma'+emp.id+'_'+a.date;
+        const existing=(state.plan[a.date]||{})[key];
+        if(!existing||existing.bsId==null) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden – zuerst einplanen');
+        const vehRef=gptResolveVehicleRef(a); if(!vehRef) throw new Error('Fahrzeug nicht eindeutig gefunden');
+        const startzeit=gptNormTime(a.time)!==null?gptNormTime(a.time):(existing.startzeit||null);
+        const endzeit=gptNormTime(a.end_time)!==null?gptNormTime(a.end_time):(existing.endzeit||null);
+        if(vehRef.id!=='privat'){
+          const vConflict=gptVehicleConflict(vehRef.id,a.date,startzeit,endzeit,emp.id);
+          if(vConflict.conflict){
+            if(vConflict.ambiguous) throw new Error('Belegung von '+vehRef.name+' am '+a.date+' nicht ausschliessbar (unvollständige Zeitangaben) – bitte klären');
+            throw new Error('Fahrzeugkonflikt: '+vehRef.name+' ist am '+a.date+' bereits einem anderen Mitarbeiter zugewiesen');
+          }
+        }
+        const site=(state.baustellen||[]).find(b=>String(b.id)===String(existing.bsId));
+        gptPlanAssign(emp,site||{id:existing.bsId,farbeHex:existing.farbeHex},a.date,undefined,startzeit,endzeit,vehRef.id,vehRef.name);
+        const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
+        const auditText='Fahrzeug für '+empName+' am '+a.date+(site?' bei '+site.name:'')+' geändert auf: '+vehRef.name;
+        gptAudit(auditText,existing.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push('Fahrzeug '+vehRef.name+' für '+empName+' am '+a.date+' eingetragen');
+
       } else if(a.type==='add_note'){
         const site=gptFindSite(a); if(!site) throw new Error('Baustelle für Notiz nicht eindeutig gefunden'); const note=(a.note||a.text||'').trim(); if(!note) throw new Error('Notiz fehlt');
         site.notiz=(site.notiz?site.notiz+'\n':'')+note;
-        gptAudit('Notiz bei '+site.name+' ergänzt: '+note,site.id); applied.push('Notiz bei '+site.name+' ergänzt');
+        const auditText='Notiz bei '+site.name+' ergänzt: '+note;
+        gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push('Notiz bei '+site.name+' ergänzt');
+
       } else if(a.type==='update_site'){
         const site=gptFindSite(a); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
         const note=(a.note||a.text||'').trim();
         if(a.date){site.von=a.date; if(!site.bis||site.bis<site.von)site.bis=a.date;}
         if(note) site.notiz=(site.notiz?site.notiz+'\n':'')+note;
-        gptAudit('Baustelle geändert: '+site.name+(a.date?' – Datum '+a.date:'')+(note?' – '+note:''),site.id); applied.push('Baustelle '+site.name+' aktualisiert');
+        const auditText='Baustelle geändert: '+site.name+(a.date?' – Datum '+a.date:'')+(note?' – '+note:'');
+        gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push('Baustelle '+site.name+' aktualisiert');
+
       } else if(a.type==='create_site'){
         const name=(a.site_name||a.target_name||a.text||'').trim(); if(!name) throw new Error('Baustellenname fehlt');
         const id=Date.now()+Math.floor(Math.random()*1000); const site={id,name,kunde:'',adresse:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',fahrtzeitMin:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',hotelName:'',hotelAdresse:'',hotelDaten:'',notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
-        if(!state.baustellen)state.baustellen=[]; state.baustellen.push(site); gptAudit('Baustelle erstellt: '+name+(a.date?' – '+a.date:''),id); applied.push('Baustelle '+name+' erstellt');
+        if(!state.baustellen)state.baustellen=[]; state.baustellen.push(site);
+        const auditText='Baustelle erstellt: '+name+(a.date?' – '+a.date:'');
+        gptAudit(auditText,id); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push('Baustelle '+name+' erstellt');
+
+      } else if(a.type==='update_todo'){
+        const t=gptFindTodoById(a.target_id); if(!t) throw new Error('To-do nicht gefunden (ungültige ID)');
+        const changes=[];
+        if(a.text && a.text.trim() && a.text.trim()!==t.text){ changes.push('Text: "'+t.text+'" → "'+a.text.trim()+'"'); t.text=a.text.trim(); }
+        if(a.responsible && a.responsible.trim() && a.responsible.trim()!==t.zustaendig){ changes.push('Zuständig: '+(t.zustaendig||'–')+' → '+a.responsible.trim()); t.zustaendig=a.responsible.trim(); }
+        const nd=gptNormDate(a.due_date);
+        if(a.due_date!==undefined && a.due_date!==null && nd && nd!==t.dueDate){ changes.push('Fällig: '+(t.dueDate||'–')+' → '+nd); t.dueDate=nd; }
+        const nt=gptNormTime(a.due_time);
+        if(a.due_time!==undefined && a.due_time!==null && nt!==t.dueTime){ changes.push('Fälligkeitszeit: '+(t.dueTime||'–')+' → '+nt); t.dueTime=nt; }
+        if(!changes.length) throw new Error('Keine erkennbare Änderung am To-do');
+        const stamp=new Date().toLocaleDateString('de-CH');
+        t.notiz=(t.notiz?t.notiz+'\n':'')+'[GPT] '+stamp+': '+changes.join('; ');
+        applied.push('To-do aktualisiert: '+changes.join('; '));
+
+      } else if(a.type==='set_todo_status'){
+        const t=gptFindTodoById(a.target_id); if(!t) throw new Error('To-do nicht gefunden (ungültige ID)');
+        const wantErledigt=gptNorm(a.todo_status)==='erledigt';
+        const wantOffen=gptNorm(a.todo_status)==='offen';
+        if(!wantErledigt && !wantOffen) throw new Error('todo_status muss "erledigt" oder "offen" sein');
+        if(wantErledigt===!!t.erledigt){ applied.push('To-do war bereits '+(t.erledigt?'erledigt':'offen')); }
+        else{
+          t.erledigt=wantErledigt;
+          if(wantErledigt){ t.erledigtDurch=initialenVon(gptActor().name)||gptActor().name; t.erledigtAm=new Date().toLocaleDateString('de-CH'); }
+          else { t.erledigtDurch=null; t.erledigtAm=null; }
+          applied.push('To-do "'+t.text+'" als '+(wantErledigt?'erledigt':'offen')+' markiert');
+        }
+
       } else { throw new Error('Aktion nicht freigegeben: '+a.type); }
     }catch(e){errors.push((a.type||'Aktion')+': '+(e?.message||e));}
   }
-  // Wenn der Benutzer ausdrücklich nur ein To-do verlangt, führen wir es aus.
-  // Bei fachlichen Änderungen erzeugt der Browser selbst exakt ein Audit-To-do pro Änderung, damit nichts doppelt erscheint.
-  if(!mutations.length){
-    for(const a of standaloneTodos){
-      const text=(a.text||a.note||a.target_name||originalMessage||'').trim(); if(!text)continue;
-      const site=gptFindSite(a); gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do'); applied.push('To-do erstellt: '+text);
-    }
+
+  // Eigenständige Arbeits-To-dos IMMER verarbeiten - unabhängig davon, ob
+  // zusätzlich fachliche Änderungen ausgeführt wurden (Fix: vorher wurden
+  // sie bei gleichzeitigen Änderungen komplett verworfen). Ein create_todo,
+  // dessen Text im Wesentlichen dem gerade erzeugten Audit-Text entspricht,
+  // gilt als das formale "Pflicht-To-do" der Änderung und wird nicht
+  // zusätzlich als eigener Arbeits-To-do abgelegt (Duplikatvermeidung).
+  for(const a of standaloneTodos){
+    const text=(a.text||a.note||a.target_name||originalMessage||'').trim(); if(!text) continue;
+    const textNorm=gptNorm(text);
+    const isRedundant=auditedTextsThisBatch.some(at=>at===textNorm || (at.length>8 && textNorm.length>8 && (at.indexOf(textNorm)!==-1 || textNorm.indexOf(at)!==-1)));
+    if(isRedundant) continue;
+    const site=gptFindSite(a);
+    const dueDate=gptNormDate(a.due_date), dueTime=gptNormTime(a.due_time);
+    gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do',dueDate,dueTime,'arbeit');
+    applied.push('To-do erstellt: '+text+(dueDate?' (fällig '+dueDate+(dueTime?' '+dueTime:'')+')':''));
   }
+
   if(applied.length){
     save();
     try{renderTodoPage();}catch(_){ }
