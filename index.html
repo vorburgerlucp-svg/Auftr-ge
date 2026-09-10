@@ -9498,6 +9498,10 @@ const GPT_ASSISTANT_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/';
 let gptBusy = false;
 let gptRecognition = null;
 let gptListening = false;
+// Gesprächsverlauf für den GPT-Arbeitsassistenten (nur im Speicher,
+// wird beim Neuladen der Seite zurückgesetzt; keine Firebase-/LocalStorage-Ablage).
+let gptHistory = [];
+const GPT_HISTORY_MAX = 20;
 
 function toggleGptAssistant(){
   const p=document.getElementById('gpt-assistant-panel');
@@ -9543,10 +9547,15 @@ async function gptSend(){
   gptBusy=true; inp.value=''; inp.disabled=true; gptAddMessage('user',message); gptAddMessage('ai','…');
   const box=document.getElementById('gpt-messages'); const pending=box?.lastElementChild;
   try{
-    const r=await fetch(GPT_ASSISTANT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,context:gptContext(),actor:gptActor()})});
+    const r=await fetch(GPT_ASSISTANT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,context:gptContext(),actor:gptActor(),history:gptHistory})});
     let data={}; try{data=await r.json();}catch(_){ }
     if(!r.ok||!data.ok) throw new Error(data.error||('HTTP '+r.status));
     if(pending) pending.remove();
+    // Verlauf erst NACH erfolgreicher Antwort fortschreiben (aktuelle Nachricht
+    // wurde oben bewusst nicht mitgeschickt, der Worker hängt sie selbst an).
+    gptHistory.push({role:'user',content:message});
+    if(data.reply) gptHistory.push({role:'assistant',content:data.reply});
+    if(gptHistory.length>GPT_HISTORY_MAX) gptHistory=gptHistory.slice(gptHistory.length-GPT_HISTORY_MAX);
     if(data.reply) gptAddMessage('ai',data.reply);
     const actions=Array.isArray(data.actions)?data.actions:[];
     if(actions.length){
