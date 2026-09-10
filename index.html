@@ -9625,10 +9625,20 @@ function gptTodo(text,responsible,bsId,source='GPT',dueDate,dueTime,kind){
 }
 function gptAudit(text,bsId){ gptTodo('🤖 '+text,gptActor().name,bsId,'GPT-Änderung',null,null,'audit'); }
 
-// Prüft/normalisiert eine Uhrzeit im Format HH:MM. Ungültiges/leeres ->
-// null (nie eine erfundene Zeit einsetzen).
+// Prüft/normalisiert eine Uhrzeit. Toleriert kleine, vom Modell manchmal
+// abweichende Schreibweisen (z.B. "07:00 Uhr", "07.00", "07:00:00",
+// "7:00"), damit eine vom Benutzer klar genannte Zeit nicht allein wegen
+// Formatierungsdetails verworfen wird. Erkennt die Funktion KEINE Uhrzeit,
+// wird niemals eine erfunden - Rückgabe dann konsequent null.
 function gptNormTime(v){
-  const s=String(v??'').trim();
+  let s=String(v??'').trim();
+  if(!s) return null;
+  // "Uhr"/"uhr"-Suffix und Leerzeichen davor entfernen
+  s=s.replace(/\s*uhr\.?$/i,'').trim();
+  // Punkt statt Doppelpunkt als Trenner tolerieren (z.B. "07.00")
+  s=s.replace(/^(\d{1,2})\.(\d{2})$/,'$1:$2');
+  // Sekunden abschneiden (z.B. "07:00:00" -> "07:00")
+  s=s.replace(/^(\d{1,2}:\d{2}):\d{2}$/,'$1');
   const m=s.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   if(!m) return null;
   return (m[1].length===1?'0'+m[1]:m[1])+':'+m[2];
@@ -9761,13 +9771,32 @@ function gptExecuteActions(actions,originalMessage){
           throw new Error('Status "'+absence+'" für '+empName+' am '+a.date+' ist unklar – bitte zuerst klären');
         }
 
-        const startzeit=gptNormTime(a.time);
-        const endzeit=gptNormTime(a.end_time);
+        // Rohwerte aus der Aktion (nur was das Modell für DIESE Nachricht
+        // tatsächlich genannt hat).
+        const startzeitRaw=gptNormTime(a.time);
+        const endzeitRaw=gptNormTime(a.end_time);
 
-        // No-Op: bereits exakt so eingeplant -> nichts tun, keine Meldung als Fehler.
+        // Bereits bestehende Einplanung für Mitarbeiter+Tag (unabhängig von
+        // der Baustelle) nachschlagen.
         const existingKey='ma'+emp.id+'_'+a.date;
-        const existing=(state.plan[a.date]||{})[existingKey];
-        if(existing && String(existing.bsId)===String(site.id) && (existing.startzeit||null)===startzeit && (existing.endzeit||null)===endzeit){
+        const existing=((state.plan||{})[a.date]||{})[existingKey];
+        // Nur relevant als "dieselbe Einplanung", wenn auch die Baustelle
+        // übereinstimmt - eine Einplanung an einer ANDEREN Baustelle liefert
+        // keine sinnvolle Zeit-Vorbelegung.
+        const sameSiteExisting = (existing && String(existing.bsId)===String(site.id)) ? existing : null;
+
+        // WICHTIG: Wird für eine bereits bestehende Einplanung an derselben
+        // Baustelle keine neue Zeit genannt, bleibt die bisher gespeicherte
+        // Zeit erhalten - sie wird NIE durch eine "nicht genannte" Zeit
+        // stillschweigend gelöscht (Ziel: bestehende Zeiten nie verlieren).
+        // Bei einer neuen/anderen Baustelle oder wenn tatsächlich noch nie
+        // eine Zeit bekannt war, bleibt der Wert null - es wird nie eine
+        // Zeit erfunden.
+        const startzeit = startzeitRaw!==null ? startzeitRaw : (sameSiteExisting ? (sameSiteExisting.startzeit||null) : null);
+        const endzeit = endzeitRaw!==null ? endzeitRaw : (sameSiteExisting ? (sameSiteExisting.endzeit||null) : null);
+
+        // No-Op: nach Merge exakt derselbe Stand -> nichts tun, keine Meldung als Fehler.
+        if(sameSiteExisting && (sameSiteExisting.startzeit||null)===startzeit && (sameSiteExisting.endzeit||null)===endzeit){
           applied.push(empName+' ist am '+a.date+' bereits so bei '+site.name+' eingeplant – keine Änderung nötig');
         } else {
           // Doppelbelegungsprüfung (ausser bei derselben Baustelle = Aktualisierung).
@@ -9799,10 +9828,11 @@ function gptExecuteActions(actions,originalMessage){
           gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
           applied.push(empName+' am '+a.date+' bei '+site.name+zeitStr+' eingeplant');
 
-          // Wenn keine Zeit bekannt ist und der Benutzer das explizit als offen
-          // markiert hat (kein time/end_time gesetzt), zusätzlich einen
+          // Wenn WEDER jetzt genannt NOCH aus einer bestehenden Einplanung an
+          // derselben Baustelle bekannt ist, UND das Modell explizit "keine
+          // Zeit bekannt" signalisiert hat (a.time===null), zusätzlich einen
           // Klärungs-Arbeits-To-do anlegen (Ziel 1: "offene" Startzeit).
-          if(!startzeit && !endzeit && a.time===null){
+          if(!startzeit && !endzeit && a.time===null && a.end_time===null){
             const clarifyText='Startzeit '+empName+' für '+site.name+' am '+a.date+' noch klären.';
             gptTodo(clarifyText,gptActor().name,site.id,'GPT-To-do',null,null,'arbeit');
             applied.push('Klärungs-To-do erstellt: '+clarifyText);
@@ -9813,7 +9843,7 @@ function gptExecuteActions(actions,originalMessage){
         const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
         if(!a.date) throw new Error('Datum fehlt');
         const key='ma'+emp.id+'_'+a.date;
-        const existing=(state.plan[a.date]||{})[key];
+        const existing=((state.plan||{})[a.date]||{})[key];
         if(!existing) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden');
         const site=a.site_id||a.site_name ? gptFindSite(a) : null;
         if(site && String(existing.bsId)!==String(site.id)) throw new Error('Bestehende Einplanung betrifft eine andere Baustelle');
@@ -9828,7 +9858,7 @@ function gptExecuteActions(actions,originalMessage){
         const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
         if(!a.date) throw new Error('Datum fehlt');
         const key='ma'+emp.id+'_'+a.date;
-        const existing=(state.plan[a.date]||{})[key];
+        const existing=((state.plan||{})[a.date]||{})[key];
         if(!existing||existing.bsId==null) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden – zuerst einplanen');
         const vehRef=gptResolveVehicleRef(a); if(!vehRef) throw new Error('Fahrzeug nicht eindeutig gefunden');
         const startzeit=gptNormTime(a.time)!==null?gptNormTime(a.time):(existing.startzeit||null);
