@@ -9667,20 +9667,99 @@ function gptIntervalsConflict(aStart,aEnd,bStart,bEnd){
 const GPT_BLOCKING_STATUSES=['Urlaub','Krank','Frei','NBU','BU','Unentschuldigt'];
 const GPT_AMBIGUOUS_STATUSES=['Info folgt'];
 
-function gptEmployeeAbsence(empId,date){
-  const e=(state.plan||{})[date]?.['status_ma'+empId];
-  return e?.status || null;
+// Vergleich case-/whitespace-unabhängig - ein Status wie "frei" oder "Frei "
+// (z.B. aus dem Excel-Import oder manueller Eingabe) darf nicht durchrutschen,
+// nur weil die Schreibweise leicht abweicht. Dies ist die EINE massgebliche
+// Prüfung (keine zweite/parallele Statuslogik).
+function gptStatusMatches(list,status){
+  if(!status) return false;
+  const n=String(status).trim().toLowerCase();
+  return list.some(s=>s.toLowerCase()===n);
 }
 
-// Prüft Doppelbelegung eines Mitarbeiters am selben Tag (ausser bei der
-// gleichen Baustelle - das ist eine Aktualisierung/kein Konflikt).
-// Rückgabe: {conflict:false} | {conflict:true, ambiguous:bool, existing}
-function gptEmployeeConflict(empId,date,start,end,excludeSiteId){
+function gptEmployeeAbsence(empId,date){
+  const e=(state.plan||{})[date]?.['status_ma'+empId];
+  return e?.status ? String(e.status).trim() : null;
+}
+
+// NEU: liefert ALLE Einplanungs-Einträge (keine Status-Einträge) eines
+// Mitarbeiters an einem Datum - normalerweise einer (Basis-Key
+// 'ma{id}_{date}'), seit Update 3 optional mehrere (Zusatz-Keys
+// 'ma{id}_{date}__2', '__3', ...). Alte Datensätze mit nur dem Basis-Key
+// funktionieren unverändert.
+function gptEmployeeDayEntries(empId,date){
   const dayPlan=(state.plan||{})[date]||{};
+  const prefix='ma'+empId+'_';
+  const out=[];
   for(const key in dayPlan){
     if(key.indexOf('status_ma')===0) continue;
-    const e=dayPlan[key]; if(!e||String(e.maId)!==String(empId)||e.bsId==null) continue;
-    if(excludeSiteId!=null && String(e.bsId)===String(excludeSiteId)) continue;
+    if(key.indexOf(prefix)!==0) continue;
+    const e=dayPlan[key]; if(!e||e.bsId==null) continue;
+    out.push({key,entry:e});
+  }
+  return out;
+}
+
+// NEU: liefert den Key für einen ZUSÄTZLICHEN gleichzeitigen Einsatz. Der
+// allererste Einsatz eines Mitarbeiters an einem Tag behält immer den
+// bisherigen Basis-Key ('ma{id}_{date}') - dadurch bleiben Wochenplan-
+// Anzeige, Drag&Drop und manuelle Bearbeitung für den (weit überwiegenden)
+// Normalfall unverändert kompatibel. Ein zweiter/dritter gleichzeitiger
+// Einsatz bekommt einen neuen, zusätzlichen Key (__2, __3, ...), den nur
+// der GPT-Assistent kennt und verwaltet.
+function gptNextAssignKey(empId,date){
+  const base='ma'+empId+'_'+date;
+  const dayPlan=(state.plan||{})[date]||{};
+  if(!dayPlan[base] || dayPlan[base].bsId==null) return base;
+  let n=2;
+  while(dayPlan[base+'__'+n]) n++;
+  return base+'__'+n;
+}
+
+// Prüft Doppelbelegung eines Mitarbeiters am selben Tag gegen ALLE seine
+// bestehenden Einsätze, ausser dem per excludeKey explizit ausgenommenen
+// (der gerade aktualisiert/verschoben wird und daher nicht mit sich selbst
+// verglichen werden darf). Rückgabe: {conflict:false} | {conflict:true, ambiguous:bool, existing}
+// Bestimmt bei mehreren/einem bestehenden Einsatz an DERSELBEN Baustelle,
+// ob ein neu genanntes Zeitfenster denselben Einsatz meint (Rückgabe:
+// der passende Eintrag -> Aktualisierung) oder eindeutig ein zeitlich
+// getrennter, zusätzlicher Einsatz an derselben Baustelle ist (Rückgabe:
+// null -> neuer Eintrag). Nur ein vollständig bekanntes UND klar NICHT
+// überlappendes Zeitfenster gilt als getrennter Einsatz - alles andere
+// (keine/unvollständige Zeit genannt, oder überlappend/unklar) wird
+// konservativ als Aktualisierung des (einzigen) bestehenden Einsatzes
+// gewertet, um keine ungewollten Duplikate zu erzeugen. Bei mehreren
+// bestehenden Einsätzen an dieser Baustelle und fehlender/unvollständiger
+// neuer Zeitangabe ist nicht eindeutig, welcher gemeint ist - Rückgabe
+// dann der String 'AMBIGUOUS' (Aufrufer muss nachfragen statt zu raten).
+function gptSameSiteMatch(entries,startRaw,endRaw){
+  if(!entries.length) return null;
+  const bothKnown = startRaw!==null && endRaw!==null;
+  if(entries.length===1){
+    if(bothKnown){
+      const cmp=gptIntervalsConflict(startRaw,endRaw,entries[0].entry.startzeit||null,entries[0].entry.endzeit||null);
+      if(cmp==='ok') return null;
+    }
+    return entries[0];
+  }
+  if(bothKnown){
+    for(const e of entries){
+      const cmp=gptIntervalsConflict(startRaw,endRaw,e.entry.startzeit||null,e.entry.endzeit||null);
+      if(cmp!=='ok') return e;
+    }
+    return null;
+  }
+  return 'AMBIGUOUS';
+}
+
+// Prüft Doppelbelegung eines Mitarbeiters am selben Tag gegen ALLE seine
+// bestehenden Einsätze, ausser dem per excludeKey explizit ausgenommenen
+// (der gerade aktualisiert/verschoben wird und daher nicht mit sich selbst
+// verglichen werden darf). Rückgabe: {conflict:false} | {conflict:true, ambiguous:bool, existing}
+function gptEmployeeConflict(empId,date,start,end,excludeKey){
+  const entries=gptEmployeeDayEntries(empId,date);
+  for(const {key,entry:e} of entries){
+    if(excludeKey!=null && key===excludeKey) continue;
     const cmp=gptIntervalsConflict(start,end,e.startzeit||null,e.endzeit||null);
     if(cmp!=='ok') return {conflict:true,ambiguous:cmp==='ambiguous',existing:e};
   }
@@ -9718,12 +9797,16 @@ function gptResolveVehicleRef(a){
   return f ? {id:String(f.id),name:f.name||f.schild||''} : null;
 }
 
-function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugName){
+// NEU: key optional - schreibt standardmässig weiterhin auf den Basis-Key
+// (100% bisheriges Verhalten für den Normalfall eines Einsatzes/Tag). Für
+// einen zusätzlichen gleichzeitigen Einsatz übergibt der Aufrufer einen
+// eigenen Key (siehe gptNextAssignKey).
+function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugName,key){
   if(!date) throw new Error('Datum fehlt');
   if(!state.plan) state.plan={}; if(!state.plan[date]) state.plan[date]={};
-  const key='ma'+emp.id+'_'+date;
-  const prev=state.plan[date][key]||{};
-  state.plan[date][key]={
+  const k=key||('ma'+emp.id+'_'+date);
+  const prev=state.plan[date][k]||{};
+  state.plan[date][k]={
     maId:emp.id,bsId:site.id,farbeHex:site.farbeHex||prev.farbeHex||'#1a6b3a',
     notiz: note!==undefined ? note : (prev.notiz||''),
     startzeit: startzeit!==undefined ? startzeit : (prev.startzeit||null),
@@ -9764,10 +9847,10 @@ function gptExecuteActions(actions,originalMessage){
 
         // Verfügbarkeit prüfen - bestehende Abwesenheit nie still überschreiben.
         const absence=gptEmployeeAbsence(emp.id,a.date);
-        if(absence && GPT_BLOCKING_STATUSES.includes(absence)){
+        if(gptStatusMatches(GPT_BLOCKING_STATUSES,absence)){
           throw new Error(empName+' ist am '+a.date+' als "'+absence+'" markiert – keine Einplanung möglich');
         }
-        if(absence && GPT_AMBIGUOUS_STATUSES.includes(absence)){
+        if(gptStatusMatches(GPT_AMBIGUOUS_STATUSES,absence)){
           throw new Error('Status "'+absence+'" für '+empName+' am '+a.date+' ist unklar – bitte zuerst klären');
         }
 
@@ -9776,31 +9859,74 @@ function gptExecuteActions(actions,originalMessage){
         const startzeitRaw=gptNormTime(a.time);
         const endzeitRaw=gptNormTime(a.end_time);
 
-        // Bereits bestehende Einplanung für Mitarbeiter+Tag (unabhängig von
-        // der Baustelle) nachschlagen.
-        const existingKey='ma'+emp.id+'_'+a.date;
-        const existing=((state.plan||{})[a.date]||{})[existingKey];
-        // Nur relevant als "dieselbe Einplanung", wenn auch die Baustelle
-        // übereinstimmt - eine Einplanung an einer ANDEREN Baustelle liefert
-        // keine sinnvolle Zeit-Vorbelegung.
-        const sameSiteExisting = (existing && String(existing.bsId)===String(site.id)) ? existing : null;
+        // Alle bereits bestehenden Einsätze dieses Mitarbeiters an diesem
+        // Tag (seit Update 3 können das mehrere sein - z.B. vormittags eine
+        // Baustelle, nachmittags eine andere).
+        const dayEntries=gptEmployeeDayEntries(emp.id,a.date);
+        const sameSiteEntries=dayEntries.filter(d=>String(d.entry.bsId)===String(site.id));
 
-        // WICHTIG: Wird für eine bereits bestehende Einplanung an derselben
-        // Baustelle keine neue Zeit genannt, bleibt die bisher gespeicherte
-        // Zeit erhalten - sie wird NIE durch eine "nicht genannte" Zeit
-        // stillschweigend gelöscht (Ziel: bestehende Zeiten nie verlieren).
-        // Bei einer neuen/anderen Baustelle oder wenn tatsächlich noch nie
-        // eine Zeit bekannt war, bleibt der Wert null - es wird nie eine
-        // Zeit erfunden.
-        const startzeit = startzeitRaw!==null ? startzeitRaw : (sameSiteExisting ? (sameSiteExisting.startzeit||null) : null);
-        const endzeit = endzeitRaw!==null ? endzeitRaw : (sameSiteExisting ? (sameSiteExisting.endzeit||null) : null);
+        // WICHTIG: "gleiche Baustelle" allein bedeutet NICHT automatisch
+        // "derselbe Einsatz" - ein Mitarbeiter kann an derselben Baustelle
+        // durchaus zwei getrennte, nicht überlappende Zeitfenster haben
+        // (z.B. 08:00-11:00 und separat 13:00-17:00). Nur wenn die neu
+        // genannte Zeit mit einem bestehenden Einsatz an dieser Baustelle
+        // überlappt/unklar ist ODER keine (vollständige) Zeit genannt wurde,
+        // gilt es als Aktualisierung desselben Einsatzes. Ein eindeutig
+        // NICHT überlappendes, vollständig bekanntes Zeitfenster wird als
+        // zusätzlicher, separater Einsatz an derselben Baustelle behandelt.
+        const sameSite=gptSameSiteMatch(sameSiteEntries,startzeitRaw,endzeitRaw);
+        if(sameSite==='AMBIGUOUS'){
+          const namen=sameSiteEntries.map(d=>{
+            const zt=d.entry.startzeit?(' '+d.entry.startzeit+(d.entry.endzeit?'–'+d.entry.endzeit:'')):'';
+            return site.name+zt;
+          }).join(', ');
+          throw new Error(empName+' hat am '+a.date+' bei '+site.name+' bereits mehrere Einsätze ('+namen+') – unklar, welcher gemeint ist. Bitte die Uhrzeit angeben, um sie zu unterscheiden.');
+        }
 
-        // No-Op: nach Merge exakt derselbe Stand -> nichts tun, keine Meldung als Fehler.
-        if(sameSiteExisting && (sameSiteExisting.startzeit||null)===startzeit && (sameSiteExisting.endzeit||null)===endzeit){
+        // Ziel-Key und ggf. den zu aktualisierenden bestehenden Eintrag
+        // bestimmen. assign_employee und move_employee unterscheiden sich
+        // NUR darin, was passiert, wenn die Zielbaustelle KEINEM
+        // bestehenden (bzw. keinem zeitlich passenden) Einsatz entspricht:
+        // - assign_employee: neuen, zusätzlichen Einsatz anlegen, bestehende
+        //   Einsätze an anderen Baustellen/Zeiten bleiben unangetastet.
+        // - move_employee: den (eindeutigen) bestehenden Einsatz dorthin
+        //   verschieben; bei mehreren bestehenden Einsätzen ohne eindeutigen
+        //   Bezug wird NICHT geraten, sondern nachgefragt.
+        let targetKey, existingForMerge, verschoben=false;
+        if(sameSite){
+          targetKey=sameSite.key; existingForMerge=sameSite.entry;
+        } else if(a.type==='assign_employee'){
+          targetKey=gptNextAssignKey(emp.id,a.date); existingForMerge=null;
+        } else if(dayEntries.length===0){
+          targetKey=gptNextAssignKey(emp.id,a.date); existingForMerge=null;
+        } else if(dayEntries.length===1){
+          targetKey=dayEntries[0].key; existingForMerge=dayEntries[0].entry; verschoben=true;
+        } else {
+          const namen=dayEntries.map(d=>{
+            const s=(state.baustellen||[]).find(b=>String(b.id)===String(d.entry.bsId));
+            const zt=d.entry.startzeit?(' '+d.entry.startzeit+(d.entry.endzeit?'–'+d.entry.endzeit:'')):'';
+            return (s?s.name:'?')+zt;
+          }).join(', ');
+          throw new Error(empName+' hat am '+a.date+' bereits mehrere Einsätze ('+namen+') – unklar, welcher nach "'+site.name+'" verschoben werden soll. Bitte den bisherigen Einsatz eindeutig benennen (z.B. per Baustellenname oder Zeit).');
+        }
+
+        // WICHTIG: Wird für einen bereits bestehenden Einsatz (an derselben
+        // Baustelle bzw. beim eindeutigen Verschieben) keine neue Zeit
+        // genannt, bleibt die bisher gespeicherte Zeit erhalten - sie wird
+        // NIE durch eine "nicht genannte" Zeit stillschweigend gelöscht.
+        // Bei einem NEUEN Einsatz (kein existingForMerge) wird nie eine Zeit
+        // erfunden.
+        const startzeit = startzeitRaw!==null ? startzeitRaw : (existingForMerge ? (existingForMerge.startzeit||null) : null);
+        const endzeit = endzeitRaw!==null ? endzeitRaw : (existingForMerge ? (existingForMerge.endzeit||null) : null);
+
+        // No-Op: nach Merge exakt derselbe Stand an derselben Baustelle -> nichts tun.
+        if(existingForMerge && String(existingForMerge.bsId)===String(site.id) && (existingForMerge.startzeit||null)===startzeit && (existingForMerge.endzeit||null)===endzeit){
           applied.push(empName+' ist am '+a.date+' bereits so bei '+site.name+' eingeplant – keine Änderung nötig');
         } else {
-          // Doppelbelegungsprüfung (ausser bei derselben Baustelle = Aktualisierung).
-          const conflict=gptEmployeeConflict(emp.id,a.date,startzeit,endzeit,site.id);
+          // Doppelbelegungsprüfung gegen ALLE ANDEREN Einsätze dieses Tages
+          // (der ggf. gerade aktualisierte/verschobene Eintrag selbst zählt
+          // nicht als Konflikt mit sich selbst).
+          const conflict=gptEmployeeConflict(emp.id,a.date,startzeit,endzeit,targetKey);
           if(conflict.conflict){
             if(conflict.ambiguous) throw new Error('Zeitliche Überschneidung für '+empName+' am '+a.date+' nicht ausschliessbar (unvollständige Zeitangaben) – bitte Zeiten klären');
             throw new Error('Zeitkonflikt: '+empName+' ist am '+a.date+' bereits anderweitig eingeplant (überschneidende Zeit)');
@@ -9820,17 +9946,18 @@ function gptExecuteActions(actions,originalMessage){
             }
           }
 
-          gptPlanAssign(emp,site,a.date,a.note||'',startzeit,endzeit,vehRef?vehRef.id:undefined,vehRef?vehRef.name:undefined);
+          gptPlanAssign(emp,site,a.date,a.note||'',startzeit,endzeit,vehRef?vehRef.id:undefined,vehRef?vehRef.name:undefined,targetKey);
 
           const zeitStr=startzeit?(' um '+startzeit+(endzeit?'–'+endzeit:' (offen bis)')):(endzeit?' bis '+endzeit:'');
           const vehStr=vehRef?(' – Fahrzeug: '+vehRef.name):'';
-          const auditText=((a.type==='move_employee')?'Mitarbeiter verschoben: ':'Mitarbeiter eingeplant: ')+empName+' → '+site.name+' am '+a.date+zeitStr+vehStr;
+          const aktionsWort = verschoben ? 'Mitarbeiter verschoben: ' : (existingForMerge ? 'Einsatz aktualisiert: ' : 'Mitarbeiter eingeplant: ');
+          const auditText=aktionsWort+empName+' → '+site.name+' am '+a.date+zeitStr+vehStr;
           gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
           applied.push(empName+' am '+a.date+' bei '+site.name+zeitStr+' eingeplant');
 
-          // Wenn WEDER jetzt genannt NOCH aus einer bestehenden Einplanung an
-          // derselben Baustelle bekannt ist, UND das Modell explizit "keine
-          // Zeit bekannt" signalisiert hat (a.time===null), zusätzlich einen
+          // Wenn WEDER jetzt genannt NOCH aus einem bestehenden Einsatz
+          // bekannt ist, UND das Modell explizit "keine Zeit bekannt"
+          // signalisiert hat (a.time===null), zusätzlich einen
           // Klärungs-Arbeits-To-do anlegen (Ziel 1: "offene" Startzeit).
           if(!startzeit && !endzeit && a.time===null && a.end_time===null){
             const clarifyText='Startzeit '+empName+' für '+site.name+' am '+a.date+' noch klären.';
@@ -9842,24 +9969,51 @@ function gptExecuteActions(actions,originalMessage){
       } else if(a.type==='remove_employee_assignment'){
         const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
         if(!a.date) throw new Error('Datum fehlt');
-        const key='ma'+emp.id+'_'+a.date;
-        const existing=((state.plan||{})[a.date]||{})[key];
-        if(!existing) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden');
-        const site=a.site_id||a.site_name ? gptFindSite(a) : null;
-        if(site && String(existing.bsId)!==String(site.id)) throw new Error('Bestehende Einplanung betrifft eine andere Baustelle');
         const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
-        const oldSite=(state.baustellen||[]).find(b=>String(b.id)===String(existing.bsId));
-        delete state.plan[a.date][key];
+        const dayEntries=gptEmployeeDayEntries(emp.id,a.date);
+        if(!dayEntries.length) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden');
+
+        let target=null;
+        if(a.site_id||a.site_name){
+          const site=gptFindSite(a); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
+          target=dayEntries.find(d=>String(d.entry.bsId)===String(site.id));
+          if(!target) throw new Error('Für '+empName+' existiert am '+a.date+' keine Einplanung bei '+site.name);
+        } else if(dayEntries.length===1){
+          target=dayEntries[0];
+        } else {
+          const namen=dayEntries.map(d=>{
+            const s=(state.baustellen||[]).find(b=>String(b.id)===String(d.entry.bsId));
+            const zt=d.entry.startzeit?(' '+d.entry.startzeit+(d.entry.endzeit?'–'+d.entry.endzeit:'')):'';
+            return (s?s.name:'?')+zt;
+          }).join(', ');
+          throw new Error(empName+' hat am '+a.date+' mehrere Einsätze ('+namen+') – unklar, welcher entfernt werden soll. Bitte die betroffene Baustelle nennen.');
+        }
+
+        const oldSite=(state.baustellen||[]).find(b=>String(b.id)===String(target.entry.bsId));
+        delete state.plan[a.date][target.key];
         const auditText=empName+' aus '+(oldSite?oldSite.name:'Einsatz')+' am '+a.date+' entfernt.';
-        gptAudit(auditText,existing.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
-        applied.push(empName+' am '+a.date+' aus der Planung entfernt');
+        gptAudit(auditText,target.entry.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
+        applied.push(empName+' am '+a.date+' aus der Planung entfernt'+(oldSite?' ('+oldSite.name+')':''));
 
       } else if(a.type==='assign_vehicle'){
         const emp=gptFindEmployee(a); if(!emp) throw new Error('Mitarbeiter nicht eindeutig gefunden');
         if(!a.date) throw new Error('Datum fehlt');
-        const key='ma'+emp.id+'_'+a.date;
-        const existing=((state.plan||{})[a.date]||{})[key];
-        if(!existing||existing.bsId==null) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden – zuerst einplanen');
+        const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
+        const dayEntries=gptEmployeeDayEntries(emp.id,a.date);
+        if(!dayEntries.length) throw new Error('Keine Einplanung für diesen Mitarbeiter/Tag gefunden – zuerst einplanen');
+
+        let target=null;
+        if(a.site_id||a.site_name){
+          const site=gptFindSite(a);
+          if(site) target=dayEntries.find(d=>String(d.entry.bsId)===String(site.id));
+          if(!target) throw new Error('Für '+empName+' existiert am '+a.date+' keine passende Einplanung für diese Baustelle');
+        } else if(dayEntries.length===1){
+          target=dayEntries[0];
+        } else {
+          throw new Error(empName+' hat am '+a.date+' mehrere Einsätze – bitte die betroffene Baustelle nennen, für welche das Fahrzeug gilt.');
+        }
+
+        const existing=target.entry;
         const vehRef=gptResolveVehicleRef(a); if(!vehRef) throw new Error('Fahrzeug nicht eindeutig gefunden');
         const startzeit=gptNormTime(a.time)!==null?gptNormTime(a.time):(existing.startzeit||null);
         const endzeit=gptNormTime(a.end_time)!==null?gptNormTime(a.end_time):(existing.endzeit||null);
@@ -9871,8 +10025,7 @@ function gptExecuteActions(actions,originalMessage){
           }
         }
         const site=(state.baustellen||[]).find(b=>String(b.id)===String(existing.bsId));
-        gptPlanAssign(emp,site||{id:existing.bsId,farbeHex:existing.farbeHex},a.date,undefined,startzeit,endzeit,vehRef.id,vehRef.name);
-        const empName=((emp.vorname||'')+' '+(emp.nachname||'')).trim();
+        gptPlanAssign(emp,site||{id:existing.bsId,farbeHex:existing.farbeHex},a.date,undefined,startzeit,endzeit,vehRef.id,vehRef.name,target.key);
         const auditText='Fahrzeug für '+empName+' am '+a.date+(site?' bei '+site.name:'')+' geändert auf: '+vehRef.name;
         gptAudit(auditText,existing.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Fahrzeug '+vehRef.name+' für '+empName+' am '+a.date+' eingetragen');
