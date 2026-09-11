@@ -1570,6 +1570,7 @@
     </div>
     <input type="hidden" id="buchungs-menu-maId">
     <input type="hidden" id="buchungs-menu-datum">
+    <input type="hidden" id="buchungs-menu-key">
 
     <!-- Baustellen-Info (nur wenn Eintrag vorhanden) -->
     <div id="buchungs-bs-info" style="display:none;margin-bottom:14px;border-radius:10px;overflow:hidden">
@@ -5228,7 +5229,7 @@ function renderWochenplan() {
       allDates.forEach((d,i)=>{
         const ds=fmtDate(d), isSo=i===6, isT=ds===today;
         const inRange=(!bs.von||ds>=bs.von)&&(!bs.bis||ds<=bs.bis);
-        const done=inRange?monteure.filter(m=>state.plan[ds]?.['ma'+m.id+'_'+ds]?.bsId===bs.id).length:0;
+        const done=inRange?monteure.filter(m=>gptEmployeeDayEntries(m.id,ds).some(en=>en.entry.bsId===bs.id)).length:0;
         const bg=isT?'background:rgba(232,184,75,.06);':isSo?'background:rgba(42,48,69,.4);':'background:var(--surface2);';
         html+='<td style="'+bg+'text-align:center;padding:3px;border-bottom:2px solid '+hex+'44">';
         if(inRange) html+='<div style="display:inline-flex;align-items:center;justify-content:center;'
@@ -5297,7 +5298,12 @@ function renderWochenplan() {
         // Suche erste Baustelle dieser Woche für diesen Monteur
         for(const d of allDates){
           const ds=fmtDate(d);
-          const e=state.plan[ds]?.['ma'+m.id+'_'+ds];
+          const dayEntriesSorted=gptEmployeeDayEntries(m.id,ds).slice().sort((x,y)=>{
+            const xs=x.entry.startzeit, ys=y.entry.startzeit;
+            if(xs&&ys) return xs<ys?-1:xs>ys?1:0;
+            if(xs&&!ys) return -1; if(!xs&&ys) return 1; return 0;
+          });
+          const e=dayEntriesSorted[0]?.entry;
           if(e?.bsId){
             const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
             if(bs?.startzeit && bs?.fahrtzeitMin){
@@ -5324,25 +5330,37 @@ function renderWochenplan() {
         const ds=fmtDate(d), isT=ds===today, isSo=i===6;
         const bg=isT?'background:rgba(232,184,75,.04);':isSo?'background:rgba(42,48,69,.3);':'';
         const planKey='ma'+m.id+'_'+ds;
-        const e=state.plan[ds]?.[planKey];
+        // NEU: ALLE Einsätze dieses Mitarbeiters an diesem Tag (nicht nur
+        // der Basis-Key) - seit Update 3 kann es mehrere gleichzeitige,
+        // nicht überlappende Einsätze geben. Chronologisch sortiert
+        // (Einsätze ohne Startzeit zuletzt).
+        const dayEntries=gptEmployeeDayEntries(m.id,ds).slice().sort((x,y)=>{
+          const xs=x.entry.startzeit, ys=y.entry.startzeit;
+          if(xs&&ys) return xs<ys?-1:xs>ys?1:0;
+          if(xs&&!ys) return -1; if(!xs&&ys) return 1; return 0;
+        });
         // Auch Status-Eintrag prüfen
         const statusE=state.plan[ds]?.['status_ma'+m.id];
 
-        if(e?.bsId){
-          const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
-          const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
-          const label=bs?bs.name:'?';
-          const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
-          const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
-          const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
-          const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
+        if(dayEntries.length){
+          const cellsHtml=dayEntries.map(({key,entry:e})=>{
+            const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
+            const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
+            const label=bs?bs.name:'?';
+            const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
+            const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
+            const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
+            const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
+            return '<div class="wp-cell" draggable="true" '
+              +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
+              +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
+              +'onclick="wpMaCellClick('+m.id+',\''+ds+'\',\''+key+'\')">'
+              +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
+              +'</div>';
+          }).join('');
           html+='<td style="'+bg+'padding:2px">'
-            +'<div class="wp-cell" draggable="true" '
-            +'data-key="'+planKey+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
-            +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:28px;cursor:grab" '
-            +'onclick="wpMaCellClick('+m.id+',\''+ds+'\')">'
-            +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
-            +'</div></td>';
+            +'<div style="display:flex;flex-direction:column;gap:2px">'+cellsHtml+'</div>'
+            +'</td>';
         } else if(statusE?.status){
           const sHex=statusE.farbeHex||statusHex(statusE.status), sTc=textCol(sHex);
           html+='<td style="'+bg+'padding:2px">'
@@ -5675,6 +5693,10 @@ function wpSwapClick(maId) {
 
 
 let wpCurrentRowKey=null, wpCurrentDatum=null, wpCurrentBsId=null, wpCurrentMaId=null;
+// NEU: welcher konkrete Einsatz-Key (bei mehreren gleichzeitigen Einsätzen)
+// gerade im Zell-Modal bearbeitet wird. null = neuer/erster Einsatz
+// (bisheriges Verhalten).
+let wpCurrentEditKey=null;
 
 document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
@@ -5694,6 +5716,7 @@ function wpPosCellClick(bsId, posIdx, datum) {
   const rowKey='bs'+bsId+'_p'+posIdx;
   wpCurrentMaId=null; wpCurrentDatum=datum;
   wpCurrentBsId=bsId; wpCurrentRowKey=rowKey; wpSelStatus=null;
+  wpCurrentEditKey=null;
   const d=new Date(datum+'T12:00');
   const TG=['So','Mo','Di','Mi','Do','Fr','Sa'];
   document.getElementById('zell-modal-title').textContent=
@@ -5722,7 +5745,7 @@ function wpPosCellClick(bsId, posIdx, datum) {
   document.getElementById('zell-modal').classList.add('open');
 }
 
-function wpMaCellClick(maId, datum) {
+function wpMaCellClick(maId, datum, key) {
   maId = parseInt(maId);
 
   // Wenn Tausch-Modus aktiv: abbrechen
@@ -5768,15 +5791,19 @@ function wpMaCellClick(maId, datum) {
   }
 
   // Zeige Auswahl-Menü: Einzelbuchung oder Block
-  showBuchungsMenu(maId, datum);
+  showBuchungsMenu(maId, datum, key);
 }
 
 // ── BUCHUNGS-MENÜ ───────────────────────────────────────
-function showBuchungsMenu(maId, datum) {
+function showBuchungsMenu(maId, datum, key) {
   maId = parseInt(maId);
-  // Bestehenden Eintrag + Baustelle suchen (Schema: ma{maId}_{datum})
+  // Bestehenden Eintrag + Baustelle suchen (Schema: ma{maId}_{datum}).
+  // NEU: wenn beim Klick ein konkreter Key mitgegeben wurde (mehrere
+  // gleichzeitige Einsätze), genau DIESEN Eintrag verwenden statt
+  // pauschal den Basis-Key - sonst würde bei mehreren Einsätzen immer nur
+  // der erste angezeigt/bearbeitet.
   let hasEntry=false, entryBs=null, entryStatus=null;
-  const planKey = 'ma'+maId+'_'+datum;
+  const planKey = key || ('ma'+maId+'_'+datum);
   const e = state.plan[datum]?.[planKey];
   if (e?.bsId) {
     hasEntry = true;
@@ -5790,10 +5817,12 @@ function showBuchungsMenu(maId, datum) {
   const m=(state.mitarbeiter||[]).find(x=>x.id===maId);
   const d=new Date(datum+'T12:00');
   const TG=['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const zeitSuffix = e?.startzeit ? (' · '+e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
   document.getElementById('buchungs-menu-title').textContent =
-    (m?.vorname||'')+' '+(m?.nachname||'')+' · '+TG[d.getDay()]+' '+fmtDE(d);
+    (m?.vorname||'')+' '+(m?.nachname||'')+' · '+TG[d.getDay()]+' '+fmtDE(d)+zeitSuffix;
   document.getElementById('buchungs-menu-maId').value = maId;
   document.getElementById('buchungs-menu-datum').value = datum;
+  document.getElementById('buchungs-menu-key').value = planKey;
   document.getElementById('buchungs-menu-loeschen').style.display  = hasEntry?'':'none';
 
   // Baustellen-Info anzeigen
@@ -5862,9 +5891,10 @@ function wpMaStartMove(maId, datum) {
   toast('Verschieben','Ziel klicken','⇅');
 }
 
-function wpMaOpenModal(maId, datum) {
+function wpMaOpenModal(maId, datum, key) {
   wpCurrentMaId=parseInt(maId); wpCurrentDatum=datum;
   wpCurrentBsId=null; wpCurrentRowKey=null; wpSelStatus=null;
+  wpCurrentEditKey=key||null;
 
   const m  = (state.mitarbeiter||[]).find(x=>x.id===parseInt(maId));
   const d  = new Date(datum+'T12:00');
@@ -5874,24 +5904,40 @@ function wpMaOpenModal(maId, datum) {
   document.getElementById('zell-notiz').value='';
   document.getElementById('zell-monteur-wrap').style.display='none';
 
-  // Aktuellen Eintrag suchen
-  for(const bs of (state.baustellen||[])){
-    for(let p=0;p<(bs.positionen||1);p++){
-      const rk='bs'+bs.id+'_p'+p;
-      const e=state.plan[datum]?.[rk];
-      if(e?.maId===parseInt(maId)){
-        wpCurrentBsId=bs.id; wpCurrentRowKey=rk;
-        document.getElementById('zell-notiz').value=e.notiz||''; break;
-      }
+  if(wpCurrentEditKey && state.plan[datum]?.[wpCurrentEditKey]){
+    // NEU: konkreten, über die Zelle ausgewählten Einsatz direkt vorbelegen
+    // - wichtig bei mehreren gleichzeitigen Einsätzen, damit genau der
+    // angeklickte (nicht irgendein passender) vorausgewählt wird.
+    const e=state.plan[datum][wpCurrentEditKey];
+    if(e.status){
+      wpSelStatus=e.status;
+      document.getElementById('zell-notiz').value=e.notiz||'';
+    } else if(e.bsId!=null){
+      wpCurrentBsId=e.bsId;
+      document.getElementById('zell-notiz').value=e.notiz||'';
     }
-    if(wpCurrentBsId) break;
-  }
-  if(!wpCurrentBsId){
-    for(const rk of Object.keys(state.plan[datum]||{})){
-      const e=state.plan[datum][rk];
-      if(e?.maId===parseInt(maId)&&e?.status){
-        wpCurrentRowKey=rk; wpSelStatus=e.status;
-        document.getElementById('zell-notiz').value=e.notiz||''; break;
+  } else {
+    // Aktuellen Eintrag suchen (bisheriges Verhalten - nur wenn KEIN
+    // konkreter Key übergeben wurde, z.B. beim Anlegen eines neuen/ersten
+    // Einsatzes über die leere Zelle).
+    for(const bs of (state.baustellen||[])){
+      for(let p=0;p<(bs.positionen||1);p++){
+        const rk='bs'+bs.id+'_p'+p;
+        const e=state.plan[datum]?.[rk];
+        if(e?.maId===parseInt(maId)){
+          wpCurrentBsId=bs.id; wpCurrentRowKey=rk;
+          document.getElementById('zell-notiz').value=e.notiz||''; break;
+        }
+      }
+      if(wpCurrentBsId) break;
+    }
+    if(!wpCurrentBsId){
+      for(const rk of Object.keys(state.plan[datum]||{})){
+        const e=state.plan[datum][rk];
+        if(e?.maId===parseInt(maId)&&e?.status){
+          wpCurrentRowKey=rk; wpSelStatus=e.status;
+          document.getElementById('zell-notiz').value=e.notiz||''; break;
+        }
       }
     }
   }
@@ -6052,15 +6098,27 @@ function saveZelle() {
   if(wpCurrentBsId && wpCurrentMaId) {
     const bs=(state.baustellen||[]).find(b=>b.id===wpCurrentBsId);
     const hex=getHex(bs);
-    // Neuer Key: ma{maId}_{datum}
-    const planKey='ma'+wpCurrentMaId+'_'+wpCurrentDatum;
     if(!state.plan[wpCurrentDatum]) state.plan[wpCurrentDatum]={};
-    // Alten Eintrag löschen falls vorhanden
-    Object.keys(state.plan[wpCurrentDatum]).forEach(k=>{
-      if(state.plan[wpCurrentDatum][k]?.maId===wpCurrentMaId) delete state.plan[wpCurrentDatum][k];
-    });
+    // NEU: Wird ein konkreter bestehender Einsatz bearbeitet (mehrere
+    // gleichzeitige Einsätze), exakt diesen Key verwenden und andere
+    // Einsätze desselben Mitarbeiters an diesem Tag NICHT anfassen. Beim
+    // Anlegen eines neuen/ersten Einsatzes (kein wpCurrentEditKey) gilt
+    // weiterhin das bisherige Verhalten: alten Basis-Eintrag ersetzen.
+    const planKey = wpCurrentEditKey || ('ma'+wpCurrentMaId+'_'+wpCurrentDatum);
+    const prev = state.plan[wpCurrentDatum][planKey]||{};
+    if(!wpCurrentEditKey){
+      // Alten Eintrag löschen falls vorhanden
+      Object.keys(state.plan[wpCurrentDatum]).forEach(k=>{
+        if(state.plan[wpCurrentDatum][k]?.maId===wpCurrentMaId) delete state.plan[wpCurrentDatum][k];
+      });
+    }
+    // Start-/Endzeit und Fahrzeug des bearbeiteten Eintrags bleiben
+    // erhalten (nicht Teil dieses Modals) statt beim Speichern verloren
+    // zu gehen.
     state.plan[wpCurrentDatum][planKey]={maId:wpCurrentMaId,bsId:wpCurrentBsId,farbeHex:hex,
-      notiz:document.getElementById('zell-notiz').value.trim()};
+      notiz:document.getElementById('zell-notiz').value.trim(),
+      startzeit:prev.startzeit??null, endzeit:prev.endzeit??null,
+      fahrzeugId:prev.fahrzeugId??null, fahrzeugName:prev.fahrzeugName||''};
     const ma=(state.mitarbeiter||[]).find(m=>m.id===wpCurrentMaId);
     save(); toast('Gespeichert',(ma?.vorname||'')+' -> '+(bs?.name||''),'✅');
   } else if(wpSelStatus && wpCurrentMaId) {
@@ -6076,9 +6134,15 @@ function clearZelle() {
   if(!wpCurrentDatum||!wpCurrentMaId) return closeZellModal();
   const ds=wpCurrentDatum;
   if(state.plan[ds]){
-    Object.keys(state.plan[ds]).forEach(rk=>{
-      if(state.plan[ds][rk]?.maId===wpCurrentMaId) delete state.plan[ds][rk];
-    });
+    if(wpCurrentEditKey){
+      // NEU: nur den konkret bearbeiteten Einsatz löschen - andere
+      // gleichzeitige Einsätze desselben Mitarbeiters bleiben erhalten.
+      delete state.plan[ds][wpCurrentEditKey];
+    } else {
+      Object.keys(state.plan[ds]).forEach(rk=>{
+        if(state.plan[ds][rk]?.maId===wpCurrentMaId) delete state.plan[ds][rk];
+      });
+    }
     save();
   }
   closeZellModal(); renderWochenplan();
@@ -6088,6 +6152,7 @@ function closeZellModal(){
   document.getElementById('zell-modal').classList.remove('open');
   wpSelMaId=null; wpSelStatus=null;
   wpCurrentRowKey=null; wpCurrentDatum=null; wpCurrentBsId=null; wpCurrentMaId=null;
+  wpCurrentEditKey=null;
 }
 
 function statusHex(s){
@@ -7084,7 +7149,8 @@ function buchungEinzel() {
   document.getElementById('buchungs-menu').classList.remove('open');
   const maId  = parseInt(document.getElementById('buchungs-menu-maId').value);
   const datum = document.getElementById('buchungs-menu-datum').value;
-  wpMaOpenModal(maId, datum);
+  const key   = document.getElementById('buchungs-menu-key').value || null;
+  wpMaOpenModal(maId, datum, key);
 }
 
 function buchungBlock() {
@@ -7099,7 +7165,14 @@ function buchungLoeschen() {
   document.getElementById('buchungs-menu').classList.remove('open');
   const maId  = parseInt(document.getElementById('buchungs-menu-maId').value);
   const datum = document.getElementById('buchungs-menu-datum').value;
-  if(state.plan?.[datum]){
+  const key   = document.getElementById('buchungs-menu-key').value;
+  // NEU: löscht gezielt NUR den konkret ausgewählten Einsatz/Status-Eintrag
+  // (wichtig bei mehreren gleichzeitigen Einsätzen desselben Mitarbeiters).
+  // Fallback (kein bekannter Key) entspricht dem bisherigen Verhalten.
+  if(key && state.plan?.[datum]?.[key]){
+    delete state.plan[datum][key];
+    save(); renderWochenplan();
+  } else if(state.plan?.[datum]){
     Object.keys(state.plan[datum]).forEach(rk=>{
       if(state.plan[datum][rk]?.maId===maId) delete state.plan[datum][rk];
     });
