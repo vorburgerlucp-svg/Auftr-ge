@@ -203,16 +203,29 @@
   <div class="login-box">
     <h1>⬡ LagerTool</h1>
     <p class="subtitle">Monteur-Ansicht</p>
-    <div class="sp-wrap">
-      <label>Name</label>
-      <input type="text" id="login-name" placeholder="Name eingeben…" autocomplete="off"
-        onfocus="loginPickerOpen()" onclick="loginPickerOpen()" oninput="loginPickerFilter()">
-      <input type="hidden" id="login-name-id" value="">
+    <div id="login-biometric-area"></div>
+    <div id="login-form-fields">
+      <div class="sp-wrap">
+        <label>Name</label>
+        <input type="text" id="login-name" placeholder="Name eingeben…" autocomplete="off"
+          onfocus="loginPickerOpen()" onclick="loginPickerOpen()" oninput="loginPickerFilter()">
+        <input type="hidden" id="login-name-id" value="">
+      </div>
+      <label>PIN</label>
+      <input type="password" id="login-pin" maxlength="4" inputmode="numeric" placeholder="••••">
+      <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
+      <button class="btn btn-primary btn-block" onclick="doLogin()">Anmelden</button>
     </div>
-    <label>PIN</label>
-    <input type="password" id="login-pin" maxlength="4" inputmode="numeric" placeholder="••••">
-    <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
-    <button class="btn btn-primary btn-block" onclick="doLogin()">Anmelden</button>
+  </div>
+</div>
+
+<!-- WEBAUTHN-EINRICHTUNGS-PROMPT (nach erstem PIN-Login) -->
+<div class="modal-overlay" id="webauthn-modal">
+  <div class="modal-box" style="max-width:340px">
+    <h1 style="font-size:16px;margin-bottom:6px">🔒 Gesichtserkennung einrichten?</h1>
+    <p class="subtitle" id="webauthn-modal-text" style="margin-bottom:18px;text-align:left"></p>
+    <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="webauthnModalYes()">Einrichten</button>
+    <button class="btn btn-block" onclick="webauthnModalNo()">Nicht jetzt</button>
   </div>
 </div>
 
@@ -390,6 +403,7 @@ let dbRef = null;
 let suppressListener = false;
 let hasReceivedFirebaseSync = false;
 let currentLoginUser = null;
+let webauthnPlatformOk = false; // Gerät/Browser unterstützt Face ID / Fingerabdruck via WebAuthn
 let cart = []; // [{artikelId, menge}]
 let bestSelKat = '';
 let bestTab = 'bestellen';
@@ -403,7 +417,9 @@ const safeStorage = (() => {
   try { localStorage.setItem('__t__','1'); localStorage.removeItem('__t__'); } catch(e) { useLS = false; }
   return {
     getItem: k => useLS ? localStorage.getItem(k) : (mem[k] ?? null),
-    setItem: (k,v) => { if (useLS) { try { localStorage.setItem(k,v); } catch(e){ useLS=false; mem[k]=v; } } else mem[k]=v; }
+    setItem: (k,v) => { if (useLS) { try { localStorage.setItem(k,v); } catch(e){ useLS=false; mem[k]=v; } } else mem[k]=v; },
+    removeItem: k => { if (useLS) { try { localStorage.removeItem(k); } catch(e){} } delete mem[k]; },
+    keys: prefix => (useLS ? Object.keys(localStorage) : Object.keys(mem)).filter(k => k.startsWith(prefix))
   };
 })();
 
@@ -631,6 +647,11 @@ function startFirebaseListener() {
           markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAllIfLoggedIn();
+          // state.mitarbeiter ist jetzt geladen - Login-Bildschirm ggf. neu
+          // rendern, damit ein bereits auf diesem Gerät eingerichteter
+          // Gesichtserkennungs-Login sichtbar wird (beim allerersten Aufruf
+          // vor dem Firebase-Sync war state.mitarbeiter noch leer).
+          if (!currentLoginUser && typeof renderLoginBiometricUI === 'function') renderLoginBiometricUI();
         }
         setSyncStatus('ok','Verbunden');
       } catch(e2) { console.error('[Firebase] parse error', e2); setSyncStatus('err','Fehler'); }
@@ -709,6 +730,9 @@ function doLogin() {
   currentLoginUser = m;
   try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
   finishLogin();
+  // Nur nach einem manuellen PIN-Login anbieten (nicht bei Auto-Login/Session-
+  // Wiederherstellung, nicht wenn gerade schon per Gesichtserkennung angemeldet).
+  maybeOfferWebauthnSetup(m);
 }
 
 function doLogout() {
@@ -727,6 +751,149 @@ function finishLogin() {
   updateMeldungenBadge();
   updateVerrechnungReminder();
 }
+
+// ════════════════════════════════════════════════════════
+// GESICHTSERKENNUNG / BIOMETRIE STATT PIN (WebAuthn)
+// ════════════════════════════════════════════════════════
+// Kein eigener Gesichtsscan - das ist die Browser-Schnittstelle (WebAuthn),
+// die Face ID / Fingerabdruck / Android-Biometrie des Geräts abfragt. Die
+// Zugangsdaten sind GERÄTEGEBUNDEN (in diesem localStorage gespeichert) -
+// auf einem neuen/anderen Gerät braucht es weiterhin den PIN. Der PIN
+// funktioniert immer als Fallback, es wird nichts ersetzt/gelöscht.
+const WEBAUTHN_CRED_PREFIX = 'monteur_webauthn_cred_';
+const WEBAUTHN_ASKED_PREFIX = 'monteur_webauthn_asked_';
+
+function bufToB64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64urlToBuf(str) {
+  str = str.replace(/-/g,'+').replace(/_/g,'/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+async function webauthnPlatformAvailable() {
+  try {
+    if (!window.PublicKeyCredential || !navigator.credentials) return false;
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch(e) { return false; }
+}
+// Alle auf DIESEM Gerät eingerichteten Mitarbeiter-Logins (kann mehrere geben,
+// falls z.B. ein Firmen-Tablet von mehreren Monteuren genutzt wird).
+function findStoredBiometricLogins() {
+  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
+    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
+    const credB64 = safeStorage.getItem(k);
+    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
+    return (m && credB64) ? {maId, credB64, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
+  }).filter(Boolean);
+}
+
+async function webauthnRegister(m) {
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = new TextEncoder().encode('ma_'+m.id);
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge,
+      rp: { name: 'LagerTool Monteur' },
+      user: { id: userId, name: (m.vorname+' '+(m.nachname||'')).trim(), displayName: (m.vorname+' '+(m.nachname||'')).trim() },
+      pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'preferred' },
+      timeout: 60000,
+      attestation: 'none'
+    }});
+    if (!cred) throw new Error('Keine Zugangsdaten erhalten');
+    safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
+    safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
+    // Leichtes Audit-Feld in den geteilten Mitarbeiter-Daten - rein informativ,
+    // ersetzt nichts. Der eigentliche Schlüssel bleibt lokal auf dem Gerät.
+    m.biometricSetupAm = new Date().toISOString();
+    save();
+    toast('Eingerichtet', 'Gesichtserkennung/Biometrie ist ab jetzt auf diesem Gerät aktiv.', '🔒');
+    renderLoginBiometricUI();
+    return true;
+  } catch(e) {
+    console.warn('WebAuthn register error', e);
+    toast('Nicht eingerichtet', 'Gesichtserkennung konnte nicht eingerichtet werden.', '⚠️');
+    return false;
+  }
+}
+
+function webauthnRemove(maId) {
+  safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+maId);
+  toast('Entfernt', 'Gesichtserkennung wurde für dieses Gerät deaktiviert. PIN funktioniert weiterhin.', '🔓');
+  renderLoginBiometricUI();
+  if (document.getElementById('page-profil')?.classList.contains('active')) renderProfil();
+}
+
+async function webauthnLoginAttempt(entry) {
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge,
+      allowCredentials: [{ id: b64urlToBuf(entry.credB64), type:'public-key' }],
+      userVerification: 'required',
+      timeout: 60000
+    }});
+    if (!assertion) throw new Error('Keine Bestätigung erhalten');
+    const m = (state.mitarbeiter||[]).find(x => x.id === entry.maId);
+    if (!m) throw new Error('Mitarbeiter nicht gefunden');
+    document.getElementById('login-error').style.display = 'none';
+    currentLoginUser = m;
+    try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
+    finishLogin();
+  } catch(e) {
+    console.warn('WebAuthn login error', e);
+    const errEl = document.getElementById('login-error');
+    showLoginPinForm();
+    if (errEl) { errEl.textContent = 'Gesichtserkennung fehlgeschlagen – bitte PIN verwenden.'; errEl.style.display = 'block'; }
+  }
+}
+
+function renderLoginBiometricUI() {
+  const area = document.getElementById('login-biometric-area');
+  if (!area) return;
+  const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
+  window._loginBiometricEntries = entries;
+  if (!entries.length) { area.innerHTML = ''; return; }
+  area.innerHTML = entries.map((e,i) => `<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="webauthnLoginAttempt(window._loginBiometricEntries[${i}])">🆔 ${entries.length>1 ? e.name : 'Als '+e.name+' mit Gesichtserkennung anmelden'}</button>`).join('')
+    + `<div style="text-align:center;margin-bottom:14px"><a href="#" onclick="showLoginPinForm();return false" style="color:var(--muted);font-size:12px">Stattdessen PIN verwenden</a></div>`;
+  document.getElementById('login-form-fields').classList.add('hidden');
+}
+function showLoginPinForm() {
+  document.getElementById('login-form-fields').classList.remove('hidden');
+}
+
+function maybeOfferWebauthnSetup(m) {
+  if (!webauthnPlatformOk) return;
+  if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return; // auf diesem Gerät schon eingerichtet
+  if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return; // schon einmal gefragt/abgelehnt
+  document.getElementById('webauthn-modal-text').textContent =
+    'Möchtest du dich ab jetzt auf diesem Gerät mit Gesichtserkennung/Fingerabdruck statt mit PIN anmelden?';
+  window._webauthnModalUser = m;
+  document.getElementById('webauthn-modal').classList.add('open');
+}
+function webauthnModalYes() {
+  const m = window._webauthnModalUser;
+  document.getElementById('webauthn-modal').classList.remove('open');
+  if (m) webauthnRegister(m);
+}
+function webauthnModalNo() {
+  const m = window._webauthnModalUser;
+  if (m) safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
+  document.getElementById('webauthn-modal').classList.remove('open');
+}
+
+// Einmalig beim Laden prüfen, ob das Gerät Face ID/Fingerabdruck unterstützt.
+(async () => {
+  webauthnPlatformOk = await webauthnPlatformAvailable();
+  renderLoginBiometricUI();
+})();
 
 // Auto-Login bei bestehender Session
 window.addEventListener('DOMContentLoaded', () => {
@@ -1756,7 +1923,22 @@ function renderProfil() {
     {key:'rueckmeldung', label:'Rückmeldung'},
   ];
 
-  let html = `<div class="card">
+  let html = '';
+  // ── Sicherheit: Gesichtserkennung/Biometrie für dieses Gerät ──
+  if (webauthnPlatformOk) {
+    const eingerichtet = !!safeStorage.getItem(WEBAUTHN_CRED_PREFIX+ma.id);
+    html += `<div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">🔒 Sicherheit</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        Gesichtserkennung/Fingerabdruck auf diesem Gerät: <b style="color:${eingerichtet?'var(--green)':'var(--muted)'}">${eingerichtet?'Eingerichtet ✅':'Nicht eingerichtet'}</b>
+      </div>
+      ${eingerichtet
+        ? `<button class="btn btn-danger btn-sm" onclick="webauthnRemove(${ma.id})">Auf diesem Gerät entfernen</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="webauthnRegister(currentLoginUser)">Jetzt einrichten</button>`}
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">Gilt nur für dieses Gerät. Der PIN funktioniert immer zusätzlich.</div>
+    </div>`;
+  }
+  html += `<div class="card">
     <div style="font-weight:700;font-size:14px;margin-bottom:10px">⭐ Meine Bewertungen</div>`;
   if (!eintraege.length) {
     html += '<div style="color:var(--muted);font-size:13px">Noch keine Bewertungen vorhanden.</div>';
