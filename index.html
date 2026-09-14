@@ -969,11 +969,14 @@
     </div>
     <div class="form-row cols-2">
       <div><label>Eintrittsdatum</label><input type="date" id="ma-eintritt"></div>
-      <div><label>Funktion / Rolle</label><input type="text" id="ma-funktion" placeholder="z.B. Monteur"></div>
+      <div><label>🎂 Geburtsdatum</label><input type="date" id="ma-geburtsdatum"></div>
     </div>
     <div class="form-row cols-2">
-      <div><label>🔐 PIN (4-stellig für Monteur-App)</label><input type="password" id="ma-pin" inputmode="numeric" maxlength="4" placeholder="z.B. 1234" style="letter-spacing:4px;font-size:18px"></div>
+      <div><label>Funktion / Rolle</label><input type="text" id="ma-funktion" placeholder="z.B. Monteur"></div>
       <div><label>Startzeit</label><input type="text" id="ma-startzeit" placeholder="z.B. 06:30"></div>
+    </div>
+    <div class="form-row cols-1">
+      <div><label>🔐 PIN (4-stellig für Monteur-App)</label><input type="password" id="ma-pin" inputmode="numeric" maxlength="4" placeholder="z.B. 1234" style="letter-spacing:4px;font-size:18px;max-width:160px"></div>
     </div>
     <div class="form-row cols-1">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,184,75,.06);border:1px solid rgba(232,184,75,.2);border-radius:8px">
@@ -2569,7 +2572,16 @@ async function doLogout() {
   try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
   location.reload();
 }
-function save() {
+// save() bleibt für alle bestehenden Aufrufer 100% wie bisher nutzbar
+// (Fire-and-forget, kein await nötig). NEU: save() gibt zusätzlich ein
+// Promise<{ok, verified?, error?}> zurück, das ein Aufrufer, der eine
+// ECHTE Bestätigung braucht (z.B. der GPT-Assistent), awaiten kann.
+// opts.verify=true liest den geschriebenen Datensatz nach dem Schreiben
+// aus Firebase neu ein und vergleicht ihn mit dem, was geschrieben wurde
+// ("Schreiben → neu lesen → kontrollieren", statt sich blind auf ein
+// aufgelöstes .set()-Promise zu verlassen).
+function save(opts) {
+  const doVerify = !!(opts && opts.verify);
   state._ts = Date.now();
   // localStorage: nur schlanke Daten (ohne base64-Docs) – localStorage hat ~5MB Limit,
   // die Docs allein sind ~29MB. Docs werden separat in IndexedDB gespeichert.
@@ -2581,16 +2593,38 @@ function save() {
   if (dbRef && hasReceivedFirebaseSync) {
     try {
       suppressListener = true;
-      pendingSavePromise = dbRef.set(slimJson).then(() => showSyncIndicator('↑ Sync'))
-        .catch(e => { console.warn('Firebase write error', e); suppressListener = false; })
+      const p = dbRef.set(slimJson).then(async () => {
+          showSyncIndicator('↑ Sync');
+          if (!doVerify) return {ok:true};
+          // Verifikation: den soeben geschriebenen Datensatz aus Firebase
+          // neu laden und mit dem gesendeten JSON vergleichen. Weicht er ab,
+          // hat zwischenzeitlich jemand/etwas anderes überschrieben - dann
+          // ist unser Schreibvorgang NICHT mehr zuverlässig der aktuelle Stand.
+          try {
+            const snap = await dbRef.once('value');
+            const persisted = snap.val();
+            if (persisted === slimJson) return {ok:true, verified:true};
+            return {ok:false, error:new Error('Nach dem Schreiben gelesener Datensatz weicht ab (evtl. zeitgleiche Änderung durch jemand anderen)')};
+          } catch(readErr) {
+            // Schreiben war laut Firebase erfolgreich, nur die Kontroll-Leseoperation
+            // schlug fehl - als unsicher (nicht verifiziert), aber nicht als Fehlschlag werten.
+            return {ok:true, verified:false, verifyError:readErr};
+          }
+        })
+        .catch(e => { console.warn('Firebase write error', e); suppressListener = false; return {ok:false, error:e}; })
         .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
-    } catch(e) { suppressListener = false; }
+      pendingSavePromise = p;
+      return p;
+    } catch(e) { suppressListener = false; return Promise.resolve({ok:false, error:e}); }
   } else if (dbRef && !hasReceivedFirebaseSync) {
     // Firebase noch nicht synchronisiert — Speicherung lokal vorgemerkt,
     // wird nachgeholt sobald der erste Sync durch ist (verhindert Datenverlust
     // wenn jemand sehr schnell nach App-Start speichert).
     pendingSaveBeforeSync = true;
+    return Promise.resolve({ok:false, error:new Error('Firebase noch nicht synchronisiert – Änderung nur lokal vorgemerkt')});
   }
+  // Kein dbRef (z.B. lokaler Modus ohne Firebase) - localStorage-Speicherung reicht.
+  return Promise.resolve({ok:true});
 }
 
 // ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
@@ -4319,6 +4353,7 @@ function showMaModal(id) {
   document.getElementById('ma-email').value = m?.email || '';
   document.getElementById('ma-adresse').value = m?.adresse || '';
   document.getElementById('ma-eintritt').value = m?.eintritt || '';
+  document.getElementById('ma-geburtsdatum').value = m?.geburtsdatum || '';
   document.getElementById('ma-funktion').value = m?.funktion || '';
   document.getElementById('ma-pin').value = m?.pin || '';
   document.getElementById('ma-admin').checked = !!(m?.admin);
@@ -4503,12 +4538,20 @@ function saveMaModal() {
   if (!vorname || !nachname) return toast('Fehler', 'Vor- und Nachname erforderlich', '⚠️');
   if (!state.mitarbeiter) state.mitarbeiter = [];
   const id = parseInt(document.getElementById('ma-modal-id').value) || Date.now();
+  // WICHTIG: bestehendes Mitarbeiter-Objekt zuerst spreaden (m||{}), damit Felder,
+  // die dieses Formular nicht kennt (bewertungen, chefBewertungen, abgemeldet,
+  // fahrzeugManuell, biometricSetupAm aus der Monteur-App, etc.) beim Speichern
+  // NICHT verloren gehen - vorher wurde hier ein komplett neues Objekt gebaut,
+  // das alles ausser den Formularfeldern stillschweigend gelöscht hat.
+  const m = state.mitarbeiter.find(x => x.id === id);
   const data = {
+    ...(m||{}),
     id, vorname, nachname,
     tel: document.getElementById('ma-tel').value.trim(),
     email: document.getElementById('ma-email').value.trim(),
     adresse: document.getElementById('ma-adresse').value.trim(),
     eintritt: document.getElementById('ma-eintritt').value,
+    geburtsdatum: document.getElementById('ma-geburtsdatum').value,
     funktion: document.getElementById('ma-funktion').value.trim(),
     pin: document.getElementById('ma-pin').value.trim() || undefined,
     admin: document.getElementById('ma-admin').checked,
@@ -9665,8 +9708,8 @@ async function gptSend(){
       if(!(dbRef&&hasReceivedFirebaseSync)){
         gptAddMessage('err','Ich habe die Anweisung verstanden, aber noch nichts geändert: Firebase ist noch nicht vollständig synchronisiert. Bitte in einigen Sekunden erneut senden.');
       }else{
-        const result=gptExecuteActions(actions,message);
-        if(result.applied.length) gptAddMessage('ai','Ausgeführt:\n• '+result.applied.join('\n• '));
+        const result=await gptExecuteActions(actions,message);
+        if(result.applied.length) gptAddMessage('ai','Ausgeführt (in Firebase bestätigt):\n• '+result.applied.join('\n• '));
         if(result.errors.length) gptAddMessage('err','Nicht ausgeführt:\n• '+result.errors.join('\n• '));
       }
     }
@@ -9889,7 +9932,7 @@ function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugN
   };
 }
 
-function gptExecuteActions(actions,originalMessage){
+async function gptExecuteActions(actions,originalMessage){
   const applied=[],errors=[];
   const mutations=actions.filter(a=>a&&a.type!=='create_todo');
   const standaloneTodos=actions.filter(a=>a&&a.type==='create_todo');
@@ -10176,13 +10219,25 @@ function gptExecuteActions(actions,originalMessage){
   }
 
   if(applied.length){
-    save();
+    // KRITISCH: hier NIE mehr nur "save()" feuern und sofort "ausgeführt"
+    // melden. Erst auf die Firebase-Bestätigung warten (verify:true liest
+    // den gespeicherten Stand danach neu ein und vergleicht ihn) - nur wenn
+    // das wirklich bestätigt ist, gelten die Änderungen als ausgeführt.
+    const saveResult = await save({verify:true});
+    if(!saveResult || !saveResult.ok){
+      const reason=saveResult?.error?.message?(': '+saveResult.error.message):'';
+      errors.push('Speichern in Firebase NICHT bestätigt'+reason+' — die Änderungen gelten daher als NICHT ausgeführt. Bitte erneut versuchen.');
+      return {applied:[],errors,saved:false};
+    }
+    if(saveResult.verifyError){
+      console.warn('[GPT] Verifikations-Lesevorgang nach dem Speichern fehlgeschlagen', saveResult.verifyError);
+    }
     try{renderTodoPage();}catch(_){ }
     try{renderWochenplan();}catch(_){ }
     try{renderFahrzeugePage();}catch(_){ }
     try{renderAll();}catch(_){ }
   }
-  return {applied,errors};
+  return {applied,errors,saved:true};
 }
 
 function gptToggleSpeech(){
