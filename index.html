@@ -415,24 +415,46 @@
 <div id="login-screen" style="position:fixed;inset:0;background:var(--bg-1, #0f1115);z-index:9999;display:flex;align-items:center;justify-content:center;">
   <div style="background:var(--card, #1a1d24);border:1px solid var(--border, #2a2d35);border-radius:12px;padding:32px;width:340px;max-width:90vw;">
     <div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:20px;">⬡ LagerTool Login</div>
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">Name eingeben oder auswählen</label>
-      <div style="position:relative">
-        <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
-          style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
-          data-hidden-id="login-name-id"
-          onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
-          oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
-        <input type="hidden" id="login-name-id" value="">
+    <div id="login-biometric-area"></div>
+    <div id="login-form-fields">
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">Name eingeben oder auswählen</label>
+        <div style="position:relative">
+          <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
+            style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
+            data-hidden-id="login-name-id"
+            onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
+            oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
+          <input type="hidden" id="login-name-id" value="">
+        </div>
       </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">PIN eingeben</label>
+        <input type="password" id="login-pin" maxlength="4" inputmode="numeric" style="width:100%;padding:10px;font-size:20px;text-align:center;letter-spacing:8px;" placeholder="••••">
+      </div>
+      <div id="login-error" style="color:#dc2626;font-size:12px;margin-bottom:10px;display:none;"></div>
+      <button class="btn btn-primary" style="width:100%;padding:10px;font-size:14px;" onclick="doLogin()">Login</button>
+      <button class="btn btn-secondary" style="width:100%;padding:8px;font-size:11px;margin-top:8px;" onclick="notfallDatenAnzeigen()">🆘 Lokale Daten anzeigen/sichern</button>
     </div>
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px;color:var(--muted,#8a8f98);display:block;margin-bottom:4px;">PIN eingeben</label>
-      <input type="password" id="login-pin" maxlength="4" inputmode="numeric" style="width:100%;padding:10px;font-size:20px;text-align:center;letter-spacing:8px;" placeholder="••••">
-    </div>
-    <div id="login-error" style="color:#dc2626;font-size:12px;margin-bottom:10px;display:none;"></div>
-    <button class="btn btn-primary" style="width:100%;padding:10px;font-size:14px;" onclick="doLogin()">Login</button>
-    <button class="btn btn-secondary" style="width:100%;padding:8px;font-size:11px;margin-top:8px;" onclick="notfallDatenAnzeigen()">🆘 Lokale Daten anzeigen/sichern</button>
+  </div>
+</div>
+
+<!-- WEBAUTHN-EINRICHTUNGS-PROMPT (nach erstem PIN-Login) -->
+<div class="modal-overlay" id="webauthn-modal">
+  <div style="background:var(--card, #1a1d24);border:1px solid var(--border, #2a2d35);border-radius:12px;padding:24px;width:320px;max-width:90vw;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:8px;">🔒 Gesichtserkennung einrichten?</div>
+    <div id="webauthn-modal-text" style="font-size:13px;color:var(--muted,#8a8f98);margin-bottom:18px;"></div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;margin-bottom:8px;" onclick="webauthnModalYes()">Einrichten</button>
+    <button class="btn btn-secondary" style="width:100%;padding:8px;" onclick="webauthnModalNo()">Nicht jetzt</button>
+  </div>
+</div>
+
+<!-- WEBAUTHN-EINSTELLUNGEN (über Header-Button erreichbar) -->
+<div class="modal-overlay" id="webauthn-settings-modal">
+  <div style="background:var(--card, #1a1d24);border:1px solid var(--border, #2a2d35);border-radius:12px;padding:24px;width:320px;max-width:90vw;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:12px;">🔒 Gesichtserkennung</div>
+    <div id="webauthn-settings-body" style="font-size:13px;color:var(--muted,#8a8f98);margin-bottom:16px;"></div>
+    <button class="btn btn-secondary" style="width:100%;padding:8px;" onclick="document.getElementById('webauthn-settings-modal').classList.remove('open')">Schliessen</button>
   </div>
 </div>
 
@@ -2001,6 +2023,26 @@ function migrationMeldungenMaIdReparatur() {
   if (repariert > 0) save();
 }
 
+// Einmalige Migration: das separate "Notiz"-Feld bei To-Dos wurde aus der UI
+// entfernt (Haupttext ist jetzt direkt editierbar). Bestehende Notizen werden
+// einmalig in den Haupttext übernommen, damit keine bereits erfassten
+// Infos verloren gehen. Läuft nur einmal (Flag), damit spätere interne
+// Audit-Einträge (gptAudit erzeugt eigene, sichtbare To-dos) nicht erneut
+// in fremde Haupttexte hineingemischt werden.
+function migrationTodoNotizMerge() {
+  if (state._todoNotizGemerged) return;
+  let gemerged = 0;
+  (state.todos||[]).forEach(t => {
+    if (t.notiz && t.notiz.trim()) {
+      t.text = (t.text||'').trim() + '\n\n' + t.notiz.trim();
+      t.notiz = '';
+      gemerged++;
+    }
+  });
+  state._todoNotizGemerged = true;
+  if (gemerged > 0) save();
+}
+
 function migrationDistanzplatten() {
   if (state._distanzplattenMigriert) return;
   if (!Array.isArray(state.kategorien)) state.kategorien = [];
@@ -2061,6 +2103,7 @@ const safeStorage = (() => {
     getItem: (k) => useLocalStorage ? localStorage.getItem(k) : (memStore[k] !== undefined ? memStore[k] : null),
     setItem: (k, v) => { if (useLocalStorage) { try { localStorage.setItem(k, v); } catch(e) { useLocalStorage=false; memStore[k]=v; } } else { memStore[k] = v; } },
     removeItem: (k) => { if (useLocalStorage) { try { localStorage.removeItem(k); } catch(e){} } delete memStore[k]; },
+    keys: (prefix) => (useLocalStorage ? Object.keys(localStorage) : Object.keys(memStore)).filter(k => k.startsWith(prefix)),
     isFallback: () => !useLocalStorage
   };
 })();
@@ -2112,6 +2155,7 @@ function load() {
   applyArtikelPreise();
   migrationDistanzplatten();
   migrationMeldungenMaIdReparatur();
+  migrationTodoNotizMerge();
   migrationTopRocRafixTX();
   migrationRafixOhneKopfErweiterung();
   migrationKategorienKorrektur();
@@ -2284,7 +2328,11 @@ function istLeiterUser(u) {
 }
 function istAdminUser(u) {
   u = u || currentLoginUser;
-  return !!(u?.admin || u?.entwickler);
+  if (!u) return false;
+  // Sicherheitsnetz: Luc Vorburger gilt namensbasiert immer als Entwickler/Admin,
+  // unabhängig vom admin-Flag (kann durch Datenfehler nicht ausgesperrt werden).
+  const istLucVorburger = (u.vorname||'').trim().toLowerCase() === 'luc' && (u.nachname||'').trim().toLowerCase() === 'vorburger';
+  return !!(u?.admin || u?.entwickler || istLucVorburger);
 }
 
 function initLoginScreen() {
@@ -2295,13 +2343,17 @@ function initLoginScreen() {
     try {
       const u = JSON.parse(savedLogin);
       const m = state.mitarbeiter.find(x => x.id === u.id);
-      if (m) { currentLoginUser = m; finishLogin(); return; }
+      if (m && istAdminUser(m)) { currentLoginUser = m; finishLogin(); return; }
+      // Zugriff nicht (mehr) erlaubt (kein Admin/Entwickler, z.B. Rolle nachträglich
+      // geändert) - alte Session verwerfen statt automatisch einzuloggen.
+      if (m) { try { sessionStorage.removeItem('lagertool_login'); } catch(e2) {} }
     } catch(e) {}
   }
 
   document.getElementById('login-pin').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });
+  renderLoginBiometricUI();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2476,7 +2528,7 @@ function fzgMonteurPickerOpen() {
   }, { excludeFzgId: fzgId });
 }
 
-function doLogin() {
+function doLogin(fromBiometric) {
   const id = parseInt(document.getElementById('login-name-id').value);
   const pin = document.getElementById('login-pin').value.trim();
   const errEl = document.getElementById('login-error');
@@ -2486,7 +2538,25 @@ function doLogin() {
 
   const m = state.mitarbeiter.find(x => x.id === id);
   if (!m || m.pin !== pin) {
-    errEl.textContent = 'Name oder PIN ungültig';
+    if (fromBiometric) {
+      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. geändert) - veraltete
+      // Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
+      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
+      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
+      renderLoginBiometricUI();
+      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
+    } else {
+      errEl.textContent = 'Name oder PIN ungültig';
+    }
+    errEl.style.display = 'block';
+    document.getElementById('login-pin').value = '';
+    return;
+  }
+
+  // Zugriff auf dieses Tool nur für Entwickler/Administratoren - alle anderen
+  // (Leiter, Monteur, Chef-Monteur) nutzen die Monteur-App.
+  if (!istAdminUser(m)) {
+    errEl.textContent = 'Kein Zugriff — dieses Tool ist nur für Entwickler und Administratoren. Bitte die Monteur-App verwenden.';
     errEl.style.display = 'block';
     document.getElementById('login-pin').value = '';
     return;
@@ -2496,6 +2566,7 @@ function doLogin() {
   currentLoginUser = m;
   try { sessionStorage.setItem('lagertool_login', JSON.stringify({id: m.id})); } catch(e) {}
   finishLogin();
+  if (!fromBiometric) maybeOfferWebauthnSetup(m);
 }
 
 function finishLogin() {
@@ -2516,7 +2587,7 @@ function finishLogin() {
   const logo = document.querySelector('.logo');
   if (logo) {
     const rolle = currentLoginUser.entwickler ? '🛠️ Entwickler' : currentLoginUser.admin ? '👑 Admin' : istLeiterUser() ? '👷 Leiter' : '🔧 Monteur';
-    logo.innerHTML = '⬡ LagerTool <span style="font-size:11px;color:var(--muted,#8a8f98);font-weight:400;margin-left:8px;">' + currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'') + ' · ' + rolle + '</span> <button class="btn btn-secondary btn-sm" style="margin-left:10px;font-size:11px;" onclick="doLogout()">Logout</button>';
+    logo.innerHTML = '⬡ LagerTool <span style="font-size:11px;color:var(--muted,#8a8f98);font-weight:400;margin-left:8px;">' + currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'') + ' · ' + rolle + '</span> <button class="btn btn-secondary btn-sm" style="margin-left:10px;font-size:11px;" onclick="openWebauthnSettingsModal()">🔒</button> <button class="btn btn-secondary btn-sm" style="margin-left:6px;font-size:11px;" onclick="doLogout()">Logout</button>';
   }
 
   // ── Rollenbasierte Navigation ──
@@ -2559,6 +2630,172 @@ function finishLogin() {
   renderAll();
   setTimeout(updateMeldungenBadge, 100);
 }
+
+// ════════════════════════════════════════════════════════
+// GESICHTSERKENNUNG / BIOMETRIE STATT PIN (WebAuthn)
+// ════════════════════════════════════════════════════════
+// Kein eigener Gesichtsscan - das ist die Browser-Schnittstelle (WebAuthn),
+// die Face ID / Fingerabdruck / Windows Hello des Geräts abfragt, rein als
+// GERÄT-SEITIGE Freischaltung. Die Anmeldung läuft danach über denselben
+// PIN-Mechanismus wie immer - die Gesichtserkennung trägt den PIN nur
+// automatisch ein, es ist KEIN separates Login-System. PIN + Zugangsdaten
+// sind GERÄTEGEBUNDEN (in diesem localStorage) - auf einem neuen/anderen
+// Gerät braucht es weiterhin die manuelle PIN-Eingabe. Da der Login-Zugang
+// zu diesem Tool ohnehin nur Entwickler/Admin erreichen (siehe doLogin()),
+// ist Gesichtserkennung hier automatisch auf diesen Personenkreis beschränkt.
+const WEBAUTHN_CRED_PREFIX = 'lagertool_webauthn_cred_';
+const WEBAUTHN_PIN_PREFIX = 'lagertool_webauthn_pin_';
+const WEBAUTHN_ASKED_PREFIX = 'lagertool_webauthn_asked_';
+let webauthnPlatformOk = false;
+
+function bufToB64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64urlToBuf(str) {
+  str = str.replace(/-/g,'+').replace(/_/g,'/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+async function webauthnPlatformAvailable() {
+  try {
+    if (!window.PublicKeyCredential || !navigator.credentials) return false;
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch(e) { return false; }
+}
+// Alle auf DIESEM Gerät eingerichteten Logins (i.d.R. genau einer - Lucs/Tobias' eigenes Gerät).
+function findStoredBiometricLogins() {
+  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
+    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
+    const credB64 = safeStorage.getItem(k);
+    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
+    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
+    return (m && credB64 && pin && istAdminUser(m)) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
+  }).filter(Boolean);
+}
+
+async function webauthnRegister(m) {
+  try {
+    if (!istAdminUser(m)) throw new Error('KEIN_ZUGRIFF');
+    if (!m.pin) throw new Error('KEIN_PIN');
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = new TextEncoder().encode('ma_'+m.id);
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge,
+      rp: { name: 'LagerTool' },
+      user: { id: userId, name: (m.vorname+' '+(m.nachname||'')).trim(), displayName: (m.vorname+' '+(m.nachname||'')).trim() },
+      pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'preferred' },
+      timeout: 60000,
+      attestation: 'none'
+    }});
+    if (!cred) throw new Error('Keine Zugangsdaten erhalten');
+    safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
+    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
+    safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
+    m.biometricSetupAm = new Date().toISOString();
+    save();
+    toast('Eingerichtet', 'Gesichtserkennung/Biometrie trägt den PIN jetzt automatisch ein.', '🔒');
+    renderLoginBiometricUI();
+    return true;
+  } catch(e) {
+    console.warn('WebAuthn register error', e);
+    toast('Nicht eingerichtet', e?.message==='KEIN_PIN' ? 'Bitte zuerst einen PIN hinterlegen.' : 'Gesichtserkennung konnte nicht eingerichtet werden.', '⚠️');
+    return false;
+  }
+}
+
+function webauthnRemove(maId) {
+  safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+maId);
+  safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+maId);
+  toast('Entfernt', 'Gesichtserkennung wurde für dieses Gerät deaktiviert. PIN funktioniert weiterhin.', '🔓');
+  renderLoginBiometricUI();
+}
+
+async function webauthnLoginAttempt(entry) {
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge,
+      allowCredentials: [{ id: b64urlToBuf(entry.credB64), type:'public-key' }],
+      userVerification: 'required',
+      timeout: 60000
+    }});
+    if (!assertion) throw new Error('Keine Bestätigung erhalten');
+    document.getElementById('login-name-id').value = entry.maId;
+    document.getElementById('login-pin').value = entry.pin;
+    doLogin(true);
+    document.getElementById('login-pin').value = '';
+  } catch(e) {
+    console.warn('WebAuthn login error', e);
+    const errEl = document.getElementById('login-error');
+    showLoginPinForm();
+    if (errEl) { errEl.textContent = 'Gesichtserkennung fehlgeschlagen – bitte PIN verwenden.'; errEl.style.display = 'block'; }
+  }
+}
+
+function renderLoginBiometricUI() {
+  const area = document.getElementById('login-biometric-area');
+  if (!area) return;
+  const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
+  window._loginBiometricEntries = entries;
+  const fields = document.getElementById('login-form-fields');
+  if (!entries.length) { area.innerHTML = ''; if (fields) fields.style.display = ''; return; }
+  area.innerHTML = entries.map((e,i) => `<button class="btn btn-primary" style="width:100%;padding:10px;margin-bottom:8px" onclick="webauthnLoginAttempt(window._loginBiometricEntries[${i}])">🆔 ${entries.length>1 ? e.name : 'Als '+e.name+' mit Gesichtserkennung anmelden'}</button>`).join('')
+    + `<div style="text-align:center;margin-bottom:14px"><a href="#" onclick="showLoginPinForm();return false" style="color:var(--muted,#8a8f98);font-size:12px">Stattdessen PIN verwenden</a></div>`;
+  if (fields) fields.style.display = 'none';
+}
+function showLoginPinForm() {
+  const fields = document.getElementById('login-form-fields');
+  if (fields) fields.style.display = '';
+}
+
+function maybeOfferWebauthnSetup(m) {
+  if (!webauthnPlatformOk || !istAdminUser(m)) return;
+  if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return;
+  if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return;
+  document.getElementById('webauthn-modal-text').textContent =
+    'Möchtest du dich ab jetzt auf diesem Gerät mit Gesichtserkennung/Fingerabdruck statt mit PIN anmelden?';
+  window._webauthnModalUser = m;
+  document.getElementById('webauthn-modal').classList.add('open');
+}
+function webauthnModalYes() {
+  const m = window._webauthnModalUser;
+  document.getElementById('webauthn-modal').classList.remove('open');
+  if (m) webauthnRegister(m);
+}
+function webauthnModalNo() {
+  const m = window._webauthnModalUser;
+  if (m) safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
+  document.getElementById('webauthn-modal').classList.remove('open');
+}
+
+function openWebauthnSettingsModal() {
+  const body = document.getElementById('webauthn-settings-body');
+  const m = currentLoginUser;
+  if (!webauthnPlatformOk) {
+    body.innerHTML = 'Auf diesem Gerät/Browser nicht unterstützt.';
+  } else {
+    const eingerichtet = m && !!safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id);
+    body.innerHTML = 'Status auf diesem Gerät: <b style="color:'+(eingerichtet?'var(--green,#4be88a)':'inherit')+'">'+(eingerichtet?'Eingerichtet ✅':'Nicht eingerichtet')+'</b>'
+      + '<div style="margin-top:12px">'+(eingerichtet
+        ? '<button class="btn btn-secondary" style="width:100%;padding:8px" onclick="webauthnRemove('+m.id+');openWebauthnSettingsModal()">Auf diesem Gerät entfernen</button>'
+        : '<button class="btn btn-primary" style="width:100%;padding:10px" onclick="webauthnRegister(currentLoginUser).then(()=>openWebauthnSettingsModal())">Jetzt einrichten</button>')+'</div>'
+      + '<div style="font-size:10px;margin-top:10px">Gilt nur für dieses Gerät. Der PIN funktioniert immer zusätzlich.</div>';
+  }
+  document.getElementById('webauthn-settings-modal').classList.add('open');
+}
+
+// Einmalig beim Laden prüfen, ob das Gerät Face ID/Fingerabdruck/Windows Hello unterstützt.
+(async () => {
+  webauthnPlatformOk = await webauthnPlatformAvailable();
+  renderLoginBiometricUI();
+})();
 
 let pendingSavePromise = null;
 async function doLogout() {
@@ -2806,12 +3043,13 @@ function renderTodoPage() {
     const bsHtml = bs ? '<span onclick="showBsModal('+bs.id+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
     const erledigtInfo = t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
     const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
+    const textEsc = (t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+'">'
       + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" style="margin-top:3px;width:18px;height:18px;flex-shrink:0">'
       + '<div style="flex:1">'
-      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+bsHtml+dueHtml+'<span style="font-weight:700'+(t.erledigt?';text-decoration:line-through':'')+'">'+(t.text||'')+'</span></div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'+bsHtml+dueHtml+'</div>'
+      + '<textarea onchange="setTodoText('+t.id+',this.value)" rows="2" style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;resize:vertical'+(t.erledigt?';text-decoration:line-through':'')+'">'+textEsc+'</textarea>'
       + '<div style="font-size:12px;color:var(--muted);margin-top:4px">\ud83d\udc64 '+(t.zustaendig||'\u2013')+'</div>'
-      + '<input type="text" value="'+(t.notiz||'').replace(/"/g,'&quot;')+'" placeholder="Notiz..." onchange="setTodoNotiz('+t.id+',this.value)" style="margin-top:6px;width:100%;font-size:12px;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px">'
       + erledigtInfo
       + '</div>'
       + '<button onclick="deleteTodoItem('+t.id+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
@@ -2835,10 +3073,12 @@ function toggleTodo(id) {
   renderTodoPage();
 }
 
-function setTodoNotiz(id, val) {
+function setTodoText(id, val) {
   const t = (state.todos||[]).find(x => x.id === id);
   if (!t) return;
-  t.notiz = val;
+  const trimmed = val.trim();
+  if (!trimmed) { toast('Fehler','Haupttext darf nicht leer sein','\u26a0\ufe0f'); renderTodoPage(); return; }
+  t.text = trimmed;
   save();
 }
 
@@ -7838,10 +8078,15 @@ function startFirebaseListener() {
           migrationSchraubenNeu();
           migrationDistanzplatten();
           migrationMeldungenMaIdReparatur();
+          migrationTodoNotizMerge();
           markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
           setTimeout(updateMeldungenBadge, 100);
+          // state.mitarbeiter ist jetzt geladen - Login-Screen ggf. neu rendern,
+          // damit ein auf diesem Gerät eingerichteter Gesichtserkennungs-Login
+          // sichtbar wird (beim allerersten Aufruf vor dem Sync war er noch leer).
+          if (!currentLoginUser && typeof renderLoginBiometricUI === 'function') renderLoginBiometricUI();
           showSyncIndicator('↓ Firebase → Lokal');
           // Falls Baustellen wiederhergestellt wurden, sofort zurück nach Firebase schreiben
           if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl && dbRef) {
@@ -10180,8 +10425,11 @@ async function gptExecuteActions(actions,originalMessage){
         const nt=gptNormTime(a.due_time);
         if(a.due_time!==undefined && a.due_time!==null && nt!==t.dueTime){ changes.push('Fälligkeitszeit: '+(t.dueTime||'–')+' → '+nt); t.dueTime=nt; }
         if(!changes.length) throw new Error('Keine erkennbare Änderung am To-do');
-        const stamp=new Date().toLocaleDateString('de-CH');
-        t.notiz=(t.notiz?t.notiz+'\n':'')+'[GPT] '+stamp+': '+changes.join('; ');
+        // Sichtbarer Audit-Trail statt (jetzt aus der UI entferntem) Notiz-Feld -
+        // gleicher Mechanismus wie bei add_note/update_site/create_site: erzeugt
+        // einen eigenen 🤖-markierten To-do-Eintrag, den man in der Liste sieht.
+        const auditText='To-do aktualisiert: '+changes.join('; ');
+        gptAudit(auditText,t.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('To-do aktualisiert: '+changes.join('; '));
 
       } else if(a.type==='set_todo_status'){
