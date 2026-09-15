@@ -715,13 +715,22 @@ document.addEventListener('click', e => {
   });
 });
 
-function doLogin() {
+function doLogin(fromBiometric) {
   const errEl = document.getElementById('login-error');
   const id = parseInt(document.getElementById('login-name-id').value);
   const pin = document.getElementById('login-pin').value;
   const m = (state.mitarbeiter||[]).find(x => x.id === id);
   if (!m || m.pin !== pin) {
-    errEl.textContent = 'Name oder PIN ungültig';
+    if (fromBiometric) {
+      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. vom Admin geändert) -
+      // veraltete Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
+      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
+      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
+      renderLoginBiometricUI();
+      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
+    } else {
+      errEl.textContent = 'Name oder PIN ungültig';
+    }
     errEl.style.display = 'block';
     document.getElementById('login-pin').value = '';
     return;
@@ -730,9 +739,9 @@ function doLogin() {
   currentLoginUser = m;
   try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
   finishLogin();
-  // Nur nach einem manuellen PIN-Login anbieten (nicht bei Auto-Login/Session-
-  // Wiederherstellung, nicht wenn gerade schon per Gesichtserkennung angemeldet).
-  maybeOfferWebauthnSetup(m);
+  // Nur nach einem manuellen PIN-Login anbieten (nicht wenn der PIN gerade
+  // erst per Gesichtserkennung automatisch eingetragen wurde).
+  if (!fromBiometric) maybeOfferWebauthnSetup(m);
 }
 
 function doLogout() {
@@ -756,11 +765,14 @@ function finishLogin() {
 // GESICHTSERKENNUNG / BIOMETRIE STATT PIN (WebAuthn)
 // ════════════════════════════════════════════════════════
 // Kein eigener Gesichtsscan - das ist die Browser-Schnittstelle (WebAuthn),
-// die Face ID / Fingerabdruck / Android-Biometrie des Geräts abfragt. Die
-// Zugangsdaten sind GERÄTEGEBUNDEN (in diesem localStorage gespeichert) -
-// auf einem neuen/anderen Gerät braucht es weiterhin den PIN. Der PIN
-// funktioniert immer als Fallback, es wird nichts ersetzt/gelöscht.
+// die Face ID / Fingerabdruck / Android-Biometrie des Geräts abfragt, rein
+// als GERÄT-SEITIGE Freischaltung. Die Anmeldung selbst läuft danach über
+// denselben PIN-Mechanismus wie immer: die Gesichtserkennung trägt den PIN
+// nur automatisch ein und meldet an - es ist KEIN separates Login-System.
+// PIN + Zugangsdaten sind GERÄTEGEBUNDEN (in diesem localStorage) - auf
+// einem neuen/anderen Gerät braucht es weiterhin die manuelle PIN-Eingabe.
 const WEBAUTHN_CRED_PREFIX = 'monteur_webauthn_cred_';
+const WEBAUTHN_PIN_PREFIX = 'monteur_webauthn_pin_';
 const WEBAUTHN_ASKED_PREFIX = 'monteur_webauthn_asked_';
 
 function bufToB64url(buf) {
@@ -789,13 +801,15 @@ function findStoredBiometricLogins() {
   return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
     const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
     const credB64 = safeStorage.getItem(k);
+    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
     const m = (state.mitarbeiter||[]).find(x => x.id === maId);
-    return (m && credB64) ? {maId, credB64, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
+    return (m && credB64 && pin) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
   }).filter(Boolean);
 }
 
 async function webauthnRegister(m) {
   try {
+    if (!m.pin) throw new Error('KEIN_PIN');
     const challenge = crypto.getRandomValues(new Uint8Array(32));
     const userId = new TextEncoder().encode('ma_'+m.id);
     const cred = await navigator.credentials.create({ publicKey: {
@@ -809,23 +823,25 @@ async function webauthnRegister(m) {
     }});
     if (!cred) throw new Error('Keine Zugangsdaten erhalten');
     safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
+    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
     safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
     // Leichtes Audit-Feld in den geteilten Mitarbeiter-Daten - rein informativ,
-    // ersetzt nichts. Der eigentliche Schlüssel bleibt lokal auf dem Gerät.
+    // ersetzt nichts. PIN + Zugangsdaten bleiben lokal auf dem Gerät.
     m.biometricSetupAm = new Date().toISOString();
     save();
-    toast('Eingerichtet', 'Gesichtserkennung/Biometrie ist ab jetzt auf diesem Gerät aktiv.', '🔒');
+    toast('Eingerichtet', 'Gesichtserkennung/Biometrie trägt den PIN jetzt automatisch ein.', '🔒');
     renderLoginBiometricUI();
     return true;
   } catch(e) {
     console.warn('WebAuthn register error', e);
-    toast('Nicht eingerichtet', 'Gesichtserkennung konnte nicht eingerichtet werden.', '⚠️');
+    toast('Nicht eingerichtet', e?.message==='KEIN_PIN' ? 'Bitte zuerst einen PIN hinterlegen (Admin).' : 'Gesichtserkennung konnte nicht eingerichtet werden.', '⚠️');
     return false;
   }
 }
 
 function webauthnRemove(maId) {
   safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+maId);
+  safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+maId);
   toast('Entfernt', 'Gesichtserkennung wurde für dieses Gerät deaktiviert. PIN funktioniert weiterhin.', '🔓');
   renderLoginBiometricUI();
   if (document.getElementById('page-profil')?.classList.contains('active')) renderProfil();
@@ -841,12 +857,13 @@ async function webauthnLoginAttempt(entry) {
       timeout: 60000
     }});
     if (!assertion) throw new Error('Keine Bestätigung erhalten');
-    const m = (state.mitarbeiter||[]).find(x => x.id === entry.maId);
-    if (!m) throw new Error('Mitarbeiter nicht gefunden');
-    document.getElementById('login-error').style.display = 'none';
-    currentLoginUser = m;
-    try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
-    finishLogin();
+    // Gesichtserkennung bestanden - trägt den zuvor lokal hinterlegten PIN
+    // automatisch ein und meldet sich über denselben Weg an wie eine
+    // manuelle PIN-Eingabe (kein separater Login-Mechanismus).
+    document.getElementById('login-name-id').value = entry.maId;
+    document.getElementById('login-pin').value = entry.pin;
+    doLogin(true);
+    document.getElementById('login-pin').value = '';
   } catch(e) {
     console.warn('WebAuthn login error', e);
     const errEl = document.getElementById('login-error');
