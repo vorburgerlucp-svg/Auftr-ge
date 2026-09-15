@@ -1026,11 +1026,43 @@
       <div><label>Notfallkontakt</label><input type="text" id="ma-notfall" placeholder="z.B. Maria Krakau +41 79 000 00 00"></div>
     </div>
     <div class="form-row cols-2">
-      <div><label>🏢 Temporäres Büro</label><input type="text" id="ma-buero" placeholder="z.B. Büro Basel 2. OG"></div>
-      <div><label>👤 Kontaktperson</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Stefan Meier"></div>
+      <div style="position:relative">
+        <label>🏢 Temporärbüro</label>
+        <input type="text" id="ma-buero" placeholder="z.B. Aris Personalberatung" autocomplete="off"
+          oninput="bueroAutocomplete(this)" onfocus="bueroAutocomplete(this)">
+        <input type="hidden" id="ma-buero-id" value="">
+        <div id="ma-buero-suggest" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.35)"></div>
+      </div>
+      <div><label>👤 Sachbearbeiter</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Stefan Meier"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>📞 Telefon Sachbearbeiter</label><input type="tel" id="ma-kontakt-tel" placeholder="+41 79 000 00 00"></div>
+      <div><label>✉️ E-Mail Sachbearbeiter</label><input type="email" id="ma-kontakt-email" placeholder="s.meier@buero.ch"></div>
+    </div>
+    <hr class="divider">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>📄 Verleihvertrag (Temporärarbeit)</span>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="maAnalysiereVerleihvertrag()" title="Zuletzt hochgeladenes PDF unten bei Dokumente automatisch auslesen">🤖 Vertrag analysieren</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">PDF unten bei "Dokumente" hochladen, dann auf "Vertrag analysieren" klicken – erkannte Felder werden nur ergänzt, nie überschrieben.</div>
+    <div class="form-row cols-2">
+      <div><label>Beruf</label><input type="text" id="ma-verleih-beruf" placeholder="z.B. Schreiner EFZ"></div>
+      <div><label>Qualifikation</label><input type="text" id="ma-verleih-qualifikation" placeholder="z.B. 5 Jahre Erfahrung Innenausbau"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>Einsatzbeginn</label><input type="date" id="ma-verleih-beginn"></div>
+      <div><label>Einsatzdauer</label><input type="text" id="ma-verleih-dauer" placeholder="z.B. 3 Monate / bis 31.12.2026"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>Arbeitszeit</label><input type="text" id="ma-verleih-arbeitszeit" placeholder="z.B. 42h/Woche"></div>
+      <div><label>Stundenansatz (CHF)</label><input type="text" id="ma-verleih-stundenansatz" placeholder="z.B. 45.50"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>GAV</label><input type="text" id="ma-verleih-gav" placeholder="z.B. GAV Personalverleih"></div>
+      <div><label>Vertragsnummer</label><input type="text" id="ma-verleih-vertragsnr" placeholder="z.B. V-2026-4711"></div>
     </div>
     <div class="form-row cols-1">
-      <div><label>📞 Kontaktperson Telefon</label><input type="tel" id="ma-kontakt-tel" placeholder="+41 79 000 00 00"></div>
+      <div><label>Vertragsdatum</label><input type="date" id="ma-verleih-vertragsdatum"></div>
     </div>
     <hr class="divider">
     <div class="card-title">📁 Dokumente</div>
@@ -1332,6 +1364,10 @@
       <div><label>Name *</label><input type="text" id="bs-name" placeholder="wird automatisch generiert"></div>
       <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Fust AG" oninput="generiereNameAusKundeOrt()"></div>
     </div>
+    <div class="form-row cols-2">
+      <div><label>Auftragsnummer</label><input type="text" id="bs-auftragsnummer" placeholder="z.B. A-2026-1234"></div>
+      <div><label>Soll-Stunden (gesamt)</label><input type="number" id="bs-sollstunden" min="0" step="0.5" placeholder="nur falls keine Positionen erfasst sind"></div>
+    </div>
     <div class="form-row cols-1">
       <div>
         <label style="color:var(--accent2);font-weight:700">👷 Chef-Monteur (Zugriff auf Nacharbeit & Bewertung)</label>
@@ -1382,8 +1418,26 @@
       </div>
     </div>
     <div class="form-row cols-2">
-      <div><label>Von</label><input type="date" id="bs-von"></div>
-      <div><label>Bis</label><input type="date" id="bs-bis"></div>
+      <div><label>Von</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="bs-von-anzeige" placeholder="Datum wählen…" readonly style="flex:1;cursor:pointer" data-dp-trigger onclick="openDatePicker('bs-von',this)">
+          <input type="hidden" id="bs-von">
+          <button type="button" data-dp-trigger style="flex-shrink:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:15px" onclick="openDatePicker('bs-von',this)" title="Kalender öffnen">📅</button>
+        </div>
+      </div>
+      <div><label>Bis</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="bs-bis-anzeige" placeholder="Datum wählen…" readonly style="flex:1;cursor:pointer" data-dp-trigger onclick="openDatePicker('bs-bis',this)">
+          <input type="hidden" id="bs-bis">
+          <button type="button" data-dp-trigger style="flex-shrink:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:15px" onclick="openDatePicker('bs-bis',this)" title="Kalender öffnen">📅</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row cols-1">
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="bsSchnellwahlWoche(0)">Diese Woche</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="bsSchnellwahlWoche(1)">Nächste Woche</button>
+      </div>
     </div>
     <div class="form-row cols-2">
       <div>
@@ -1424,6 +1478,16 @@
       <div><label>E-Mail</label><input type="email" id="bs-ap-email" placeholder="t.fust@fust.ch"></div>
     </div>
     <hr class="divider">
+    <div class="card-title">🧰 Logistik vor Ort</div>
+    <div class="form-row cols-2">
+      <div><label>🅿️ Parkplatz</label><input type="text" id="bs-parkplatz" placeholder="z.B. Hintereingang Lieferhof"></div>
+      <div><label>🚪 Zufahrt / Schlüssel</label><input type="text" id="bs-zufahrt" placeholder="z.B. Schlüssel bei Empfang"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div><label>🧱 Material</label><input type="text" id="bs-material" placeholder="z.B. wird vom Kunden gestellt"></div>
+      <div><label>🔧 Werkzeug</label><input type="text" id="bs-werkzeug" placeholder="z.B. Bohrmaschine + Wasserwaage"></div>
+    </div>
+    <hr class="divider">
     <div class="card-title">🏨 Hotel / Unterkunft</div>
     <div class="form-row cols-2">
       <div><label>Hotel Name</label><input type="text" id="bs-hotel-name" placeholder="z.B. Hotel Merian Basel"></div>
@@ -1439,9 +1503,14 @@
     </div>
     <div class="form-row cols-1">
       <div>
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>📋 Notizen / Rapport-Verlauf</span>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="bsKopiereMontageaufgebot()" title="Kompakte Zusammenfassung aus allen erfassten Feldern in die Zwischenablage kopieren">🪧 Montageaufgebot kopieren</button>
+        </label>
         <textarea id="bs-notiz" rows="4"
           style="width:100%;resize:vertical;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);line-height:1.5"
-          placeholder="Wichtige Infos für die Monteure:&#10;- Parkplatz: Hintereingang Lieferhof&#10;- Schlüssel bei Empfang abholen&#10;- Werkzeug: Bohrmaschine + Wasserwaage&#10;- Achtung: Bewohner anwesend&#10;- ..."></textarea>
+          placeholder="Zusätzliche Hinweise, Besonderheiten, Rapport-Einträge…&#10;(Parkplatz/Zufahrt/Material/Werkzeug oben als eigene Felder erfassen)"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Beim Speichern wird oben automatisch ein 🪧 Montageaufgebot aus den erfassten Feldern eingefügt/aktualisiert - bestehende Notizen bleiben erhalten.</div>
       </div>
     </div>
     <div id="bs-drop-zone" class="doc-upload-area" 
@@ -1469,6 +1538,7 @@
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeBsModal()">Abbrechen</button>
       <button class="btn btn-secondary" id="bs-delete-btn" style="color:var(--red);border-color:var(--red);margin-right:auto;display:none" onclick="deleteBaustelle()">🗑 Löschen</button>
+      <button class="btn btn-secondary" id="bs-kopieren-btn" style="display:none" onclick="bsModalKopieren()">📋 Kopieren</button>
       <button class="btn btn-primary" onclick="saveBsModal()">💾 Speichern</button>
     </div>
   </div>
@@ -1604,13 +1674,17 @@
         <div id="buchungs-bs-typ" style="font-size:11px;opacity:.8;margin-top:1px"></div>
       </div>
       <div style="padding:10px 14px;background:var(--surface2);display:flex;flex-direction:column;gap:6px">
+        <div id="buchungs-bs-auftragsnr" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></div>
         <div id="buchungs-bs-datum" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-adresse" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-startzeit" style="font-size:12px;color:var(--muted)"></div>
+        <div id="buchungs-bs-montagedetail" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-ap" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-positionen" style="font-size:12px;color:var(--muted)"></div>
+        <div id="buchungs-bs-logistik" style="font-size:12px;color:var(--muted)"></div>
         <div id="buchungs-bs-hotel" style="font-size:12px;color:#f0c040;font-weight:600;display:none">🏨 <span id="buchungs-bs-hotel-text"></span></div>
         <div id="buchungs-bs-notiz" style="font-size:12px;color:var(--text);white-space:pre-line;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"></div>
+        <button class="btn btn-secondary btn-sm" id="buchungs-bs-bearbeiten-btn" onclick="buchungBearbeiten()" style="margin-top:6px;display:none">✏️ Auftrag bearbeiten</button>
       </div>
     </div>
 
@@ -1644,6 +1718,17 @@
       👁 Nur Ansicht — Änderungen kann nur der Admin vornehmen.
     </div>
   </div>
+</div>
+
+<!-- MONATSKALENDER-POPUP (Priorität 6) -->
+<div id="datepicker-popup" style="display:none;position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);padding:10px;width:250px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <button type="button" onclick="dpNavi(-1)" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;padding:2px 8px">‹</button>
+    <div id="dp-month-label" style="font-weight:700;font-size:13px"></div>
+    <button type="button" onclick="dpNavi(1)" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;padding:2px 8px">›</button>
+  </div>
+  <div id="dp-weekdays" style="display:grid;grid-template-columns:repeat(7,1fr);font-size:10px;color:var(--muted);text-align:center;margin-bottom:4px"></div>
+  <div id="dp-days" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px"></div>
 </div>
 
 <!-- LIGHTBOX -->
@@ -2629,6 +2714,39 @@ function finishLogin() {
 
   renderAll();
   setTimeout(updateMeldungenBadge, 100);
+  if (istAdmin || istEntwickler) setTimeout(pruefeGeburtstagsTodos, 300);
+}
+
+// ── GEBURTSTAGE (Priorität 11) ───────────────────────────────
+// Läuft bei jedem Admin/Entwickler-Login: legt 3 Tage vor dem Geburtstag
+// eines aktiven Mitarbeiters ein To-do an. Jährlich wiederkehrend, aber
+// pro Kalenderjahr höchstens einmal pro Mitarbeiter (m._geburtstagTodoJahr
+// merkt sich das zuletzt bediente Jahr). Abgemeldete Mitarbeiter werden
+// übersprungen (bestehende Aktiv-/Statuslogik, wie auch im Wochenplan).
+function pruefeGeburtstagsTodos() {
+  if (!state.mitarbeiter) return;
+  const heute = new Date(); heute.setHours(0,0,0,0);
+  const jahr = heute.getFullYear();
+  const ziel = new Date(heute); ziel.setDate(ziel.getDate()+3);
+  let geaendert = false;
+  state.mitarbeiter.forEach(m => {
+    if (!m.geburtsdatum || m.abgemeldet) return;
+    const gd = new Date(m.geburtsdatum+'T12:00');
+    if (isNaN(gd.getTime())) return;
+    if (gd.getMonth()!==ziel.getMonth() || gd.getDate()!==ziel.getDate()) return;
+    if (m._geburtstagTodoJahr === jahr) return; // dieses Jahr bereits angelegt
+    const name = ((m.vorname||'')+' '+(m.nachname||'')).trim();
+    if (!state.todos) state.todos = [];
+    state.todos.push({
+      id: Date.now()+Math.floor(Math.random()*1000)+23, bsId: null,
+      text: 'Geburtstagsgeschenk vorbereiten – '+name,
+      zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'',
+      erstelltAm: new Date().toISOString().slice(0,10)
+    });
+    m._geburtstagTodoJahr = jahr;
+    geaendert = true;
+  });
+  if (geaendert) { save(); try{ renderTodoPage(); }catch(_){ } }
 }
 
 // ════════════════════════════════════════════════════════
@@ -2978,6 +3096,16 @@ function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdo
 
 // ── NAVIGATION ─────────────────────────────────────────
 function showPage(id) {
+  // Admin-only Bereiche (Priorität 13): Lagerverwaltung und Fahrzeug-Inventar.
+  // Gleiches Muster wie bei "einstellungen" weiter unten - verhindert auch
+  // einen direkten Aufruf (z.B. per Konsole), nicht nur das Verstecken der
+  // Navigation. WICHTIG: echte Durchsetzung braucht zusätzlich serverseitige
+  // Firebase Security Rules (rollenbasiert) - das kann dieser Client-Code
+  // allein nicht garantieren, siehe Hinweis in den Rollout-Notizen.
+  if ((id === 'lager' || id === 'fahrzeuge') && !(currentLoginUser?.admin || currentLoginUser?.entwickler)) {
+    toast('Zugriff verweigert', 'Nur für Admin/Entwickler', '🔒');
+    return;
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
@@ -3022,8 +3150,16 @@ function initialenVon(name) {
   return teile.map(t => t[0]).join('').toUpperCase().slice(0,3);
 }
 
+// Mehrfachauswahl (Priorität 12) - ERLEDIGT und AUSGEWÄHLT sind zwei
+// unabhängige Zustände; ein To-do muss zum Löschen nicht erledigt sein.
+let todoAusgewaehlt = new Set();
+
 function renderTodoPage() {
   if (!state.todos) state.todos = [];
+  // Auswahl von zwischenzeitlich gelöschten To-dos bereinigen.
+  const gueltigeIds = new Set(state.todos.map(t=>t.id));
+  [...todoAusgewaehlt].forEach(id=>{ if(!gueltigeIds.has(id)) todoAusgewaehlt.delete(id); });
+
   const offen = state.todos.filter(t => !t.erledigt).length;
   const erledigt = state.todos.filter(t => t.erledigt).length;
   document.getElementById('todo-stat-offen').textContent = offen;
@@ -3034,18 +3170,30 @@ function renderTodoPage() {
   if (todoFilter === 'erledigt') liste = liste.filter(t => t.erledigt);
 
   const wrap = document.getElementById('todo-list');
+  const auswahlBar = todoAusgewaehlt.size
+    ? '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px;flex-wrap:wrap">'
+      + '<span style="font-size:13px;font-weight:600">'+todoAusgewaehlt.size+' ausgewählt</span>'
+      + '<button class="btn btn-danger btn-sm" onclick="todoAusgewaehlteLoeschen()">🗑 '+todoAusgewaehlt.size+' ausgewählte löschen</button>'
+      + '<button class="btn btn-secondary btn-sm" onclick="todoAuswahlAufheben()">Auswahl aufheben</button>'
+      + '</div>'
+    : '';
+
   if (!liste.length) {
-    wrap.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Keine Eintr\u00e4ge</div>';
+    wrap.innerHTML = auswahlBar + '<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Keine Eintr\u00e4ge</div>';
     return;
   }
-  wrap.innerHTML = liste.map(t => {
+  wrap.innerHTML = auswahlBar + liste.map(t => {
     const bs = t.bsId ? (state.baustellen||[]).find(b => b.id === t.bsId) : null;
     const bsHtml = bs ? '<span onclick="showBsModal('+bs.id+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
     const erledigtInfo = t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
     const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
     const textEsc = (t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+'">'
-      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" style="margin-top:3px;width:18px;height:18px;flex-shrink:0">'
+    const istAusgewaehlt = todoAusgewaehlt.has(t.id);
+    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+(istAusgewaehlt?';border-color:var(--accent)':'')+'">'
+      + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center;flex-shrink:0;margin-top:3px">'
+      + '<input type="checkbox" '+(istAusgewaehlt?'checked':'')+' onchange="toggleTodoAuswahl('+t.id+',this.checked)" title="Auswählen (für Mehrfachlöschen)" style="width:16px;height:16px;cursor:pointer">'
+      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" title="Erledigt" style="width:18px;height:18px">'
+      + '</div>'
       + '<div style="flex:1">'
       + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'+bsHtml+dueHtml+'</div>'
       + '<textarea onchange="setTodoText('+t.id+',this.value)" rows="2" style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;resize:vertical'+(t.erledigt?';text-decoration:line-through':'')+'">'+textEsc+'</textarea>'
@@ -3055,6 +3203,34 @@ function renderTodoPage() {
       + '<button onclick="deleteTodoItem('+t.id+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
       + '</div>';
   }).join('');
+}
+
+function toggleTodoAuswahl(id, checked) {
+  if (checked) todoAusgewaehlt.add(id); else todoAusgewaehlt.delete(id);
+  renderTodoPage();
+}
+function todoAuswahlAufheben() {
+  todoAusgewaehlt.clear();
+  renderTodoPage();
+}
+// Löscht gezielt nur die ausgewählten IDs - unabhängig vom Erledigt-Status.
+// SAVE→VERIFY, bevor die Löschung als ausgeführt gilt (kein Scheinerfolg).
+async function todoAusgewaehlteLoeschen() {
+  if (!todoAusgewaehlt.size) return;
+  const anzahl = todoAusgewaehlt.size;
+  if (!confirm(anzahl+' ausgewählte To-do(s) löschen?')) return;
+  const ids = new Set(todoAusgewaehlt);
+  const vorher = state.todos;
+  state.todos = (state.todos||[]).filter(t => !ids.has(t.id));
+  const res = await save({verify:true});
+  if (!res || !res.ok) {
+    state.todos = vorher; // Speichern nicht bestätigt -> lokale Änderung zurücknehmen
+    toast('Nicht gelöscht', 'Speichern nicht bestätigt – bitte erneut versuchen', '⛔');
+    return;
+  }
+  todoAusgewaehlt.clear();
+  renderTodoPage();
+  toast('Gelöscht', anzahl+' To-do(s) entfernt', '🗑');
 }
 
 function toggleTodo(id) {
@@ -3100,10 +3276,17 @@ function addTodoItem() {
   toast('To-Do hinzugef\u00fcgt', text, '\u2705');
 }
 
-function deleteTodoItem(id) {
+async function deleteTodoItem(id) {
   if (!confirm('To-Do l\u00f6schen?')) return;
+  const vorher = state.todos;
   state.todos = (state.todos||[]).filter(t => t.id !== id);
-  save();
+  const res = await save({verify:true});
+  if (!res || !res.ok) {
+    state.todos = vorher;
+    toast('Nicht gelöscht', 'Speichern nicht bestätigt – bitte erneut versuchen', '⛔');
+    return;
+  }
+  todoAusgewaehlt.delete(id);
   renderTodoPage();
 }
 
@@ -4582,6 +4765,139 @@ function renderMitarbeiterPage() {
   }
 }
 
+// ── TEMPORÄRBÜRO-STAMMDATEN (Priorität 9) ───────────────────
+// state.temporarbueros[]: {id, name, sachbearbeiter:[{name,tel,email}]}
+// Wiederverwendbare Stammdaten, damit Firma+Kontakte nur einmal gepflegt
+// werden müssen. Autocomplete beim Tippen im "Temporärbüro"-Feld.
+function bueroAutocomplete(el) {
+  const q = el.value.trim().toLowerCase();
+  const box = document.getElementById('ma-buero-suggest');
+  if (!box) return;
+  if (!q) { box.style.display='none'; return; }
+  const treffer = (state.temporarbueros||[]).filter(b => (b.name||'').toLowerCase().includes(q)).slice(0,6);
+  if (!treffer.length) { box.style.display='none'; return; }
+  box.innerHTML = treffer.map(b => {
+    const sb = (b.sachbearbeiter||[])[0];
+    return '<div onclick="bueroWaehlen('+b.id+')" style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">'
+      + '<div style="font-weight:600">'+b.name+'</div>'
+      + (sb ? '<div style="color:var(--muted);font-size:11px">'+sb.name+(sb.tel?' · '+sb.tel:'')+'</div>' : '')
+      + '</div>';
+  }).join('');
+  box.style.display = 'block';
+  setTimeout(()=>document.addEventListener('click', function close(e){
+    if (!box.contains(e.target) && e.target.id!=='ma-buero') { box.style.display='none'; document.removeEventListener('click', close); }
+  }), 0);
+}
+function bueroWaehlen(id) {
+  const b = (state.temporarbueros||[]).find(x=>x.id===id);
+  if (!b) return;
+  document.getElementById('ma-buero').value = b.name;
+  document.getElementById('ma-buero-id').value = b.id;
+  const sb = (b.sachbearbeiter||[])[0];
+  if (sb) {
+    document.getElementById('ma-kontakt-name').value = sb.name||'';
+    document.getElementById('ma-kontakt-tel').value = sb.tel||'';
+    document.getElementById('ma-kontakt-email').value = sb.email||'';
+  }
+  const box = document.getElementById('ma-buero-suggest'); if (box) box.style.display='none';
+}
+// Legt bei Bedarf ein neues Temporärbüro an bzw. ergänzt/aktualisiert den
+// genannten Sachbearbeiter beim bestehenden Büro. Gibt die Büro-ID zurück.
+function bueroStammdatenUpsert(name, sbName, sbTel, sbEmail, existingId) {
+  const n = (name||'').trim();
+  if (!n) return null;
+  if (!state.temporarbueros) state.temporarbueros = [];
+  let b = existingId ? state.temporarbueros.find(x=>x.id===parseInt(existingId)) : null;
+  if (!b) b = state.temporarbueros.find(x=>(x.name||'').trim().toLowerCase()===n.toLowerCase());
+  if (!b) { b = {id:Date.now()+Math.floor(Math.random()*1000), name:n, sachbearbeiter:[]}; state.temporarbueros.push(b); }
+  else if (b.name!==n) b.name = n;
+  const sn = (sbName||'').trim();
+  if (sn) {
+    if (!b.sachbearbeiter) b.sachbearbeiter=[];
+    const idx = b.sachbearbeiter.findIndex(s=>(s.name||'').trim().toLowerCase()===sn.toLowerCase());
+    const entry = {name:sn, tel:(sbTel||'').trim(), email:(sbEmail||'').trim()};
+    if (idx>=0) b.sachbearbeiter[idx] = {...b.sachbearbeiter[idx], ...entry};
+    else b.sachbearbeiter.push(entry);
+  }
+  return b.id;
+}
+
+// ── VERLEIHVERTRAG-ANALYSE (Priorität 10) ───────────────────
+// Extrahiert Text aus einem hochgeladenen PDF (pdf.js, bereits geladen)
+// und ordnet ihn per Regex-Muster den strukturierten Feldern zu - analog
+// zum bestehenden Baustellen-Text-Import (kiParseText). Bestehende, vom
+// Nutzer bereits ausgefüllte Felder werden NIE überschrieben.
+async function extrahierePdfText(dataUrl) {
+  if (typeof pdfjsLib === 'undefined') return '';
+  const base64 = dataUrl.split(',')[1] || '';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+  const pdf = await pdfjsLib.getDocument({data:bytes}).promise;
+  let text='';
+  for (let p=1;p<=pdf.numPages;p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    text += tc.items.map(i=>i.str).join(' ') + '\n';
+  }
+  return text;
+}
+function parseVerleihvertragText(t) {
+  const p = {};
+  function parseDatum(str) {
+    const m = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+    if (!m) return null;
+    const y = m[3].length===2 ? '20'+m[3] : m[3];
+    return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  }
+  let m;
+  if (m = t.match(/(?:verleihfirma|personalverleih(?:sfirma)?|temporärbüro|agentur)[:\s]+([^\n]+)/i)) p.buero = m[1].trim().substring(0,80);
+  if (m = t.match(/(?:sachbearbeiter(?:in)?|berater(?:in)?|kontaktperson)[:\s]+([^\n|,]+)/i)) p.sbName = m[1].trim();
+  if (m = t.match(/(\+41[\d\s]{9,14})/)) p.sbTel = m[1].trim().replace(/\s/g,'');
+  if (m = t.match(/[\w.+-]+@[\w-]+\.[a-z]{2,}/i)) p.sbEmail = m[0];
+  if (m = t.match(/(?:beruf|funktion|tätigkeit)[:\s]+([^\n]+)/i)) p.beruf = m[1].trim();
+  if (m = t.match(/qualifikation[:\s]+([^\n]+)/i)) p.qualifikation = m[1].trim();
+  if (m = t.match(/(?:einsatzbeginn|beginn(?:datum)?)[:\s]+(\d{1,2}\.\d{1,2}\.\d{2,4})/i)) p.einsatzbeginn = parseDatum(m[1]);
+  if (m = t.match(/einsatzdauer[:\s]+([^\n]+)/i)) p.einsatzdauer = m[1].trim();
+  if (m = t.match(/arbeitszeit[:\s]+([^\n]+)/i)) p.arbeitszeit = m[1].trim();
+  if (m = t.match(/(?:stundenansatz|stundenlohn|stundensatz)[:\s]+(?:CHF\s*)?([\d.,]+)/i)) p.stundenansatz = m[1].replace(',','.');
+  if (m = t.match(/\bGAV\b[:\s]*([^\n]{0,60})/i)) p.gav = m[1].trim() || 'ja';
+  if (m = t.match(/(?:vertrags?nr\.?|vertragsnummer)[:\s]+([A-Za-z0-9\-\/]+)/i)) p.vertragsnummer = m[1].trim();
+  if (m = t.match(/vertragsdatum[:\s]+(\d{1,2}\.\d{1,2}\.\d{2,4})/i)) p.vertragsdatum = parseDatum(m[1]);
+  return p;
+}
+function maSetIfEmpty(id, val) {
+  if (!val) return;
+  const el = document.getElementById(id);
+  if (el && !el.value.trim()) el.value = val;
+}
+async function maAnalysiereVerleihvertrag() {
+  const doc = [...tempMaDocs].reverse().find(d => d.type==='application/pdf');
+  if (!doc) return toast('Hinweis','Bitte zuerst einen Verleihvertrag (PDF) bei "Dokumente" hochladen','⚠️');
+  toast('Analysiere','Lese Vertrag…','⏳');
+  try {
+    const text = await extrahierePdfText(doc.data);
+    if (!text || text.trim().length<20) return toast('Hinweis','Kein auslesbarer Text gefunden (evtl. gescanntes Bild-PDF) – bitte Felder manuell ausfüllen','⚠️');
+    const p = parseVerleihvertragText(text);
+    if (p.buero) { maSetIfEmpty('ma-buero', p.buero); bueroAutocomplete(document.getElementById('ma-buero')); }
+    maSetIfEmpty('ma-kontakt-name', p.sbName);
+    maSetIfEmpty('ma-kontakt-tel', p.sbTel);
+    maSetIfEmpty('ma-kontakt-email', p.sbEmail);
+    maSetIfEmpty('ma-verleih-beruf', p.beruf);
+    maSetIfEmpty('ma-verleih-qualifikation', p.qualifikation);
+    maSetIfEmpty('ma-verleih-beginn', p.einsatzbeginn);
+    maSetIfEmpty('ma-verleih-dauer', p.einsatzdauer);
+    maSetIfEmpty('ma-verleih-arbeitszeit', p.arbeitszeit);
+    maSetIfEmpty('ma-verleih-stundenansatz', p.stundenansatz);
+    maSetIfEmpty('ma-verleih-gav', p.gav);
+    maSetIfEmpty('ma-verleih-vertragsnr', p.vertragsnummer);
+    maSetIfEmpty('ma-verleih-vertragsdatum', p.vertragsdatum);
+    toast('Analysiert','Bitte erkannte Felder prüfen und ergänzen','✅');
+  } catch(err) {
+    toast('Fehler','Vertrag konnte nicht gelesen werden: '+err.message,'⚠️');
+  }
+}
+
 function showMaModal(id) {
   tempMaFoto = null; tempMaDocs = [];
   const m = id ? state.mitarbeiter?.find(x => x.id === id) : null;
@@ -4600,8 +4916,19 @@ function showMaModal(id) {
   document.getElementById('ma-startzeit').value = m?.startzeit || '';
   document.getElementById('ma-notfall').value = m?.notfall || '';
   document.getElementById('ma-buero').value = m?.buero || '';
+  document.getElementById('ma-buero-id').value = m?.bueroId || '';
   document.getElementById('ma-kontakt-name').value = m?.kontaktName || '';
   document.getElementById('ma-kontakt-tel').value = m?.kontaktTel || '';
+  document.getElementById('ma-kontakt-email').value = m?.kontaktEmail || '';
+  document.getElementById('ma-verleih-beruf').value = m?.verleih?.beruf || '';
+  document.getElementById('ma-verleih-qualifikation').value = m?.verleih?.qualifikation || '';
+  document.getElementById('ma-verleih-beginn').value = m?.verleih?.einsatzbeginn || '';
+  document.getElementById('ma-verleih-dauer').value = m?.verleih?.einsatzdauer || '';
+  document.getElementById('ma-verleih-arbeitszeit').value = m?.verleih?.arbeitszeit || '';
+  document.getElementById('ma-verleih-stundenansatz').value = m?.verleih?.stundenansatz || '';
+  document.getElementById('ma-verleih-gav').value = m?.verleih?.gav || '';
+  document.getElementById('ma-verleih-vertragsnr').value = m?.verleih?.vertragsnummer || '';
+  document.getElementById('ma-verleih-vertragsdatum').value = m?.verleih?.vertragsdatum || '';
   const preview = document.getElementById('ma-foto-preview');
   if (m?.foto) {
     document.getElementById('ma-foto-preview').innerHTML = `<img src="${m.foto}" style="width:52px;height:52px;border-radius:50%;object-fit:cover">`;
@@ -4799,8 +5126,27 @@ function saveMaModal() {
     faehigkeiten: Array.from(document.querySelectorAll('#ma-faehigkeiten-wrap input:checked')).map(cb=>cb.value),
     notfall: document.getElementById('ma-notfall').value.trim(),
     buero: document.getElementById('ma-buero').value.trim(),
+    bueroId: bueroStammdatenUpsert(
+      document.getElementById('ma-buero').value.trim(),
+      document.getElementById('ma-kontakt-name').value.trim(),
+      document.getElementById('ma-kontakt-tel').value.trim(),
+      document.getElementById('ma-kontakt-email').value.trim(),
+      document.getElementById('ma-buero-id').value
+    ),
     kontaktName: document.getElementById('ma-kontakt-name').value.trim(),
     kontaktTel: document.getElementById('ma-kontakt-tel').value.trim(),
+    kontaktEmail: document.getElementById('ma-kontakt-email').value.trim(),
+    verleih: {
+      beruf: document.getElementById('ma-verleih-beruf').value.trim(),
+      qualifikation: document.getElementById('ma-verleih-qualifikation').value.trim(),
+      einsatzbeginn: document.getElementById('ma-verleih-beginn').value,
+      einsatzdauer: document.getElementById('ma-verleih-dauer').value.trim(),
+      arbeitszeit: document.getElementById('ma-verleih-arbeitszeit').value.trim(),
+      stundenansatz: document.getElementById('ma-verleih-stundenansatz').value.trim(),
+      gav: document.getElementById('ma-verleih-gav').value.trim(),
+      vertragsnummer: document.getElementById('ma-verleih-vertragsnr').value.trim(),
+      vertragsdatum: document.getElementById('ma-verleih-vertragsdatum').value
+    },
     foto: tempMaFoto,
     docs: tempMaDocs
   };
@@ -6117,6 +6463,7 @@ function showBuchungsMenu(maId, datum, key) {
     document.getElementById('buchungs-bs-typ').style.color  = tc;
     document.getElementById('buchungs-bs-name').textContent = entryBs.name + (entryBs.kunde?' · '+entryBs.kunde:'');
     document.getElementById('buchungs-bs-typ').textContent  = entryBs.montageTyp||'';
+    document.getElementById('buchungs-bs-auftragsnr').textContent = entryBs.auftragsnummer ? '# '+entryBs.auftragsnummer : '';
     const vonDE = entryBs.von ? new Date(entryBs.von+'T12:00').toLocaleDateString('de-CH') : '';
     const bisDE = entryBs.bis ? new Date(entryBs.bis+'T12:00').toLocaleDateString('de-CH') : '';
     document.getElementById('buchungs-bs-datum').innerHTML    = vonDE||bisDE ? '📅 '+vonDE+(bisDE?' – '+bisDE:'') : '';
@@ -6124,9 +6471,17 @@ function showBuchungsMenu(maId, datum, key) {
       ? '📍 <a href="https://maps.google.com/?q='+encodeURIComponent(entryBs.adresse)+'" target="_blank" style="color:var(--accent2);text-decoration:none">'+entryBs.adresse+'</a>'
       : '';
     document.getElementById('buchungs-bs-startzeit').innerHTML= entryBs.startzeit ? '⏰ Startzeit: '+entryBs.startzeit : '';
+    document.getElementById('buchungs-bs-montagedetail').innerHTML = entryBs.montageDetail ? '🛠 '+entryBs.montageDetail : '';
     document.getElementById('buchungs-bs-ap').innerHTML       = entryBs.apName
       ? '👤 '+entryBs.apName+(entryBs.apTel?' · '+entryBs.apTel:'')+(entryBs.apEmail?' · '+entryBs.apEmail:'') : '';
     document.getElementById('buchungs-bs-positionen').innerHTML = '👷 '+( entryBs.positionen||1)+' Monteur'+((entryBs.positionen||1)>1?'e':'');
+    const logistikTeile = [
+      entryBs.parkplatz ? '🅿️ '+entryBs.parkplatz : '',
+      entryBs.zufahrt ? '🚪 '+entryBs.zufahrt : '',
+      entryBs.material ? '🧱 '+entryBs.material : '',
+      entryBs.werkzeug ? '🔧 '+entryBs.werkzeug : ''
+    ].filter(Boolean);
+    document.getElementById('buchungs-bs-logistik').innerHTML = logistikTeile.join('<br>');
     // Hotel
     const hotelEl = document.getElementById('buchungs-bs-hotel');
     const hotelTextEl = document.getElementById('buchungs-bs-hotel-text');
@@ -6141,9 +6496,10 @@ function showBuchungsMenu(maId, datum, key) {
       notizEl.style.display = entryBs.notiz ? 'block' : 'none';
       notizEl.innerHTML     = entryBs.notiz ? '📋 '+entryBs.notiz.replace(/\n/g,'<br>') : '';
     }
-    // Status-Notiz ausblenden
-    ['buchungs-bs-datum','buchungs-bs-adresse','buchungs-bs-startzeit','buchungs-bs-ap','buchungs-bs-positionen']
-      .forEach(id=>{}); // Reset nur bei Status
+    // Direkter Sprung ins volle Bearbeiten-Modal (Priorität 3) - nur Admin.
+    window._buchungsMenuBsId = entryBs.id;
+    const bearbBtn = document.getElementById('buchungs-bs-bearbeiten-btn');
+    if (bearbBtn) bearbBtn.style.display = (currentLoginUser && currentLoginUser.admin) ? 'block' : 'none';
     infoEl.style.display = 'block';
   } else if (entryStatus) {
     document.getElementById('buchungs-bs-header').style.background = statusHex(entryStatus);
@@ -6151,10 +6507,16 @@ function showBuchungsMenu(maId, datum, key) {
     document.getElementById('buchungs-bs-typ').style.color  = '#e8eaf0';
     document.getElementById('buchungs-bs-name').textContent = entryStatus;
     document.getElementById('buchungs-bs-typ').textContent  = '';
-    ['buchungs-bs-datum','buchungs-bs-adresse','buchungs-bs-startzeit','buchungs-bs-ap','buchungs-bs-positionen','buchungs-bs-notiz']
+    window._buchungsMenuBsId = null;
+    const bearbBtn2 = document.getElementById('buchungs-bs-bearbeiten-btn');
+    if (bearbBtn2) bearbBtn2.style.display = 'none';
+    ['buchungs-bs-auftragsnr','buchungs-bs-datum','buchungs-bs-adresse','buchungs-bs-startzeit','buchungs-bs-montagedetail','buchungs-bs-ap','buchungs-bs-positionen','buchungs-bs-logistik','buchungs-bs-notiz']
       .forEach(id=>{ const el=document.getElementById(id); if(el){el.innerHTML='';el.style.display='none';} });
     infoEl.style.display = 'block';
   } else {
+    window._buchungsMenuBsId = null;
+    const bearbBtn3 = document.getElementById('buchungs-bs-bearbeiten-btn');
+    if (bearbBtn3) bearbBtn3.style.display = 'none';
     infoEl.style.display = 'none';
   }
 
@@ -6769,6 +7131,31 @@ function calcAbfahrt(ankunftZeit, fahrtzeitMin) {
 
 const HEIMATORT = 'Gewerbestrasse 25, 4123 Allschwil, Schweiz';
 
+// Geocodiert eine Adresse und berechnet die Fahrtstrecke/-zeit ab Allschwil
+// (Nominatim + OSRM, kein API-Key nötig). Wird sowohl vom manuellen
+// 🚗-Button (berechneFahrtzeit) als auch von der automatischen
+// Hotelprüfung (Priorität 8) genutzt - eine einzige Datenquelle.
+async function bsGeocodeUndRoute(adresse) {
+  const homeCoord = [7.5414, 47.5516]; // Allschwil fix
+  const geoUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+    + encodeURIComponent(adresse);
+  const geoResp = await fetch(geoUrl, {headers:{'Accept-Language':'de'}});
+  const geoData = await geoResp.json();
+  if (!geoData.length) return null;
+  const zielLng = parseFloat(geoData[0].lon), zielLat = parseFloat(geoData[0].lat);
+  const osrmUrl = `https://router.project-osrm.org/route/v1/driving/`
+    + `${homeCoord[0]},${homeCoord[1]};${zielLng},${zielLat}?overview=false`;
+  const routeResp = await fetch(osrmUrl);
+  const routeData = await routeResp.json();
+  if (routeData.code !== 'Ok' || !routeData.routes?.length) return null;
+  const sek = routeData.routes[0].duration;
+  const km = +(routeData.routes[0].distance / 1000).toFixed(1);
+  const minTotal = Math.ceil(sek / 60);
+  const h = Math.floor(minTotal/60), min = minTotal % 60;
+  const fahrtzeitStr = h>0 ? `${h}h ${min}min` : `${min} min`;
+  return { km, minTotal, fahrtzeitStr };
+}
+
 async function berechneFahrtzeit() {
   const adresse = document.getElementById('bs-adresse').value.trim();
   if(!adresse) return toast('Hinweis','Bitte zuerst Adresse eingeben','⚠️');
@@ -6780,45 +7167,15 @@ async function berechneFahrtzeit() {
   info.textContent='Berechne Fahrtzeit...';
 
   try {
-    // 1. Geocode Heimatort (einmalig fix)
-    const homeCoord = [7.5414, 47.5516]; // Allschwil fix
-
-    // 2. Geocode Zieladresse via Nominatim
-    const geoUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
-      + encodeURIComponent(adresse);
-    const geoResp = await fetch(geoUrl, {headers:{'Accept-Language':'de'}});
-    const geoData = await geoResp.json();
-
-    if(!geoData.length) {
-      info.textContent = '⚠️ Adresse nicht gefunden';
+    const res = await bsGeocodeUndRoute(adresse);
+    if (!res) {
+      info.textContent = '⚠️ Adresse/Route nicht gefunden';
       btn.textContent='🚗'; btn.disabled=false;
       return;
     }
+    const { km, minTotal, fahrtzeitStr } = res;
 
-    const zielLng = parseFloat(geoData[0].lon);
-    const zielLat = parseFloat(geoData[0].lat);
-
-    // 3. Routing via OSRM (kostenlos, kein API-Key)
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/`
-      + `${homeCoord[0]},${homeCoord[1]};${zielLng},${zielLat}`
-      + `?overview=false`;
-    const routeResp = await fetch(osrmUrl);
-    const routeData = await routeResp.json();
-
-    if(routeData.code !== 'Ok' || !routeData.routes?.length) {
-      info.textContent = '⚠️ Route nicht gefunden';
-      btn.textContent='🚗'; btn.disabled=false;
-      return;
-    }
-
-    const sek      = routeData.routes[0].duration;
-    const km       = (routeData.routes[0].distance / 1000).toFixed(1);
-    const minTotal = Math.ceil(sek / 60);
-    const h        = Math.floor(minTotal/60);
-    const min      = minTotal % 60;
-    const fahrtzeitStr = h>0 ? `${h}h ${min}min` : `${min} min`;
-
-    // 4. Startzeit berechnen: Ankunftszeit - Fahrtzeit - 15min Puffer
+    // Startzeit berechnen: Ankunftszeit - Fahrtzeit - 15min Puffer
     const startzeitInput = document.getElementById('bs-startzeit').value.trim();
     let abfahrtStr = '';
     if(startzeitInput) {
@@ -6833,8 +7190,9 @@ async function berechneFahrtzeit() {
     badge.style.background = 'rgba(30,200,100,.15)';
     badge.style.color = '#1ec864';
 
-    // Fahrtzeit in bs-Objekt merken für Wochenplan-Anzeige
-    window._aktFahrtzeit = { min: minTotal, km, str: fahrtzeitStr, abfahrt: abfahrtStr };
+    // Fahrtzeit/-strecke merken - inkl. Adresse, damit die automatische
+    // Hotelprüfung beim Speichern erkennt, ob der Wert noch aktuell ist.
+    window._aktFahrtzeit = { min: minTotal, km, str: fahrtzeitStr, abfahrt: abfahrtStr, adresse };
 
   } catch(err) {
     info.textContent = '⚠️ Fehler: '+err.message;
@@ -7089,6 +7447,25 @@ function kiParseText(t) {
     if (new RegExp(pat,'i').test(t)) { p.montageArt=typ; break; }
   }
 
+  // Auftragsnummer
+  const anr = t.match(/(?:auftrags?nr\.?|auftragsnummer|bestell(?:nr\.?|nummer))[:\s]+([A-Za-z0-9\-\/]+)/i);
+  if (anr) p.auftragsnummer = anr[1].trim();
+
+  // Logistik: Parkplatz, Zufahrt/Schlüssel, Material, Werkzeug (nur wenn im
+  // Text explizit erwähnt - nichts wird erfunden)
+  const pp = t.match(/(?:parkplatz|parkierung)[:\s]+([^\n]+)/i);
+  if (pp) p.parkplatz = pp[1].trim();
+  const zf = t.match(/(?:zufahrt|schlüssel|schluessel|zugang)[:\s]+([^\n]+)/i);
+  if (zf) p.zufahrt = zf[1].trim();
+  const mat = t.match(/(?:^|\n)\s*material[:\s]+([^\n]+)/i);
+  if (mat) p.material = mat[1].trim();
+  const wz = t.match(/werkzeug[:\s]+([^\n]+)/i);
+  if (wz) p.werkzeug = wz[1].trim();
+
+  // Soll-Stunden (gesamt)
+  const ss = t.match(/(?:soll-?stunden|budget-?stunden)[:\s]+([\d.,]+)/i);
+  if (ss) p.sollStunden = parseFloat(ss[1].replace(',','.'))||null;
+
   // Falls kein Name: ersten nicht-leeren Zeilen-Satz nehmen
   if (!p.name) {
     const lines = t.split('\n').map(l=>l.trim()).filter(l=>l && !/^[-–—]+$/.test(l));
@@ -7109,12 +7486,18 @@ function kiFelder(p) {
   if (p.name)        document.getElementById('bs-name').value        = p.name;
   if (p.kunde)       document.getElementById('bs-kunde').value       = p.kunde;
   if (p.adresse)     document.getElementById('bs-adresse').value     = p.adresse;
-  if (p.von)         document.getElementById('bs-von').value         = p.von;
-  if (p.bis)         document.getElementById('bs-bis').value         = p.bis;
+  if (p.von)       { document.getElementById('bs-von').value         = p.von; document.getElementById('bs-von-anzeige').value = dpFormatDE(p.von); }
+  if (p.bis)       { document.getElementById('bs-bis').value         = p.bis; document.getElementById('bs-bis-anzeige').value = dpFormatDE(p.bis); }
   if (p.startzeit)   document.getElementById('bs-startzeit').value   = p.startzeit;
   if (p.apName)      document.getElementById('bs-ap-name').value     = p.apName;
   if (p.apTel)       document.getElementById('bs-ap-tel').value      = p.apTel;
   if (p.apEmail)     document.getElementById('bs-ap-email').value    = p.apEmail;
+  if (p.auftragsnummer) document.getElementById('bs-auftragsnummer').value = p.auftragsnummer;
+  if (p.parkplatz)   document.getElementById('bs-parkplatz').value   = p.parkplatz;
+  if (p.zufahrt)     document.getElementById('bs-zufahrt').value     = p.zufahrt;
+  if (p.material)    document.getElementById('bs-material').value    = p.material;
+  if (p.werkzeug)    document.getElementById('bs-werkzeug').value    = p.werkzeug;
+  if (p.sollStunden) document.getElementById('bs-sollstunden').value = p.sollStunden;
   if (p.bauleiter) {
     const notizEl = document.getElementById('bs-notiz');
     if (notizEl) notizEl.value = (notizEl.value ? notizEl.value+'\n' : '') + 'Bauleiter: ' + p.bauleiter;
@@ -7172,11 +7555,17 @@ function showBsModal(id) {
     const bs = (state.baustellen||[]).find(b=>b.id===parseInt(id));
     if (bs) {
       alert('🔒 ' + bs.name + '\n\n' +
+        (bs.auftragsnummer ? '# ' + bs.auftragsnummer + '\n' : '') +
         (bs.kunde ? 'Kunde: ' + bs.kunde + '\n' : '') +
         (bs.adresse ? '📍 ' + bs.adresse + '\n' : '') +
         (bs.von ? '📅 ' + bs.von + (bs.bis ? ' – ' + bs.bis : '') + '\n' : '') +
         (bs.startzeit ? '⏰ Start: ' + bs.startzeit + '\n' : '') +
+        (bs.montageDetail ? '🛠 ' + bs.montageDetail + '\n' : '') +
         (bs.apName ? '👤 ' + bs.apName + (bs.apTel ? ' · ' + bs.apTel : '') + '\n' : '') +
+        (bs.parkplatz ? '🅿️ ' + bs.parkplatz + '\n' : '') +
+        (bs.zufahrt ? '🚪 ' + bs.zufahrt + '\n' : '') +
+        (bs.material ? '🧱 ' + bs.material + '\n' : '') +
+        (bs.werkzeug ? '🔧 ' + bs.werkzeug + '\n' : '') +
         (bs.notiz ? '\n📋 ' + bs.notiz : '') +
         '\n\nNur der Admin kann Baustellen bearbeiten.');
     }
@@ -7195,15 +7584,25 @@ function showBsModal(id) {
   const delBtn = document.getElementById('bs-delete-btn');
   const istAdminOderLeiter = currentLoginUser?.admin || currentLoginUser?.entwickler || istLeiterUser();
   if (delBtn) delBtn.style.display = (bs && istAdminOderLeiter) ? '' : 'none';
+  const kopBtn = document.getElementById('bs-kopieren-btn');
+  if (kopBtn) kopBtn.style.display = (bs && istAdminOderLeiter) ? '' : 'none';
   document.getElementById('bs-modal-id').value = id||'';
   document.getElementById('bs-name').value = bs?.name||'';
   document.getElementById('bs-kunde').value = bs?.kunde||'';
   document.getElementById('bs-adresse').value = bs?.adresse||'';
   document.getElementById('bs-von').value = bs?.von||'';
   document.getElementById('bs-bis').value = bs?.bis||'';
+  document.getElementById('bs-von-anzeige').value = bs?.von ? dpFormatDE(bs.von) : '';
+  document.getElementById('bs-bis-anzeige').value = bs?.bis ? dpFormatDE(bs.bis) : '';
   document.getElementById('bs-positionen').value = bs?.positionen||1;
   document.getElementById('bs-montageArt').value = bs?.montageArt||'';
   document.getElementById('bs-montageDetail').value = bs?.montageDetail||'';
+  document.getElementById('bs-auftragsnummer').value = bs?.auftragsnummer||'';
+  document.getElementById('bs-sollstunden').value = (bs?.sollStunden!=null && bs?.sollStunden!=='') ? bs.sollStunden : '';
+  document.getElementById('bs-parkplatz').value = bs?.parkplatz||'';
+  document.getElementById('bs-zufahrt').value = bs?.zufahrt||'';
+  document.getElementById('bs-material').value = bs?.material||'';
+  document.getElementById('bs-werkzeug').value = bs?.werkzeug||'';
   // Chef-Monteur
   const chefMa = bs?.chefMonteurId ? (state.mitarbeiter||[]).find(m=>m.id===bs.chefMonteurId) : null;
   document.getElementById('bs-chefMonteur').value = chefMa ? chefMa.vorname+' '+(chefMa.nachname||'') : '';
@@ -7340,12 +7739,297 @@ function renderBsDocPreview() {
 function openBsDoc(i){const d=tempBsDocs[i];if(!d)return;const a=document.createElement('a');a.href=d.data;a.download=d.name;a.click();}
 function removeBsDoc(i){tempBsDocs.splice(i,1);renderBsDocPreview();}
 
-function saveBsModal() {
+// ── ZENTRALE UMDISPOSITIONS-LOGIK (Priorität 4) ────────────
+// Von saveBsModal (manuelle Bearbeiten-Maske) UND vom GPT-Assistenten
+// (Aktion update_site) genutzt, damit beide Wege den Wochenplan exakt
+// gleich behandeln - keine zwei parallelen Speicherwege.
+function bsWerktage(von, bis) {
+  const out=[]; if(!von) return out;
+  const startD=new Date(von+'T12:00'), endD=new Date((bis||von)+'T12:00');
+  for(let d=new Date(startD); d<=endD; d.setDate(d.getDate()+1)){
+    if(d.getDay()===0||d.getDay()===6) continue; // Sa/So frei
+    out.push(fmtDate(d));
+  }
+  return out;
+}
+function bsUmdisponierePlan(bsId, farbeHex, altVon, altBis, altTeamIds, neuVon, neuBis, neuTeamIds) {
+  if (!state.plan) state.plan = {};
+  const konflikte = [];
+  const altTage = bsWerktage(altVon, altBis);
+  const neuTageSet = new Set(bsWerktage(neuVon, neuBis));
+  (altTeamIds||[]).forEach(maId=>{
+    altTage.forEach(datum=>{
+      const nochGueltig = neuTageSet.has(datum) && (neuTeamIds||[]).includes(maId);
+      if (!nochGueltig) {
+        const key='ma'+maId+'_'+datum;
+        if (state.plan[datum]?.[key]?.bsId===bsId) delete state.plan[datum][key];
+      }
+    });
+  });
+  if ((neuTeamIds||[]).length && neuVon) {
+    bsWerktage(neuVon, neuBis).forEach(datum=>{
+      if (!state.plan[datum]) state.plan[datum] = {};
+      neuTeamIds.forEach(maId=>{
+        const key='ma'+maId+'_'+datum;
+        const bestehend = state.plan[datum][key];
+        if (bestehend && bestehend.bsId!=null && bestehend.bsId!==bsId) {
+          const m=(state.mitarbeiter||[]).find(x=>x.id===maId);
+          const fremd=(state.baustellen||[]).find(b=>b.id===bestehend.bsId);
+          konflikte.push(((m?.vorname||'')+' '+(m?.nachname||'')).trim()+' am '+datum+' bereits auf '+(fremd?.name||'anderer Baustelle'));
+          return;
+        }
+        state.plan[datum][key] = { maId, bsId, farbeHex, notiz: bestehend?.notiz||'', startzeit: bestehend?.startzeit||null, endzeit: bestehend?.endzeit||null };
+      });
+    });
+  }
+  return konflikte;
+}
+
+// ── AUFTRAG KOPIEREN (Priorität 5) ──────────────────────────
+// Übernimmt die aktuell im Modal angezeigten Werte in ein "Neu anlegen"-
+// Formular (leere ID). Das Original bleibt unverändert, da erst beim
+// nachfolgenden Speichern ein komplett neuer Datensatz entsteht - es wird
+// keine gemeinsame Referenz auf Original-Objekte/-Arrays gehalten
+// (tempBsDocs/tempBsTasks sind beim Laden bereits eigenständig kopiert).
+function bsModalKopieren() {
+  const origName = document.getElementById('bs-name').value.trim();
+  if (!origName) return toast('Fehler','Keine Baustelle geladen','⚠️');
+  document.getElementById('bs-modal-id').value = '';
+  document.getElementById('bs-modal-title').textContent = 'Baustelle anlegen (Kopie von "'+origName+'")';
+  document.getElementById('bs-name').value = origName + ' (Kopie)';
+  // Neuer Zeitraum ist Pflicht - wird bewusst nicht übernommen.
+  document.getElementById('bs-von').value = '';
+  document.getElementById('bs-bis').value = '';
+  document.getElementById('bs-von-anzeige').value = '';
+  document.getElementById('bs-bis-anzeige').value = '';
+  document.getElementById('bs-delete-btn').style.display = 'none';
+  document.getElementById('bs-kopieren-btn').style.display = 'none';
+  toast('Kopiert', 'Bitte neuen Zeitraum wählen (und ggf. Monteure anpassen), dann speichern', '📋');
+  document.getElementById('bs-von-anzeige').focus();
+}
+
+// ── MONATSKALENDER-POPUP (Priorität 6) ──────────────────────
+// Generische Komponente: openDatePicker('feld-id', ankerElement) öffnet
+// den Kalender; das kanonische Feld ('feld-id') behält weiterhin den
+// ISO-Wert (YYYY-MM-DD), damit sich am bestehenden Speicher-/Lese-Code
+// nichts ändert. Existiert ein zugehöriges Anzeigefeld ('feld-id-anzeige'),
+// wird dort zusätzlich das lesbare DE-Datum angezeigt.
+let dpState = { inputId:null, viewYear:0, viewMonth:0 };
+
+function dpFormatDE(iso) {
+  if (!iso) return '';
+  const d = new Date(iso+'T12:00');
+  return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear();
+}
+
+function openDatePicker(inputId, anchorEl) {
+  const el = document.getElementById(inputId);
+  const cur = el.value ? new Date(el.value+'T12:00') : new Date();
+  dpState.inputId = inputId;
+  dpState.viewYear = cur.getFullYear();
+  dpState.viewMonth = cur.getMonth();
+  dpRender();
+  const pop = document.getElementById('datepicker-popup');
+  const rect = (anchorEl||el).getBoundingClientRect();
+  pop.style.top = Math.min(rect.bottom + window.scrollY + 4, window.innerHeight + window.scrollY - 300) + 'px';
+  pop.style.left = Math.max(8, Math.min(rect.left + window.scrollX, window.innerWidth - 262)) + 'px';
+  pop.style.display = 'block';
+  setTimeout(()=>document.addEventListener('click', dpOutsideClick), 0);
+}
+function dpOutsideClick(e) {
+  const pop = document.getElementById('datepicker-popup');
+  if (pop && !pop.contains(e.target) && !e.target.closest('[data-dp-trigger]')) {
+    pop.style.display = 'none';
+    document.removeEventListener('click', dpOutsideClick);
+  }
+}
+function dpNavi(delta) {
+  dpState.viewMonth += delta;
+  if (dpState.viewMonth < 0) { dpState.viewMonth = 11; dpState.viewYear--; }
+  if (dpState.viewMonth > 11) { dpState.viewMonth = 0; dpState.viewYear++; }
+  dpRender();
+}
+function dpRender() {
+  const MONATE=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const TAGE=['Mo','Di','Mi','Do','Fr','Sa','So'];
+  document.getElementById('dp-month-label').textContent = MONATE[dpState.viewMonth]+' '+dpState.viewYear;
+  document.getElementById('dp-weekdays').innerHTML = TAGE.map(t=>'<div>'+t+'</div>').join('');
+  const first = new Date(dpState.viewYear, dpState.viewMonth, 1);
+  const startOffset = first.getDay()===0 ? 6 : first.getDay()-1; // Woche beginnt Montag
+  const daysInMonth = new Date(dpState.viewYear, dpState.viewMonth+1, 0).getDate();
+  const el = document.getElementById(dpState.inputId);
+  const selected = el ? el.value : '';
+  const todayStr = fmtDate(new Date());
+  let html='';
+  for (let i=0;i<startOffset;i++) html+='<div></div>';
+  for (let d=1; d<=daysInMonth; d++) {
+    const dateObj = new Date(dpState.viewYear, dpState.viewMonth, d, 12);
+    const ds = fmtDate(dateObj);
+    const isSel = ds===selected, isToday = ds===todayStr, isWe = (dateObj.getDay()===0||dateObj.getDay()===6);
+    let style='text-align:center;padding:6px 0;border-radius:6px;cursor:pointer;font-size:12px;';
+    if (isSel) style+='background:var(--accent);color:#1a1e2e;font-weight:700;';
+    else if (isToday) style+='border:1px solid var(--accent);';
+    if (isWe && !isSel) style+='color:var(--muted);';
+    html += '<div onclick="dpPick(\''+ds+'\')" style="'+style+'">'+d+'</div>';
+  }
+  document.getElementById('dp-days').innerHTML = html;
+}
+function dpPick(ds) {
+  const el = document.getElementById(dpState.inputId);
+  if (!el) return;
+  el.value = ds;
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+  const anzeige = document.getElementById(dpState.inputId+'-anzeige');
+  if (anzeige) anzeige.value = dpFormatDE(ds);
+  document.getElementById('datepicker-popup').style.display='none';
+  document.removeEventListener('click', dpOutsideClick);
+}
+
+// Schnellwahl "Diese Woche" / "Nächste Woche" für Von/Bis (Mo-Fr).
+function bsSchnellwahlWoche(wochenOffset) {
+  const monday = addDays(getMonday(new Date()), wochenOffset*7);
+  const friday = addDays(monday, 4);
+  const vonIso = fmtDate(monday), bisIso = fmtDate(friday);
+  document.getElementById('bs-von').value = vonIso;
+  document.getElementById('bs-bis').value = bisIso;
+  const vonA = document.getElementById('bs-von-anzeige'); if (vonA) vonA.value = dpFormatDE(vonIso);
+  const bisA = document.getElementById('bs-bis-anzeige'); if (bisA) bisA.value = dpFormatDE(bisIso);
+}
+
+// ── INTERNES MONTAGEAUFGEBOT (Priorität 7) ──────────────────
+// Kompakte Zusammenfassung aus allen vorhandenen Auftragsdaten - nichts
+// wird erfunden, nur tatsächlich erfasste Felder erscheinen. Wird beim
+// Speichern automatisch in "Wichtige Infos für die Monteure" (bs-notiz)
+// eingefügt/aktualisiert; bestehender Freitext/Rapport-Verlauf bleibt
+// unangetastet (nur der markierte Block wird ersetzt).
+const MONTAGEAUFGEBOT_START = '── 🪧 Montageaufgebot (automatisch generiert) ──';
+const MONTAGEAUFGEBOT_ENDE  = '── Ende Montageaufgebot ──';
+
+function bsGeneriereMontageaufgebot(data) {
+  const teamNamen = [...new Set([data.chefMonteurId, ...(data.teamMonteurIds||[])].filter(Boolean))]
+    .map(id => { const m=(state.mitarbeiter||[]).find(x=>x.id===id); return m ? ((m.vorname||'')+' '+(m.nachname||'')).trim() : null; })
+    .filter(Boolean);
+  const zeilen = [MONTAGEAUFGEBOT_START];
+  zeilen.push('Auftrag: '+(data.name||'–')+(data.auftragsnummer?' (# '+data.auftragsnummer+')':''));
+  if (data.kunde) zeilen.push('Kunde: '+data.kunde);
+  if (data.adresse) zeilen.push('Baustelle: '+data.adresse);
+  if (data.von) zeilen.push('Datum: '+data.von+(data.bis&&data.bis!==data.von?'–'+data.bis:'')+(data.startzeit?', Start '+data.startzeit:''));
+  const taetigkeit=[data.montageArt,data.montageDetail].filter(Boolean).join(' – ');
+  if (taetigkeit) zeilen.push('Tätigkeit: '+taetigkeit);
+  if (teamNamen.length) zeilen.push('Monteure: '+teamNamen.join(', '));
+  const ap=[data.apName,data.apTel,data.apEmail].filter(Boolean).join(' · ');
+  if (ap) zeilen.push('Ansprechpartner: '+ap);
+  if (data.material) zeilen.push('Material: '+data.material);
+  if (data.werkzeug) zeilen.push('Werkzeug: '+data.werkzeug);
+  if (data.parkplatz) zeilen.push('Parkplatz: '+data.parkplatz);
+  if (data.zufahrt) zeilen.push('Zufahrt/Schlüssel: '+data.zufahrt);
+  if (data.hotelName) zeilen.push('Hotel: '+data.hotelName+(data.hotelDaten?' ('+data.hotelDaten+')':'')+(data.hotelAdresse?' – '+data.hotelAdresse:''));
+  zeilen.push(MONTAGEAUFGEBOT_ENDE);
+  return zeilen.join('\n');
+}
+function bsNotizMitAufgebot(bisherigeNotiz, data) {
+  let rest = bisherigeNotiz || '';
+  const startIdx = rest.indexOf(MONTAGEAUFGEBOT_START);
+  const endIdx = rest.indexOf(MONTAGEAUFGEBOT_ENDE);
+  if (startIdx!==-1 && endIdx!==-1 && endIdx>startIdx) {
+    rest = (rest.slice(0,startIdx) + rest.slice(endIdx+MONTAGEAUFGEBOT_ENDE.length)).trim();
+  }
+  const aufgebot = bsGeneriereMontageaufgebot(data);
+  return rest ? (aufgebot + '\n\n' + rest) : aufgebot;
+}
+// Liest die für das Aufgebot relevanten Felder direkt aus dem Formular
+// (für die Kopieren-Vorschau, bevor gespeichert wird).
+function bsFormAlsDaten() {
+  return {
+    name: document.getElementById('bs-name').value.trim(),
+    auftragsnummer: document.getElementById('bs-auftragsnummer').value.trim(),
+    kunde: document.getElementById('bs-kunde').value.trim(),
+    adresse: document.getElementById('bs-adresse').value.trim(),
+    von: document.getElementById('bs-von').value,
+    bis: document.getElementById('bs-bis').value,
+    startzeit: document.getElementById('bs-startzeit').value.trim(),
+    montageArt: document.getElementById('bs-montageArt').value,
+    montageDetail: document.getElementById('bs-montageDetail').value.trim(),
+    apName: document.getElementById('bs-ap-name').value.trim(),
+    apTel: document.getElementById('bs-ap-tel').value.trim(),
+    apEmail: document.getElementById('bs-ap-email').value.trim(),
+    material: document.getElementById('bs-material').value.trim(),
+    werkzeug: document.getElementById('bs-werkzeug').value.trim(),
+    parkplatz: document.getElementById('bs-parkplatz').value.trim(),
+    zufahrt: document.getElementById('bs-zufahrt').value.trim(),
+    hotelName: document.getElementById('bs-hotel-name').value.trim(),
+    hotelDaten: document.getElementById('bs-hotel-daten').value.trim(),
+    hotelAdresse: document.getElementById('bs-hotel-adresse').value.trim(),
+    chefMonteurId: parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
+    teamMonteurIds: bsGetTeamIds()
+  };
+}
+function bsKopiereMontageaufgebot() {
+  const data = bsFormAlsDaten();
+  if (!data.name) return toast('Fehler','Zuerst Name/Auftrag eingeben','⚠️');
+  const text = bsGeneriereMontageaufgebot(data);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(()=>toast('Kopiert','Montageaufgebot in Zwischenablage','📋'))
+      .catch(()=>toast('Fehler','Kopieren fehlgeschlagen','⚠️'));
+  } else {
+    toast('Fehler','Zwischenablage nicht verfügbar','⚠️');
+  }
+}
+
+// ── HOTELPRÜFUNG (Priorität 8) ──────────────────────────────
+// Prüft die Distanz zur Baustellenadresse und legt bei > 60 km ein
+// Hotel-To-do an, sofern noch keines offen ist. Erfindet nie eine
+// Distanz - ohne (geocodierbare) Adresse passiert nichts.
+async function bsPruefeHotelBedarf(data, oldBs) {
+  if (!data.adresse) return;
+  if (data.fahrtzeitKm == null) {
+    if (window._aktFahrtzeit?.adresse === data.adresse && window._aktFahrtzeit?.km != null) {
+      // Admin hat bereits per 🚗-Button berechnet - keine zweite Abfrage nötig.
+      data.fahrtzeitKm = window._aktFahrtzeit.km;
+    } else if (oldBs && oldBs.adresse === data.adresse && oldBs.fahrtzeitKm != null) {
+      // Adresse unverändert - bereits bekannten Wert übernehmen statt erneut abzufragen.
+      data.fahrtzeitKm = oldBs.fahrtzeitKm;
+      if (!data.fahrtzeitMin) data.fahrtzeitMin = oldBs.fahrtzeitMin;
+      if (!data.fahrtzeitStr) data.fahrtzeitStr = oldBs.fahrtzeitStr;
+    } else {
+      try {
+        const res = await bsGeocodeUndRoute(data.adresse);
+        if (res) {
+          data.fahrtzeitKm = res.km;
+          if (!data.fahrtzeitMin) data.fahrtzeitMin = res.minTotal;
+          if (!data.fahrtzeitStr) data.fahrtzeitStr = res.fahrtzeitStr;
+        }
+      } catch(_) { /* Distanz bleibt unbekannt - kein Blocker fürs Speichern */ }
+    }
+  }
+  if (data.fahrtzeitKm != null && data.fahrtzeitKm > 60) {
+    if (!state.todos) state.todos = [];
+    const bereitsOffen = state.todos.some(t => t.bsId===data.id && !t.erledigt && /^Hotel erforderlich/i.test(t.text||''));
+    if (!bereitsOffen) {
+      state.todos.push({
+        id: Date.now()+Math.floor(Math.random()*1000)+11, bsId: data.id,
+        text: 'Hotel erforderlich / Hotel prüfen – '+data.name+' ('+data.fahrtzeitKm+' km von Allschwil)',
+        zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'',
+        erstelltAm: new Date().toISOString().slice(0,10)
+      });
+    }
+  }
+}
+
+async function saveBsModal() {
   const name=document.getElementById('bs-name').value.trim();
   if(!name) return toast('Fehler','Name erforderlich','⚠️');
   if(!state.baustellen) state.baustellen=[];
   const id=parseInt(document.getElementById('bs-modal-id').value)||Date.now();
+  // Stand VOR dieser Speicherung merken - wird für die Umdisposition
+  // (Von/Bis- bzw. Team-Änderung, Priorität 4) gebraucht.
+  const oldBs = state.baustellen.find(b=>b.id===id) || null;
+  const sollStundenRaw = document.getElementById('bs-sollstunden').value;
   const data={id,name,
+    auftragsnummer:document.getElementById('bs-auftragsnummer').value.trim(),
+    sollStunden: sollStundenRaw!=='' ? (parseFloat(sollStundenRaw)||0) : null,
     kunde:document.getElementById('bs-kunde').value.trim(),
     adresse:document.getElementById('bs-adresse').value.trim(),
     von:document.getElementById('bs-von').value,
@@ -7356,12 +8040,17 @@ function saveBsModal() {
     chefMonteurId:parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
     teamMonteurIds: bsGetTeamIds(),
     startzeit:document.getElementById('bs-startzeit').value.trim(),
-    fahrtzeitMin: window._aktFahrtzeit?.min || null,
-    fahrtzeitStr: window._aktFahrtzeit?.str || null,
+    fahrtzeitMin: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.min ?? null) : null,
+    fahrtzeitKm: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.km ?? null) : null,
+    fahrtzeitStr: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.str ?? null) : null,
     montageTyp:document.getElementById('bs-montageArt').value,
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
     apEmail:document.getElementById('bs-ap-email').value.trim(),
+    parkplatz:document.getElementById('bs-parkplatz').value.trim(),
+    zufahrt:document.getElementById('bs-zufahrt').value.trim(),
+    material:document.getElementById('bs-material').value.trim(),
+    werkzeug:document.getElementById('bs-werkzeug').value.trim(),
     hotelName:document.getElementById('bs-hotel-name').value.trim(),
     hotelAdresse:document.getElementById('bs-hotel-adresse').value.trim(),
     hotelDaten:document.getElementById('bs-hotel-daten').value.trim(),
@@ -7380,26 +8069,44 @@ function saveBsModal() {
   const idx=state.baustellen.findIndex(b=>b.id===id);
   if(idx>=0) state.baustellen[idx]=data; else state.baustellen.push(data);
 
-  // Team-Monteure (inkl. Chef-Monteur) automatisch im Wochenplan eintragen
-  const alleTeamIds = [...new Set([...(data.teamMonteurIds||[]), data.chefMonteurId].filter(Boolean))];
-  if (alleTeamIds.length && data.von) {
-    if (!state.plan) state.plan = {};
-    const startD = new Date(data.von + 'T12:00');
-    const endD = new Date((data.bis || data.von) + 'T12:00');
-    for (let d = new Date(startD); d <= endD; d.setDate(d.getDate()+1)) {
-      const datum = fmtDate(d);
-      // Sonntag überspringen (Wochenende ohne Eintrag)
-      if (d.getDay() === 0 || d.getDay() === 6) continue; // Samstag + Sonntag frei
-      if (!state.plan[datum]) state.plan[datum] = {};
-      alleTeamIds.forEach(maId => {
-        // Bestehenden Status-Eintrag für diesen Tag/Monteur nicht überschreiben falls schon eine andere Baustelle gesetzt ist und nicht diese
-        const key = 'ma' + maId + '_' + datum;
-        state.plan[datum][key] = { maId, bsId: data.id, farbeHex: data.farbeHex, notiz: '' };
-      });
-    }
-  }
+  // Internes Montageaufgebot automatisch generieren/aktualisieren (Priorität
+  // 7) - ersetzt nur den markierten Block, restlicher Notiz-/Rapport-Text
+  // bleibt unverändert erhalten.
+  // Automatische Hotelprüfung (Priorität 8) - vor dem Montageaufgebot, damit
+  // ein neu erkannter Hotelbedarf ggf. dort mit auftaucht.
+  await bsPruefeHotelBedarf(data, oldBs);
 
-  save(); closeBsModal();
+  data.notiz = bsNotizMitAufgebot(data.notiz, data);
+
+  // ── UMDISPOSITION (Priorität 4) ──────────────────────────
+  const neueTeamIds = [...new Set([...(data.teamMonteurIds||[]), data.chefMonteurId].filter(Boolean))];
+  const altTeamIds = oldBs ? [...new Set([...(oldBs.teamMonteurIds||[]), oldBs.chefMonteurId].filter(Boolean))] : [];
+  const konflikte = bsUmdisponierePlan(id, data.farbeHex, oldBs?.von, oldBs?.bis, altTeamIds, data.von, data.bis, neueTeamIds);
+
+  // Dokumentation: jede Umdisposition und jeder übersprungene Konflikt
+  // bekommt einen To-do-Eintrag (bestehende Projekt-Konvention).
+  if (!state.todos) state.todos=[];
+  if (oldBs && (oldBs.von!==data.von || oldBs.bis!==data.bis)) {
+    state.todos.push({ id: Date.now()+Math.floor(Math.random()*1000), bsId: id,
+      text: 'Umdisponiert: '+name+' von '+(oldBs.von||'–')+'–'+(oldBs.bis||'–')+' auf '+(data.von||'–')+'–'+(data.bis||'–'),
+      zustaendig: currentLoginUser?((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim():'–',
+      erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'', erstelltAm:new Date().toISOString().slice(0,10) });
+  }
+  konflikte.forEach(k=>{
+    state.todos.push({ id: Date.now()+Math.floor(Math.random()*1000)+Math.floor(Math.random()*1000), bsId: id,
+      text: '⚠️ Konflikt bei Umdisposition '+name+': '+k+' – manuell prüfen',
+      zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'', erstelltAm:new Date().toISOString().slice(0,10) });
+  });
+
+  // KRITISCH: erst nach bestätigtem, verifiziertem Speichern gilt die
+  // Änderung als ausgeführt (gleiches Prinzip wie beim GPT-Assistenten).
+  const saveResult = await save({verify:true});
+  if (!saveResult || !saveResult.ok) {
+    toast('Nicht gespeichert', 'Firebase-Speichern fehlgeschlagen – bitte erneut versuchen', '⛔');
+    return; // Modal bleibt bewusst offen
+  }
+  closeBsModal();
+  if (konflikte.length) toast('Teilweise gespeichert', konflikte.length+' Konflikt(e) übersprungen – siehe To-Do-Liste', '⚠️');
   // Falls die Baustelle in der aktuell angezeigten Woche nicht sichtbar wäre, zu ihrem Start springen
   if (data.von) {
     const vonDate = new Date(data.von + 'T12:00');
@@ -7411,7 +8118,8 @@ function saveBsModal() {
   } else {
     renderWochenplan();
   }
-  toast('Baustelle gespeichert',name,'✅');
+  try{renderTodoPage();}catch(_){ }
+  if (!konflikte.length) toast('Baustelle gespeichert',name,'✅');
 }
 
 function deleteBs() {
@@ -7427,6 +8135,13 @@ function deleteBs() {
   save(); closeBsModal(); renderWochenplan();
 }
 
+
+function buchungBearbeiten() {
+  const bsId = window._buchungsMenuBsId;
+  if (!bsId) return;
+  document.getElementById('buchungs-menu').classList.remove('open');
+  showBsModal(bsId);
+}
 
 function buchungEinzel() {
   document.getElementById('buchungs-menu').classList.remove('open');
@@ -10177,6 +10892,33 @@ function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugN
   };
 }
 
+// Ordnet optionale strukturierte Felder aus einer GPT-Aktion einem
+// Baustelle-Objekt zu - von create_site UND update_site genutzt, damit
+// beide denselben Feldsatz kennen (Priorität 2: "nicht nur Auftragstitel").
+// Fehlende/leere Werte werden NIE erfunden - nur explizit gelieferte Felder
+// werden übernommen.
+function gptApplySiteFields(site, a) {
+  const set = (key, val) => { if (val!==undefined && val!==null && String(val).trim()!=='') site[key] = String(val).trim(); };
+  set('kunde', a.kunde);
+  set('adresse', a.adresse);
+  set('auftragsnummer', a.auftragsnummer);
+  set('montageDetail', a.montage_beschreibung || a.montageDetail);
+  set('montageArt', a.montage_art || a.montageArt);
+  if(site.montageArt) site.montageTyp = site.montageArt;
+  set('apName', a.ansprechpartner_name || a.ap_name);
+  set('apTel', a.ansprechpartner_telefon || a.ap_telefon);
+  set('apEmail', a.ansprechpartner_email || a.ap_email);
+  set('material', a.material);
+  set('werkzeug', a.werkzeug);
+  set('parkplatz', a.parkplatz);
+  set('zufahrt', a.zufahrt);
+  set('hotelName', a.hotel_name);
+  set('hotelAdresse', a.hotel_adresse);
+  set('hotelDaten', a.hotel_daten);
+  if (a.soll_stunden!==undefined && a.soll_stunden!==null && a.soll_stunden!=='') site.sollStunden = parseFloat(a.soll_stunden)||0;
+  if (a.positionen!==undefined && a.positionen!==null && a.positionen!=='') site.positionen = parseInt(a.positionen)||1;
+}
+
 async function gptExecuteActions(actions,originalMessage){
   const applied=[],errors=[];
   const mutations=actions.filter(a=>a&&a.type!=='create_todo');
@@ -10401,15 +11143,41 @@ async function gptExecuteActions(actions,originalMessage){
       } else if(a.type==='update_site'){
         const site=gptFindSite(a); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
         const note=(a.note||a.text||'').trim();
-        if(a.date){site.von=a.date; if(!site.bis||site.bis<site.von)site.bis=a.date;}
+        const vorherVon=site.von, vorherBis=site.bis;
+        const vorherSnapshot={adresse:site.adresse, fahrtzeitKm:site.fahrtzeitKm, fahrtzeitMin:site.fahrtzeitMin, fahrtzeitStr:site.fahrtzeitStr};
+        // Expliziter Zeitraum (von/bis) hat Vorrang vor dem einfachen "date"-Feld -
+        // erlaubt echte Umdisposition analog zur manuellen Bearbeiten-Maske.
+        if(a.von || a.bis){
+          if(a.von) site.von=a.von;
+          if(a.bis) site.bis=a.bis;
+          if(!site.bis || site.bis<site.von) site.bis=site.von;
+        } else if(a.date){
+          site.von=a.date; if(!site.bis||site.bis<site.von)site.bis=a.date;
+        }
+        const vorherAdresse=site.adresse;
+        gptApplySiteFields(site, a);
+        if(site.adresse!==vorherAdresse) site.fahrtzeitKm=null; // Adresse geändert -> Distanz neu ermitteln
+        await bsPruefeHotelBedarf(site, vorherSnapshot);
         if(note) site.notiz=(site.notiz?site.notiz+'\n':'')+note;
-        const auditText='Baustelle geändert: '+site.name+(a.date?' – Datum '+a.date:'')+(note?' – '+note:'');
+        site.notiz = bsNotizMitAufgebot(site.notiz, site);
+        let umdispoHinweis='';
+        if((vorherVon!==site.von || vorherBis!==site.bis)){
+          const teamIds=[...new Set([...(site.teamMonteurIds||[]), site.chefMonteurId].filter(Boolean))];
+          const umdispoKonflikte=bsUmdisponierePlan(site.id, site.farbeHex, vorherVon, vorherBis, teamIds, site.von, site.bis, teamIds);
+          umdispoHinweis=' – Zeitraum '+(vorherVon||'–')+'–'+(vorherBis||'–')+' → '+(site.von||'–')+'–'+(site.bis||'–');
+          umdispoKonflikte.forEach(k=>gptTodo('⚠️ Konflikt bei Umdisposition '+site.name+': '+k+' – manuell prüfen',gptActor().name,site.id,'GPT-Konflikt'));
+        }
+        const auditText='Baustelle geändert: '+site.name+umdispoHinweis+(note?' – '+note:'');
         gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Baustelle '+site.name+' aktualisiert');
 
       } else if(a.type==='create_site'){
         const name=(a.site_name||a.target_name||a.text||'').trim(); if(!name) throw new Error('Baustellenname fehlt');
-        const id=Date.now()+Math.floor(Math.random()*1000); const site={id,name,kunde:'',adresse:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',fahrtzeitMin:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',hotelName:'',hotelAdresse:'',hotelDaten:'',notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
+        const id=Date.now()+Math.floor(Math.random()*1000);
+        const site={id,name,kunde:'',adresse:'',auftragsnummer:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',fahrtzeitMin:null,fahrtzeitKm:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',parkplatz:'',zufahrt:'',material:'',werkzeug:'',hotelName:'',hotelAdresse:'',hotelDaten:'',sollStunden:null,notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
+        gptApplySiteFields(site, a);
+        await bsPruefeHotelBedarf(site, null);
+        site.notiz = bsNotizMitAufgebot(site.notiz, site);
         if(!state.baustellen)state.baustellen=[]; state.baustellen.push(site);
         const auditText='Baustelle erstellt: '+name+(a.date?' – '+a.date:'');
         gptAudit(auditText,id); auditedTextsThisBatch.push(gptNorm(auditText));
