@@ -3154,6 +3154,12 @@ function initialenVon(name) {
 // unabhängige Zustände; ein To-do muss zum Löschen nicht erledigt sein.
 let todoAusgewaehlt = new Set();
 
+// Erzeugt eine für Inline-HTML-Attribute (onclick/onchange, doppelt gequotet) sichere
+// JS-Literal-Darstellung einer To-do-ID – funktioniert für numerische und String-IDs
+// (z.B. "gpt_todo-test-fixed-002"), ohne die ID selbst zu verändern.
+function todoIdAttr(id) {
+  return JSON.stringify(id).replace(/"/g, '&quot;');
+}
 function renderTodoPage() {
   if (!state.todos) state.todos = [];
   // Auswahl von zwischenzeitlich gelöschten To-dos bereinigen.
@@ -3191,16 +3197,16 @@ function renderTodoPage() {
     const istAusgewaehlt = todoAusgewaehlt.has(t.id);
     return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+(istAusgewaehlt?';border-color:var(--accent)':'')+'">'
       + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center;flex-shrink:0;margin-top:3px">'
-      + '<input type="checkbox" '+(istAusgewaehlt?'checked':'')+' onchange="toggleTodoAuswahl('+t.id+',this.checked)" title="Auswählen (für Mehrfachlöschen)" style="width:16px;height:16px;cursor:pointer">'
-      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+t.id+')" title="Erledigt" style="width:18px;height:18px">'
+      + '<input type="checkbox" '+(istAusgewaehlt?'checked':'')+' onchange="toggleTodoAuswahl('+todoIdAttr(t.id)+',this.checked)" title="Auswählen (für Mehrfachlöschen)" style="width:16px;height:16px;cursor:pointer">'
+      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+todoIdAttr(t.id)+')" title="Erledigt" style="width:18px;height:18px">'
       + '</div>'
       + '<div style="flex:1">'
       + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'+bsHtml+dueHtml+'</div>'
-      + '<textarea onchange="setTodoText('+t.id+',this.value)" rows="2" style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;resize:vertical'+(t.erledigt?';text-decoration:line-through':'')+'">'+textEsc+'</textarea>'
+      + '<textarea onchange="setTodoText('+todoIdAttr(t.id)+',this.value)" rows="2" style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;resize:vertical'+(t.erledigt?';text-decoration:line-through':'')+'">'+textEsc+'</textarea>'
       + '<div style="font-size:12px;color:var(--muted);margin-top:4px">\ud83d\udc64 '+(t.zustaendig||'\u2013')+'</div>'
       + erledigtInfo
       + '</div>'
-      + '<button onclick="deleteTodoItem('+t.id+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
+      + '<button onclick="deleteTodoItem('+todoIdAttr(t.id)+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
       + '</div>';
   }).join('');
 }
