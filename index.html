@@ -1519,6 +1519,20 @@
         <div style="font-size:11px;color:var(--muted);margin-top:3px">Beim Speichern wird oben automatisch ein 🪧 Montageaufgebot aus den erfassten Feldern eingefügt/aktualisiert - bestehende Notizen bleiben erhalten.</div>
       </div>
     </div>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px">Kategorie (für neue Uploads)</label>
+      <select id="bs-doc-category" style="margin-top:4px">
+        <option>Arbeitsbeschrieb</option>
+        <option>Dokumentation</option>
+        <option>Fotos</option>
+        <option>Mail</option>
+        <option>Pläne</option>
+        <option>Quittungen</option>
+        <option>Schäden</option>
+        <option>Stunden_Rapporte</option>
+        <option selected>Sonstiges</option>
+      </select>
+    </div>
     <div id="bs-drop-zone" class="doc-upload-area" 
       ondragover="event.preventDefault();this.style.borderColor='var(--accent2)'" 
       ondragleave="this.style.borderColor=''" 
@@ -1528,6 +1542,7 @@
     </div>
     <input type="file" id="bs-doc-input" accept="image/*,application/pdf,.dwg,.dxf" multiple style="display:none" onchange="handleBsDocUpload(event)">
     <div class="doc-preview-grid" id="bs-doc-preview"></div>
+    <div id="bs-doc-upload-status" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
     <hr class="divider">
     <div>
       <label>Farbe im Plan</label>
@@ -3048,7 +3063,21 @@ async function loadDocsFromIDB(s) {
     }
     for (const b of (s.baustellen||[])) {
       const docs = await get('bs_' + b.id);
-      if (docs) b.docs = docs;
+      if (docs && Array.isArray(b.docs)) {
+        // NICHT das ganze Array überschreiben (das würde auf einem anderen
+        // Gerät hochgeladene Server-Dokumente wieder verschwinden lassen,
+        // da diese nie in die lokale IndexedDB dieses Geräts gelangen).
+        // Nur bei _localOnly-Einträgen die lokal zwischengespeicherten Bytes
+        // wieder anhängen; Server-Dokumente (storage:'site-document') bleiben
+        // exakt so, wie sie aus Firebase kamen.
+        b.docs = b.docs.map(d => {
+          if (!d._localOnly) return d;
+          const match = docs.find(x => x.name === d.name && x.type === d.type);
+          return match || d;
+        });
+      } else if (docs && !b.docs) {
+        b.docs = docs;
+      }
     }
   } catch(e) { console.warn('IndexedDB read error:', e); }
 }
@@ -3065,7 +3094,13 @@ function stripLargeData(s) {
     m.docs = (m.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
   });
   (copy.baustellen||[]).forEach(b => {
-    b.docs = (b.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+    // Server-Dokumente (storage:'site-document') enthalten ohnehin nur
+    // schlanke Metadaten (kein .data) - die dürfen NICHT auf _localOnly
+    // reduziert werden, sonst geht Kategorie/Grösse/Zeitstempel bei jedem
+    // Speichern verloren und sie würden fälschlich als "nur lokal" markiert.
+    b.docs = (b.docs||[]).map(d => d.storage === 'site-document'
+      ? d
+      : { name: d.name, type: d.type, _localOnly: true });
   });
   return copy;
 }
@@ -7772,26 +7807,165 @@ function deleteBaustelleById(id) {
 function handleBsDrop(e) {
   e.preventDefault();
   document.getElementById('bs-drop-zone').style.borderColor='';
-  Array.from(e.dataTransfer.files).forEach(readBsFile);
+  Array.from(e.dataTransfer.files).forEach(bsUploadDocumentToServer);
 }
-function handleBsDocUpload(e) { Array.from(e.target.files).forEach(readBsFile); e.target.value=''; }
+function handleBsDocUpload(e) { Array.from(e.target.files).forEach(bsUploadDocumentToServer); e.target.value=''; }
+// Alte, rein lokale Ablage (Base64 → IndexedDB). Bleibt unverändert bestehen -
+// wird vom Dropzone-Handler oben nicht mehr aufgerufen, aber nicht entfernt,
+// da bestehende Aufrufer/Altbestand darauf weiterhin funktionieren müssen.
 function readBsFile(file) {
   const r=new FileReader();
   r.onload=ev=>{ tempBsDocs.push({name:file.name,type:file.type,data:ev.target.result}); renderBsDocPreview(); };
   r.readAsDataURL(file);
 }
+
+// ══════════════════════════════════════════════════════════════
+// NEU: physischer Server-Upload über den Cloudflare Worker
+// (POST /api/v1/site-documents → Bridge → OneDrive-Auftragsordner).
+// Ersetzt für NEUE Dateien den bisherigen reinen Base64/IndexedDB-Weg.
+// Bestehende IndexedDB-Dokumente (readBsFile-Altbestand) bleiben unberührt.
+// ══════════════════════════════════════════════════════════════
+const LAGERTOOL_SITE_DOCS_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/api/v1/site-documents';
+
+// Leitet aus der Adresse eine Ortsangabe ab - identische Logik wie
+// deriveCityFromAddress() im Worker, damit Browser- und ChatGPT-Pfad auf
+// denselben Auftragsordnernamen kommen.
+function bsCityFromAdresse(adresse) {
+  if (typeof adresse !== 'string' || !adresse.trim()) return '';
+  const parts = adresse.split(',');
+  let last = parts[parts.length - 1].trim();
+  last = last.replace(/^\d{4,5}\s+/, '');
+  return last.trim();
+}
+
+// HTTP-Header-Werte müssen ByteString/Latin-1-sicher sein - Dateinamen mit
+// Umlauten etc. würden sonst den fetch()-Aufruf zum Absturz bringen. Nur für
+// den Transport im Header; der Anzeigename in der Oberfläche bleibt original.
+function bsAsciiSafeHeaderValue(str) {
+  return String(str||'').replace(/[^\x20-\x7E]/g, '_');
+}
+
+// Wartet, bis lagertoolOAuthToken (vom bestehenden, unveränderten OAuth-Code)
+// gesetzt wird - reine Beobachtung der vorhandenen Variable, kein Eingriff
+// in den bestehenden Login-/Message-Listener-Code.
+function lagertoolOAuthWaitForToken(timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    if (lagertoolOAuthToken) return resolve(lagertoolOAuthToken);
+    const start = Date.now();
+    const iv = setInterval(() => {
+      if (lagertoolOAuthToken) { clearInterval(iv); resolve(lagertoolOAuthToken); }
+      else if (Date.now() - start > timeoutMs) { clearInterval(iv); reject(new Error('Zeitüberschreitung beim Login.')); }
+    }, 300);
+  });
+}
+async function lagertoolOAuthEnsureToken() {
+  if (lagertoolOAuthToken) return lagertoolOAuthToken;
+  await lagertoolOAuthLogin();
+  const statusEl = document.getElementById('bs-doc-upload-status');
+  if (statusEl) statusEl.textContent = '🔐 Bitte im geöffneten Anmeldefenster einloggen…';
+  return lagertoolOAuthWaitForToken();
+}
+
+async function bsUploadDocumentToServer(file) {
+  const statusEl = document.getElementById('bs-doc-upload-status');
+  const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+
+  const siteId = document.getElementById('bs-modal-id').value;
+  if (!siteId) {
+    setStatus('❌ Bitte zuerst die Baustelle einmal speichern, bevor Dokumente hochgeladen werden.');
+    toast('Fehler', 'Baustelle muss vor Dokument-Upload gespeichert sein', '⚠️');
+    return;
+  }
+  const kunde = document.getElementById('bs-kunde').value.trim();
+  const adresse = document.getElementById('bs-adresse').value.trim();
+  const auftragsnummer = document.getElementById('bs-auftragsnummer').value.trim();
+  const city = bsCityFromAdresse(adresse);
+  const category = document.getElementById('bs-doc-category').value || 'Sonstiges';
+
+  let token;
+  try {
+    setStatus('⏳ "' + file.name + '" wird hochgeladen…');
+    token = await lagertoolOAuthEnsureToken();
+  } catch (e) {
+    setStatus('❌ Anmeldung fehlgeschlagen: ' + (e.message || e));
+    toast('Fehler', 'Anmeldung für Dokument-Upload fehlgeschlagen', '⚠️');
+    return;
+  }
+
+  let response, data;
+  try {
+    response = await fetch(LAGERTOOL_SITE_DOCS_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Site-Id': String(siteId),
+        'X-Customer': bsAsciiSafeHeaderValue(kunde),
+        'X-City': bsAsciiSafeHeaderValue(city),
+        'X-OrderNumber': bsAsciiSafeHeaderValue(auftragsnummer),
+        'X-Category': category,
+        'X-Filename': bsAsciiSafeHeaderValue(file.name)
+      },
+      body: file
+    });
+    data = await response.json().catch(() => ({}));
+  } catch (e) {
+    setStatus('❌ Dokument konnte nicht gespeichert werden (Netzwerkfehler).');
+    toast('Fehler', 'Dokument konnte nicht gespeichert werden', '⚠️');
+    return;
+  }
+
+  if (response.status === 401) {
+    lagertoolOAuthToken = null;
+    setStatus('🔐 Anmeldung abgelaufen - bitte erneut anmelden und Upload wiederholen.');
+    toast('Anmeldung abgelaufen', 'Bitte erneut anmelden, dann Datei nochmals hochladen', '🔐');
+    return;
+  }
+  if (!response.ok || data.savedLocally !== true) {
+    setStatus('❌ Dokument konnte nicht gespeichert werden' + (data.error ? (': ' + data.error) : '.'));
+    toast('Fehler', 'Dokument konnte nicht gespeichert werden', '⚠️');
+    return;
+  }
+
+  // Erst jetzt, nach bestätigter physischer Speicherung: Metadaten anzeigen.
+  tempBsDocs.push({
+    name: data.fileName || file.name,
+    category: data.category || category,
+    orderFolder: data.orderFolder || null,
+    size: typeof data.size === 'number' ? data.size : file.size,
+    mimeType: file.type || null,
+    uploadedAt: new Date().toISOString(),
+    storage: 'site-document'
+  });
+  renderBsDocPreview();
+  setStatus('✅ "' + file.name + '" gespeichert (' + category + ')');
+  toast('Dokument gespeichert', file.name, '✅');
+}
+
 function renderBsDocPreview() {
   const g=document.getElementById('bs-doc-preview'); if(!g) return;
   if(!tempBsDocs.length){g.innerHTML='';return;}
-  g.innerHTML=tempBsDocs.map((d,i)=>`<div class="doc-preview-item">
+  g.innerHTML=tempBsDocs.map((d,i)=>{
+    if (d.storage === 'site-document') {
+      // Server-Dokument: keine Bytes lokal vorhanden (nur Metadaten) - kein
+      // Bild-Preview, kein lokaler Download, kein Entfernen-Button (es gibt
+      // noch keine Löschfunktion gegen die physische Ablage).
+      return `<div class="doc-preview-item">
+        <div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px">📄<span style="font-size:9px;color:var(--muted)">${(d.category||'').toUpperCase()}</span></div>
+        <div class="doc-label" title="${d.name}">${d.name}</div>
+        <div style="font-size:9px;color:var(--muted);text-align:center">✅ gespeichert</div>
+      </div>`;
+    }
+    return `<div class="doc-preview-item">
     ${d.type?.startsWith('image')
       ?`<img src="${d.data}" onclick="openLightbox('${d.data}')" style="cursor:pointer">`
       :`<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px;cursor:pointer" onclick="openBsDoc(${i})">📄<span style="font-size:9px;color:var(--muted)">${d.name.split('.').pop().toUpperCase()}</span></div>`}
     <button class="doc-remove" onclick="removeBsDoc(${i})">✕</button>
     <div class="doc-label">${d.name}</div>
-  </div>`).join('');
+  </div>`;
+  }).join('');
 }
-function openBsDoc(i){const d=tempBsDocs[i];if(!d)return;const a=document.createElement('a');a.href=d.data;a.download=d.name;a.click();}
+function openBsDoc(i){const d=tempBsDocs[i];if(!d||!d.data)return;const a=document.createElement('a');a.href=d.data;a.download=d.name;a.click();}
 function removeBsDoc(i){tempBsDocs.splice(i,1);renderBsDocPreview();}
 
 // ── ZENTRALE UMDISPOSITIONS-LOGIK (Priorität 4) ────────────
