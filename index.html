@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 <script>if (typeof emailjs !== 'undefined') { try { emailjs.init('uEjZ4g6QkqHfSFjQ_'); } catch(e) { console.warn('EmailJS init fehlgeschlagen:', e); } } else { console.warn('EmailJS Script nicht geladen - Bestellungen per Mail funktionieren nicht ohne Internetverbindung'); }</script>
 <!-- Firebase -->
@@ -1442,7 +1443,7 @@
     <div class="form-row cols-2">
       <div>
         <label style="display:flex;align-items:center;gap:8px">
-          Startzeit
+          Startzeit (Ankunft Baustelle)
           <span id="fahrtzeit-badge" style="display:none;font-size:10px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--surface2);color:var(--muted)"></span>
         </label>
         <div style="display:flex;gap:6px;align-items:center">
@@ -1456,6 +1457,12 @@
         <label>👥 Anzahl Monteure auf diesem Block</label>
         <input type="number" id="bs-positionen" placeholder="z.B. 2" min="1" max="30" value="1">
         <div style="font-size:11px;color:var(--muted);margin-top:3px">Bestimmt wie viele Monteur-Felder beim "Block einfügen" erscheinen</div>
+      </div>
+    </div>
+    <div class="form-row cols-1">
+      <div>
+        <label>Abfahrtszeit Allschwil <span style="font-weight:400;color:var(--muted)">(optional - sonst automatisch aus Startzeit − Fahrtzeit berechnet)</span></label>
+        <input type="text" id="bs-abfahrt-allschwil" placeholder="z.B. 05:45 (leer lassen für automatische Berechnung)">
       </div>
     </div>
 
@@ -1503,9 +1510,8 @@
     </div>
     <div class="form-row cols-1">
       <div>
-        <label style="display:flex;justify-content:space-between;align-items:center">
+        <label>
           <span>📋 Notizen / Rapport-Verlauf</span>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="bsKopiereMontageaufgebot()" title="Kompakte Zusammenfassung aus allen erfassten Feldern in die Zwischenablage kopieren">🪧 Montageaufgebot kopieren</button>
         </label>
         <textarea id="bs-notiz" rows="4"
           style="width:100%;resize:vertical;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);line-height:1.5"
@@ -1535,6 +1541,13 @@
       </div>
       <input type="hidden" id="bs-farbe" value="gruen">
     </div>
+    <hr class="divider">
+    <div class="card-title">📎 INTERNES MONTAGEAUFGEBOT</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Fasst alle oben erfassten Daten (inkl. Positionen, Notizen/Rapport-Verlauf und Anhänge-Hinweis) zu einem vollständigen internen Montageaufgebot zusammen - immer aktuell, nie ein alter gespeicherter Text.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+      <button type="button" class="btn btn-secondary" onclick="bsKopiereMontageaufgebot()">📋 Montageaufgebot kopieren</button>
+      <button type="button" class="btn btn-secondary" onclick="bsMontageaufgebotPDF()">📄 Montageaufgebot als PDF</button>
+    </div>
     <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeBsModal()">Abbrechen</button>
       <button class="btn btn-secondary" id="bs-delete-btn" style="color:var(--red);border-color:var(--red);margin-right:auto;display:none" onclick="deleteBaustelle()">🗑 Löschen</button>
@@ -1557,12 +1570,16 @@
     <!-- Baustellen-Auswahl -->
     <div style="margin-bottom:10px">
       <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px">Baustelle</label>
+      <input type="text" id="zell-bs-search" placeholder="Baustelle suchen…" autocomplete="off"
+        style="margin-top:6px" oninput="zellRenderBsListe(this.value)">
       <div id="zell-bs-liste" style="margin-top:8px;max-height:160px;overflow-y:auto"></div>
     </div>
 
     <!-- Monteur-Auswahl (erscheint nach Baustellen-Wahl) -->
     <div id="zell-monteur-wrap" style="display:none;margin-bottom:10px">
       <label style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px">Monteur wählen</label>
+      <input type="text" id="zell-monteur-search" placeholder="Monteur suchen…" autocomplete="off"
+        style="margin-top:6px" oninput="wpMaSelectBs(wpCurrentBsId, this.value)">
       <div id="zell-monteur-liste" style="margin-top:8px;max-height:200px;overflow-y:auto"></div>
     </div>
 
@@ -2496,7 +2513,7 @@ function spRender(inputEl, dd, query, opts) {
       const belegtBei = findFahrzeugFuerMitarbeiterId(m.id, excludeFzgId);
       if (belegtBei) { gesperrt = true; sperrText = '🔒 ' + belegtBei.name; }
     }
-    return `<div class="sp-item${gesperrt?' disabled':''}" ${gesperrt?'':`onclick="spSelect(${m.id}, '${name.replace(/'/g,"\\'")}')"`}>
+    return `<div class="sp-item${gesperrt?' disabled':''}" ${gesperrt?'':`onclick="spSelect(${maIdAttr(m.id)}, '${name.replace(/'/g,"\\'")}')"`}>
       <span>${name}${rolle}</span>
       ${sperrText ? `<span style="font-size:11px;color:var(--muted)">${sperrText}</span>` : ''}
     </div>`;
@@ -2574,7 +2591,7 @@ function bsTeamPickerRender(dd, query) {
     });
   dd.innerHTML = list.map(m => {
     const name = m.vorname + ' ' + (m.nachname||'');
-    return `<div class="sp-item" onclick="bsAddTeamMonteur(${m.id})"><span>${name}</span></div>`;
+    return `<div class="sp-item" onclick="bsAddTeamMonteur(${maIdAttr(m.id)})"><span>${name}</span></div>`;
   }).join('') || '<div class="sp-item disabled"><span>Keine weiteren Mitarbeiter</span></div>';
 }
 function bsAddTeamMonteur(maId) {
@@ -2614,7 +2631,7 @@ function fzgMonteurPickerOpen() {
 }
 
 function doLogin(fromBiometric) {
-  const id = parseInt(document.getElementById('login-name-id').value);
+  const id = maIdValue(document.getElementById('login-name-id').value);
   const pin = document.getElementById('login-pin').value.trim();
   const errEl = document.getElementById('login-error');
 
@@ -3670,7 +3687,7 @@ function saveFzgModal() {
   const name = document.getElementById('fzg-modal-name').value.trim();
   const monteur = document.getElementById('fzg-modal-monteur').value.trim();
   const monteurIdRaw = document.getElementById('fzg-modal-monteur-id').value;
-  const monteurId = monteurIdRaw !== '' ? parseInt(monteurIdRaw) : null;
+  const monteurId = monteurIdRaw !== '' ? maIdValue(monteurIdRaw) : null;
   if (!name || !monteur) return toast('Fehler', 'Fahrzeug-Nr. und Monteur pflichtfeld', '⚠️');
   const id = parseInt(document.getElementById('fzg-modal-id').value) || Date.now();
   // Sperre: dieser Monteur darf nicht schon einem anderen Fahrzeug zugewiesen sein
@@ -4166,7 +4183,7 @@ async function submitBestellung() {
     if (!fzg) return toast('Fehler', 'Fahrzeug nicht gefunden', '⚠️');
     fzgName = fzg.name; monteurName = fzg.monteur || ''; fahrzeugId = fzg.id;
   } else if (selVal.startsWith('ma_')) {
-    const mId = parseInt(selVal.slice(3));
+    const mId = maIdValue(selVal.slice(3));
     const ma = (state.mitarbeiter||[]).find(m => m.id === mId);
     if (!ma) return toast('Fehler', 'Monteur nicht gefunden', '⚠️');
     fzgName = '(kein Fahrzeug)'; monteurName = (ma.vorname+' '+(ma.nachname||'')).trim(); maId = ma.id;
@@ -4705,7 +4722,7 @@ function maCardHtml(m) {
     ? `<img class="ma-avatar" src="${m.foto}" alt="${initials}">`
     : `<div class="ma-avatar-placeholder">${initials}</div>`;
   const abg = m.abgemeldet;
-  return `<div class="ma-card" onclick="showMaModal(${m.id})" style="${abg?'opacity:.72':''}">
+  return `<div class="ma-card" onclick="showMaModal(${maIdAttr(m.id)})" style="${abg?'opacity:.72':''}">
     <div style="display:flex;gap:12px;align-items:center">
       ${avatar}
       <div>
@@ -4904,7 +4921,19 @@ async function maAnalysiereVerleihvertrag() {
   }
 }
 
+// Mitarbeiter-IDs aus Formularen erhalten den gespeicherten Datentyp.
+function maIdValue(value) {
+  if (value === '' || value == null) return null;
+  const employee = (state.mitarbeiter || []).find(m => String(m.id) === String(value));
+  if (employee) return employee.id;
+  return /^\d+$/.test(String(value)) ? Number(value) : String(value);
+}
+function maIdAttr(id) {
+  return JSON.stringify(id).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
+}
+
 function showMaModal(id) {
+  id = maIdValue(id);
   tempMaFoto = null; tempMaDocs = [];
   const m = id ? state.mitarbeiter?.find(x => x.id === id) : null;
   document.getElementById('ma-modal-title').textContent = m ? 'Mitarbeiter bearbeiten' : 'Neuer Mitarbeiter';
@@ -5013,7 +5042,7 @@ function cancelAbmeldung() {
 }
 
 function confirmAbmeldung() {
-  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const id = maIdValue(document.getElementById('ma-modal-id').value);
   const m = (state.mitarbeiter||[]).find(x => x.id === id);
   if (!m) return;
   const grund = document.getElementById('ma-abmelde-grund').value.trim();
@@ -5034,7 +5063,7 @@ function confirmAbmeldung() {
 }
 
 function reaktiviereMa() {
-  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const id = maIdValue(document.getElementById('ma-modal-id').value);
   const m = (state.mitarbeiter||[]).find(x => x.id === id);
   if (!m) return;
   if (!confirm(`${m.vorname} ${m.nachname} wieder anmelden?`)) return;
@@ -5110,7 +5139,7 @@ function saveMaModal() {
   const nachname = document.getElementById('ma-nachname').value.trim();
   if (!vorname || !nachname) return toast('Fehler', 'Vor- und Nachname erforderlich', '⚠️');
   if (!state.mitarbeiter) state.mitarbeiter = [];
-  const id = parseInt(document.getElementById('ma-modal-id').value) || Date.now();
+  const id = maIdValue(document.getElementById('ma-modal-id').value) || Date.now();
   // WICHTIG: bestehendes Mitarbeiter-Objekt zuerst spreaden (m||{}), damit Felder,
   // die dieses Formular nicht kennt (bewertungen, chefBewertungen, abgemeldet,
   // fahrzeugManuell, biometricSetupAm aus der Monteur-App, etc.) beim Speichern
@@ -5164,7 +5193,7 @@ function saveMaModal() {
 }
 
 function showMaAuswertung() {
-  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const id = maIdValue(document.getElementById('ma-modal-id').value);
   const m = (state.mitarbeiter||[]).find(x => x.id === id);
   if (!m) return;
   const bsKrit = [
@@ -5246,7 +5275,7 @@ function showMaAuswertung() {
     nacharbeit.forEach(na => { html += `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);color:var(--accent)">⏱ ${na.datum} · ${na.bauName||''} · ${na.std}h · ${na.text||''}</div>`; });
   }
 
-  html += `<button class="btn btn-secondary btn-block" style="margin-top:16px" onclick="closeMaModal();showMaModal(${m.id})">← Zurück</button>`;
+  html += `<button class="btn btn-secondary btn-block" style="margin-top:16px" onclick="closeMaModal();showMaModal(${maIdAttr(m.id)})">← Zurück</button>`;
 
   const modal = document.querySelector('#ma-modal .modal');
   if (!modal) return;
@@ -5255,7 +5284,7 @@ function showMaAuswertung() {
 }
 
 function deleteMa() {
-  const id = parseInt(document.getElementById('ma-modal-id').value);
+  const id = maIdValue(document.getElementById('ma-modal-id').value);
   if (!confirm('Mitarbeiter löschen?')) return;
   state.mitarbeiter = state.mitarbeiter.filter(m => m.id !== id);
 
@@ -5890,14 +5919,14 @@ function renderWochenplan() {
       const isSwapSrc=wpSwapSource?.maId===m.id;
       html+='<tr style="'+(isSwapSrc?'background:rgba(232,184,75,.06)':'')+'">';
       // Name
-      html+='<td class="sticky-col" onclick="wpSwapClick('+m.id+')" '
+      html+='<td class="sticky-col" onclick="wpSwapClick('+maIdAttr(m.id)+')" '
         +'style="min-width:130px;max-width:150px;padding:4px 8px;vertical-align:middle;cursor:pointer;'
         +'border-left:3px solid transparent;'+(isSwapSrc?'background:rgba(232,184,75,.12);border-left:3px solid var(--accent);':'')+'\">'
         +'<div style="font-weight:700;font-size:12px;'+(isSwapSrc?'color:var(--accent)':'')+'">'+m.vorname+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(m.nachname||'')+'</div>'
         +(isSwapSrc?'<div style="font-size:9px;color:var(--accent)">↕ wählen...</div>':'')
         +'</td>';
-      html+='<td onclick="wpFzgEdit('+m.id+',event)" style="text-align:center;font-family:var(--mono);font-size:11px;color:#ffffff;font-weight:600;vertical-align:middle;cursor:pointer;user-select:none;line-height:1.2" title="Fahrzeug wechseln">'
+      html+='<td onclick="wpFzgEdit('+maIdAttr(m.id)+',event)" style="text-align:center;font-family:var(--mono);font-size:11px;color:#ffffff;font-weight:600;vertical-align:middle;cursor:pointer;user-select:none;line-height:1.2" title="Fahrzeug wechseln">'
         +fzgName
         +(()=>{
           const fzgObj=fzg||(state.fahrzeuge||[]).find(f=>f.name===fzgName||f.id===getMaFahrzeug(m)?.id);
@@ -5949,7 +5978,7 @@ function renderWochenplan() {
                 // Manuelle Überschreibung prüfen
                 const manuell = bs.abfahrtManuell?.[m.id];
                 const anzeige = manuell || abfahrt;
-                abfahrtHtml='<span style="color:var(--text);cursor:pointer'+(manuell?';text-decoration:underline dotted':'')+'" onclick="wpAbfahrtEdit('+m.id+',event)" title="Klicken zum Ändern">'+anzeige+'</span>'
+                abfahrtHtml='<span style="color:var(--text);cursor:pointer'+(manuell?';text-decoration:underline dotted':'')+'" onclick="wpAbfahrtEdit('+maIdAttr(m.id)+',event)" title="Klicken zum Ändern">'+anzeige+'</span>'
                   +'<div style="font-size:9px;color:var(--muted)">🚗'+bs.fahrtzeitStr+'</div>';
               }
             } else if(bs?.startzeit){
@@ -5989,7 +6018,7 @@ function renderWochenplan() {
             return '<div class="wp-cell" draggable="true" '
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
               +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
-              +'onclick="wpMaCellClick('+m.id+',\''+ds+'\',\''+key+'\')">'
+              +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
               +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
               +'</div>';
           }).join('');
@@ -6002,14 +6031,14 @@ function renderWochenplan() {
             +'<div class="wp-cell" draggable="true" '
             +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
             +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center" '
-            +'onclick="wpMaCellClick('+m.id+',\''+ds+'\')">'
+            +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'
             +statusE.status+'</div></td>';
         } else {
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell leer" '
             +'data-key="'+planKey+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
             +'style="justify-content:center;font-size:16px;min-height:28px" '
-            +'onclick="wpMaCellClick('+m.id+',\''+ds+'\')">'+'+'+'</div></td>';
+            +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'+'+'+'</div></td>';
         }
       });
       html+='</tr>';
@@ -6027,7 +6056,7 @@ function renderWochenplan() {
     if(!el.classList.contains('leer')){
       el.setAttribute('draggable','true');
       el.addEventListener('dragstart', ev=>{
-        dragSrc={key:el.dataset.key, ds:el.dataset.ds, maId:parseInt(el.dataset.ma), bsId:parseInt(el.dataset.bs)||0};
+        dragSrc={key:el.dataset.key, ds:el.dataset.ds, maId:maIdValue(el.dataset.ma), bsId:parseInt(el.dataset.bs)||0};
         ev.dataTransfer.effectAllowed='move';
         setTimeout(()=>el.style.opacity='0.35',0);
       });
@@ -6043,7 +6072,7 @@ function renderWochenplan() {
       const s=dragSrc; dragSrc=null;
       const tKey =el.dataset.key;
       const tDs  =el.dataset.ds;
-      const tMaId=parseInt(el.dataset.ma)||0;
+      const tMaId=maIdValue(el.dataset.ma)||0;
       if(!tDs || !tMaId) return;
       if(s.key===tKey && s.ds===tDs) return;
       if(!state.plan) state.plan={};
@@ -6266,7 +6295,7 @@ function wpSwapClick(maId) {
   if (maId === null || maId === undefined || maId === 'null') {
     toast('Hinweis', 'Zuerst einen Monteur mit Eintrag anwählen', '⚠️'); return;
   }
-  maId = parseInt(maId);
+  maId = maIdValue(maId);
 
   if (!wpSwapSource) {
     wpSwapSource = { maId };
@@ -6357,20 +6386,10 @@ function wpPosCellClick(bsId, posIdx, datum) {
   document.getElementById('zell-modal-title').textContent=
     bs.name+' · Pos.'+(posIdx+1)+' · '+TG[d.getDay()]+' '+fmtDE(d);
   document.getElementById('zell-notiz').value='';
-  // Baustellen-Liste rendern
-  const bsList=document.getElementById('zell-bs-liste');
-  bsList.innerHTML=(state.baustellen||[]).map(b=>{
-    const hex=getHex(b),tc=textCol(hex),active=b.id===bsId;
-    const vonStr=b.von?new Date(b.von+'T12:00').toLocaleDateString('de-CH'):'';
-    const bisStr=b.bis?new Date(b.bis+'T12:00').toLocaleDateString('de-CH'):'';
-    return '<div onclick="wpMaSelectBs('+b.id+')" id="wp-bs-'+b.id+'"'
-      +' style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;'
-      +'border:2px solid '+(active?'white':'var(--border)')+';background:'+(active?hex:'var(--bg)')+';">'
-      +'<div style="width:12px;height:12px;border-radius:3px;background:'+hex+';flex-shrink:0"></div>'
-      +'<div style="flex:1"><div style="font-weight:600;font-size:13px;color:'+(active?tc:'var(--text)')+'">'+b.name+'</div>'
-      +'<div style="font-size:10px;color:var(--muted)">'+vonStr+(bisStr?' - '+bisStr:'')+(b.montageTyp?' · '+b.montageTyp:'')+'</div>'
-      +'</div></div>';
-  }).join('');
+  // Baustellen-Liste (Suchfeld leeren + rendern)
+  const bsSearchEl=document.getElementById('zell-bs-search');
+  if (bsSearchEl) bsSearchEl.value='';
+  zellRenderBsListe('');
   ['Urlaub','Krank','Frei','NBU','Info folgt','BU','Unentschuldigt'].forEach(s=>{
     const el=document.getElementById('zs-'+s);
     if(el){el.style.background='';el.style.color='';el.style.borderColor='';}
@@ -6381,7 +6400,7 @@ function wpPosCellClick(bsId, posIdx, datum) {
 }
 
 function wpMaCellClick(maId, datum, key) {
-  maId = parseInt(maId);
+  maId = maIdValue(maId);
 
   // Wenn Tausch-Modus aktiv: abbrechen
   if (wpSwapSource) {
@@ -6431,7 +6450,7 @@ function wpMaCellClick(maId, datum, key) {
 
 // ── BUCHUNGS-MENÜ ───────────────────────────────────────
 function showBuchungsMenu(maId, datum, key) {
-  maId = parseInt(maId);
+  maId = maIdValue(maId);
   // Bestehenden Eintrag + Baustelle suchen (Schema: ma{maId}_{datum}).
   // NEU: wenn beim Klick ein konkreter Key mitgegeben wurde (mehrere
   // gleichzeitige Einsätze), genau DIESEN Eintrag verwenden statt
@@ -6537,17 +6556,17 @@ function showBuchungsMenu(maId, datum, key) {
 }
 
 function wpMaStartMove(maId, datum) {
-  wpMoveSource={maId:parseInt(maId), datum};
+  wpMoveSource={maId:maIdValue(maId), datum};
   renderWochenplan();
   toast('Verschieben','Ziel klicken','⇅');
 }
 
 function wpMaOpenModal(maId, datum, key) {
-  wpCurrentMaId=parseInt(maId); wpCurrentDatum=datum;
+  wpCurrentMaId=maIdValue(maId); wpCurrentDatum=datum;
   wpCurrentBsId=null; wpCurrentRowKey=null; wpSelStatus=null;
   wpCurrentEditKey=key||null;
 
-  const m  = (state.mitarbeiter||[]).find(x=>x.id===parseInt(maId));
+  const m  = (state.mitarbeiter||[]).find(x=>x.id===maIdValue(maId));
   const d  = new Date(datum+'T12:00');
   const TG = ['So','Mo','Di','Mi','Do','Fr','Sa'];
   document.getElementById('zell-modal-title').textContent =
@@ -6575,7 +6594,7 @@ function wpMaOpenModal(maId, datum, key) {
       for(let p=0;p<(bs.positionen||1);p++){
         const rk='bs'+bs.id+'_p'+p;
         const e=state.plan[datum]?.[rk];
-        if(e?.maId===parseInt(maId)){
+        if(e?.maId===maIdValue(maId)){
           wpCurrentBsId=bs.id; wpCurrentRowKey=rk;
           document.getElementById('zell-notiz').value=e.notiz||''; break;
         }
@@ -6585,7 +6604,7 @@ function wpMaOpenModal(maId, datum, key) {
     if(!wpCurrentBsId){
       for(const rk of Object.keys(state.plan[datum]||{})){
         const e=state.plan[datum][rk];
-        if(e?.maId===parseInt(maId)&&e?.status){
+        if(e?.maId===maIdValue(maId)&&e?.status){
           wpCurrentRowKey=rk; wpSelStatus=e.status;
           document.getElementById('zell-notiz').value=e.notiz||''; break;
         }
@@ -6593,32 +6612,10 @@ function wpMaOpenModal(maId, datum, key) {
     }
   }
 
-  // Baustellen-Liste
-  const bsList=document.getElementById('zell-bs-liste');
-  const allBs=state.baustellen||[];
-  if(!allBs.length){
-    bsList.innerHTML='<div style="color:var(--muted);font-size:12px;padding:6px 0">Noch keine Baustellen angelegt</div>';
-  } else {
-    bsList.innerHTML=allBs.map(bs=>{
-      const hex=getHex(bs), tc=textCol(hex), active=wpCurrentBsId===bs.id;
-      const inRange=(!bs.von||datum>=bs.von)&&(!bs.bis||datum<=bs.bis);
-      const vonStr=bs.von?new Date(bs.von+'T12:00').toLocaleDateString('de-CH'):'';
-      const bisStr=bs.bis?new Date(bs.bis+'T12:00').toLocaleDateString('de-CH'):'';
-      return '<div onclick="wpMaSelectBs('+bs.id+')" id="wp-bs-'+bs.id+'"'
-        +' style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;'
-        +'cursor:pointer;margin-bottom:4px;'
-        +'border:2px solid '+(active?'white':'var(--border)')+';'
-        +'background:'+(active?hex:'var(--bg)')+';">'
-        +'<div style="width:12px;height:12px;border-radius:3px;background:'+hex+';flex-shrink:0"></div>'
-        +'<div style="flex:1">'
-          +'<div style="font-weight:600;font-size:13px;color:'+(active?tc:'var(--text)')+'">'+bs.name+'</div>'
-          +'<div style="font-size:10px;color:var(--muted)">'+vonStr+(bisStr?' – '+bisStr:'')
-            +(bs.montageTyp?' · '+bs.montageTyp:'')+(bs.adresse?' · '+bs.adresse:'')+'</div>'
-        +'</div>'
-        +(inRange?'':'<span style="font-size:10px;color:var(--muted)">ausserhalb</span>')
-        +'</div>';
-    }).join('');
-  }
+  // Baustellen-Liste (Suchfeld leeren + rendern)
+  const bsSearchEl=document.getElementById('zell-bs-search');
+  if (bsSearchEl) bsSearchEl.value='';
+  zellRenderBsListe('');
 
   // Status-Buttons
   ['Urlaub','Krank','Frei','NBU','Info folgt','BU','Unentschuldigt'].forEach(s=>{
@@ -6633,8 +6630,52 @@ function wpMaOpenModal(maId, datum, key) {
   document.getElementById('zell-modal').classList.add('open');
 }
 
-function wpMaSelectBs(bsId) {
+// Gemeinsame Render-Funktion für die Baustellen-Liste im Zell-Modal (mit Suchfilter).
+// Wird beim Öffnen des Modals (query='') und bei Eingabe ins Suchfeld aufgerufen.
+function zellRenderBsListe(query) {
+  const bsList=document.getElementById('zell-bs-liste');
+  if(!bsList) return;
+  const q=(query||'').trim().toLowerCase();
+  const datum=wpCurrentDatum;
+  const allBs=(state.baustellen||[]).filter(bs=>{
+    if(!q) return true;
+    return (bs.name||'').toLowerCase().includes(q) ||
+           (bs.kunde||'').toLowerCase().includes(q) ||
+           (bs.adresse||'').toLowerCase().includes(q);
+  });
+  if(!allBs.length){
+    bsList.innerHTML='<div style="color:var(--muted);font-size:12px;padding:6px 0">Keine Baustelle gefunden</div>';
+    return;
+  }
+  bsList.innerHTML=allBs.map(bs=>{
+    const hex=getHex(bs), tc=textCol(hex), active=wpCurrentBsId===bs.id;
+    const inRange=(!bs.von||datum>=bs.von)&&(!bs.bis||datum<=bs.bis);
+    const vonStr=bs.von?new Date(bs.von+'T12:00').toLocaleDateString('de-CH'):'';
+    const bisStr=bs.bis?new Date(bs.bis+'T12:00').toLocaleDateString('de-CH'):'';
+    return '<div onclick="wpMaSelectBs('+bs.id+')" id="wp-bs-'+bs.id+'"'
+      +' style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;'
+      +'cursor:pointer;margin-bottom:4px;'
+      +'border:2px solid '+(active?'white':'var(--border)')+';'
+      +'background:'+(active?hex:'var(--bg)')+';">'
+      +'<div style="width:12px;height:12px;border-radius:3px;background:'+hex+';flex-shrink:0"></div>'
+      +'<div style="flex:1">'
+        +'<div style="font-weight:600;font-size:13px;color:'+(active?tc:'var(--text)')+'">'+bs.name+'</div>'
+        +'<div style="font-size:10px;color:var(--muted)">'+vonStr+(bisStr?' – '+bisStr:'')
+          +(bs.montageTyp?' · '+bs.montageTyp:'')+(bs.adresse?' · '+bs.adresse:'')+'</div>'
+      +'</div>'
+      +(inRange?'':'<span style="font-size:10px;color:var(--muted)">ausserhalb</span>')
+      +'</div>';
+  }).join('');
+}
+
+function wpMaSelectBs(bsId, query) {
   wpCurrentBsId=parseInt(bsId); wpSelStatus=null;
+  // query===undefined heisst: Aufruf durch Klick auf eine Baustellen-Karte (nicht durchs Suchfeld) → Monteur-Suchfeld zurücksetzen
+  if (query === undefined) {
+    const searchEl=document.getElementById('zell-monteur-search');
+    if (searchEl) searchEl.value='';
+    query='';
+  }
 
   // Status reset
   ['Urlaub','Krank','Frei','NBU','Info folgt','BU','Unentschuldigt'].forEach(s=>{
@@ -6652,7 +6693,12 @@ function wpMaSelectBs(bsId) {
   // Monteur-Liste mit Fähigkeits-Info aufbauen
   const bs=(state.baustellen||[]).find(b=>b.id===parseInt(bsId));
   const typ=bs?.montageTyp||'';
-  const monteure=(state.mitarbeiter||[]).filter(m=>m.vorname);
+  const q=(query||'').trim().toLowerCase();
+  const monteure=(state.mitarbeiter||[]).filter(m=>m.vorname).filter(m=>{
+    if(!q) return true;
+    return (m.vorname+' '+(m.nachname||'')).toLowerCase().includes(q) ||
+           ((m.nachname||'')+' '+m.vorname).toLowerCase().includes(q);
+  });
   const datum=wpCurrentDatum;
 
   // Belegte Monteure an diesem Tag (andere Positionen)
@@ -6674,7 +6720,7 @@ function wpMaSelectBs(bsId) {
     const active = m.id===curMaId;
     const fzg = getMaFahrzeug(m);
     const fzgName = fzg?fzg.name:(m.fahrzeugHint&&m.fahrzeugHint!=='Kein'?m.fahrzeugHint:'');
-    return '<div '+(istBelegt?'title="Monteur heute bereits auf anderer Baustelle"':'onclick="wpPickMonteur('+m.id+')"')+' id="wp-ma-'+m.id+'"'
+    return '<div '+(istBelegt?'title="Monteur heute bereits auf anderer Baustelle"':'onclick="wpPickMonteur('+maIdAttr(m.id)+')"')+' id="wp-ma-'+m.id+'"'
       +' style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;'
       +(istBelegt?'cursor:not-allowed;':'cursor:pointer;')+'margin-bottom:3px;'
       +'border:2px solid '+(active?'white':'var(--border)')+';'
@@ -6691,7 +6737,9 @@ function wpMaSelectBs(bsId) {
   }
 
   let html='';
-  if(typ && passend.length){
+  if(!monteure.length){
+    html='<div style="color:var(--muted);font-size:12px;padding:6px 0">Kein Monteur gefunden</div>';
+  } else if(typ && passend.length){
     html+='<div style="font-size:10px;color:var(--accent);font-weight:600;padding:2px 4px;margin-bottom:4px;letter-spacing:.5px">✓ PASSENDE FÄHIGKEIT</div>';
     html+=passend.map(renderMaChip).join('');
     if(rest.length) html+='<div style="font-size:10px;color:var(--muted);padding:4px 4px 2px;margin-top:4px;border-top:1px solid var(--border)">ALLE MONTEURE</div>';
@@ -6706,7 +6754,7 @@ function wpMaSelectBs(bsId) {
 }
 
 function wpPickMonteur(maId) {
-  maId=parseInt(maId);
+  maId=maIdValue(maId);
   // Alle Chips zurücksetzen
   (state.mitarbeiter||[]).forEach(m=>{
     const el=document.getElementById('wp-ma-'+m.id); if(!el) return;
@@ -7617,6 +7665,7 @@ function showBsModal(id) {
   bsSetTeamIds(Array.isArray(bs?.teamMonteurIds) ? bs.teamMonteurIds : []);
   document.getElementById('bs-teamMonteur-search').value = '';
   document.getElementById('bs-startzeit').value = bs?.startzeit||'';
+  document.getElementById('bs-abfahrt-allschwil').value = bs?.abfahrtAllschwil||'';
   window._aktFahrtzeit = bs?.fahrtzeitMin ? {min:bs.fahrtzeitMin, str:bs.fahrtzeitStr} : null;
   const badge = document.getElementById('fahrtzeit-badge');
   const info  = document.getElementById('fahrtzeit-info');
@@ -7760,7 +7809,6 @@ function bsWerktage(von, bis) {
 }
 function bsUmdisponierePlan(bsId, farbeHex, altVon, altBis, altTeamIds, neuVon, neuBis, neuTeamIds) {
   if (!state.plan) state.plan = {};
-  const konflikte = [];
   const altTage = bsWerktage(altVon, altBis);
   const neuTageSet = new Set(bsWerktage(neuVon, neuBis));
   (altTeamIds||[]).forEach(maId=>{
@@ -7772,6 +7820,9 @@ function bsUmdisponierePlan(bsId, farbeHex, altVon, altBis, altTeamIds, neuVon, 
       }
     });
   });
+  // Rohe Tag-für-Tag-Kollisionen sammeln (nur für Monteure, die der NEUEN
+  // Einteilung tatsächlich zugewiesen sind - andere lösen nie eine Meldung aus).
+  const rohKonflikte = [];
   if ((neuTeamIds||[]).length && neuVon) {
     bsWerktage(neuVon, neuBis).forEach(datum=>{
       if (!state.plan[datum]) state.plan[datum] = {};
@@ -7779,16 +7830,50 @@ function bsUmdisponierePlan(bsId, farbeHex, altVon, altBis, altTeamIds, neuVon, 
         const key='ma'+maId+'_'+datum;
         const bestehend = state.plan[datum][key];
         if (bestehend && bestehend.bsId!=null && bestehend.bsId!==bsId) {
-          const m=(state.mitarbeiter||[]).find(x=>x.id===maId);
-          const fremd=(state.baustellen||[]).find(b=>b.id===bestehend.bsId);
-          konflikte.push(((m?.vorname||'')+' '+(m?.nachname||'')).trim()+' am '+datum+' bereits auf '+(fremd?.name||'anderer Baustelle'));
+          rohKonflikte.push({maId, datum, fremdBsId: bestehend.bsId});
           return;
         }
         state.plan[datum][key] = { maId, bsId, farbeHex, notiz: bestehend?.notiz||'', startzeit: bestehend?.startzeit||null, endzeit: bestehend?.endzeit||null };
       });
     });
   }
+  return bsAggregiereKonflikte(rohKonflikte);
+}
+
+// Fasst rohe Tag-für-Tag-Kollisionen zu je EINER Meldung pro zusammenhängendem
+// Zeitraum (gleicher Monteur + gleiche fremde Baustelle) zusammen, statt eine
+// separate Meldung pro einzelnem Konflikttag zu erzeugen.
+function bsAggregiereKonflikte(rohKonflikte) {
+  const konflikte = [];
+  const byKey = {};
+  rohKonflikte.forEach(k=>{
+    const gk = k.maId+'__'+k.fremdBsId;
+    (byKey[gk] = byKey[gk]||[]).push(k.datum);
+  });
+  Object.keys(byKey).forEach(gk=>{
+    const [maIdStr, fremdBsIdStr] = gk.split('__');
+    const tage = byKey[gk].slice().sort();
+    const m=(state.mitarbeiter||[]).find(x=>String(x.id)===maIdStr);
+    const fremd=(state.baustellen||[]).find(b=>String(b.id)===fremdBsIdStr);
+    const name=((m?.vorname||'')+' '+(m?.nachname||'')).trim();
+    // Zusammenhängende Tagesblöcke bilden - bis zu 3 Tage Lücke (Wochenende)
+    // gilt noch als "zusammenhängend", damit z.B. Fr+Mo nicht künstlich
+    // getrennt gemeldet werden.
+    let blockStart=tage[0], blockEnd=tage[0];
+    for (let i=1;i<tage.length;i++){
+      const diffDays=Math.round((new Date(tage[i]+'T12:00')-new Date(blockEnd+'T12:00'))/86400000);
+      if (diffDays<=3) { blockEnd=tage[i]; }
+      else { konflikte.push(bsFormatKonflikt(name, blockStart, blockEnd, fremd)); blockStart=tage[i]; blockEnd=tage[i]; }
+    }
+    konflikte.push(bsFormatKonflikt(name, blockStart, blockEnd, fremd));
+  });
   return konflikte;
+}
+function bsFormatKonflikt(name, von, bis, fremd) {
+  const vonStr=new Date(von+'T12:00').toLocaleDateString('de-CH');
+  const bisStr=new Date(bis+'T12:00').toLocaleDateString('de-CH');
+  const zeitraum = von===bis ? ('am '+vonStr) : ('vom '+vonStr+'–'+bisStr);
+  return name+' ist '+zeitraum+' bereits auf '+(fremd?.name||'anderer Baustelle')+' eingeplant';
 }
 
 // ── AUFTRAG KOPIEREN (Priorität 5) ──────────────────────────
@@ -7955,6 +8040,7 @@ function bsFormAlsDaten() {
     von: document.getElementById('bs-von').value,
     bis: document.getElementById('bs-bis').value,
     startzeit: document.getElementById('bs-startzeit').value.trim(),
+    abfahrtAllschwil: document.getElementById('bs-abfahrt-allschwil').value.trim(),
     montageArt: document.getElementById('bs-montageArt').value,
     montageDetail: document.getElementById('bs-montageDetail').value.trim(),
     apName: document.getElementById('bs-ap-name').value.trim(),
@@ -7967,21 +8053,203 @@ function bsFormAlsDaten() {
     hotelName: document.getElementById('bs-hotel-name').value.trim(),
     hotelDaten: document.getElementById('bs-hotel-daten').value.trim(),
     hotelAdresse: document.getElementById('bs-hotel-adresse').value.trim(),
-    chefMonteurId: parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
-    teamMonteurIds: bsGetTeamIds()
+    chefMonteurId: maIdValue(document.getElementById('bs-chefMonteur-id').value)||null,
+    teamMonteurIds: bsGetTeamIds(),
+    // Zusätzlich für das vollständige interne Montageaufgebot (Kopieren/PDF):
+    sollStunden: (document.getElementById('bs-sollstunden').value!=='') ? parseFloat(document.getElementById('bs-sollstunden').value) : null,
+    positionen: parseInt(document.getElementById('bs-positionen').value)||1,
+    notiz: document.getElementById('bs-notiz').value, // bewusst NICHT getrimmt - Rapport-Verlauf 1:1 übernehmen
+    docs: tempBsDocs||[],
+    tasks: tempBsTasks||[],
+    fahrtzeitKm: bsAktuelleFahrtzeitKm(),
+    fahrtzeitMin: bsAktuelleFahrtzeitMin()
   };
 }
+
+// Liefert die aktuell gültige Distanz/Fahrzeit ab Allschwil für die Adresse,
+// die gerade im Formular steht: frisch berechnet (🚗-Button in dieser
+// Sitzung) hat Vorrang, sonst der zuletzt gespeicherte Wert der Baustelle
+// (nur falls sich die Adresse seither nicht geändert hat). Wird sowohl vom
+// Speichern als auch vom internen Montageaufgebot genutzt - eine Datenquelle.
+function bsAktuelleFahrtzeitKm() {
+  const adresse = document.getElementById('bs-adresse').value.trim();
+  if (window._aktFahrtzeit?.adresse === adresse && window._aktFahrtzeit?.km != null) return window._aktFahrtzeit.km;
+  const id = parseInt(document.getElementById('bs-modal-id').value);
+  const oldBs = id ? (state.baustellen||[]).find(b=>b.id===id) : null;
+  if (oldBs && oldBs.adresse === adresse && oldBs.fahrtzeitKm != null) return oldBs.fahrtzeitKm;
+  return null;
+}
+function bsAktuelleFahrtzeitMin() {
+  const adresse = document.getElementById('bs-adresse').value.trim();
+  if (window._aktFahrtzeit?.adresse === adresse && window._aktFahrtzeit?.min != null) return window._aktFahrtzeit.min;
+  const id = parseInt(document.getElementById('bs-modal-id').value);
+  const oldBs = id ? (state.baustellen||[]).find(b=>b.id===id) : null;
+  if (oldBs && oldBs.adresse === adresse && oldBs.fahrtzeitMin != null) return oldBs.fahrtzeitMin;
+  return null;
+}
+
 function bsKopiereMontageaufgebot() {
   const data = bsFormAlsDaten();
   if (!data.name) return toast('Fehler','Zuerst Name/Auftrag eingeben','⚠️');
-  const text = bsGeneriereMontageaufgebot(data);
+  copyMontageaufgebot(data);
+}
+function bsMontageaufgebotPDF() {
+  const data = bsFormAlsDaten();
+  if (!data.name) return toast('Fehler','Zuerst Name/Auftrag eingeben','⚠️');
+  downloadMontageaufgebotPDF(data);
+}
+
+// ══════════════════════════════════════════════════════════════
+// INTERNES MONTAGEAUFGEBOT (vollständige Fassung) — Priorität "PDF/Doku"
+// EINZIGE gemeinsame Datenquelle für Textkopie UND PDF-Export, damit beide
+// nie auseinanderlaufen können. Nimmt IMMER die aktuell im Formular
+// stehenden Werte entgegen (bsFormAlsDaten()) - nie ein zwischengespeicherter
+// alter Text. Bewusst getrennt von bsGeneriereMontageaufgebot() (der
+// kompakte, automatisch in die Notiz eingefügte 🪧-Block) - dieser bleibt
+// unverändert, sonst würde sich die Notiz bei jedem Speichern selbst
+// rekursiv aufblähen (das vollständige Aufgebot enthält ja u.a. die Notiz).
+function buildMontageaufgebot(site) {
+  if (!site) return [];
+  const v = (val) => (val===undefined || val===null || String(val).trim()==='') ? '–' : String(val).trim();
+
+  const chefMa = site.chefMonteurId ? (state.mitarbeiter||[]).find(m=>m.id===site.chefMonteurId) : null;
+  const chefName = chefMa ? ((chefMa.vorname||'')+' '+(chefMa.nachname||'')).trim() : null;
+  const teamNamen = [...new Set(site.teamMonteurIds||[])]
+    .map(id => { const m=(state.mitarbeiter||[]).find(x=>x.id===id); return m ? ((m.vorname||'')+' '+(m.nachname||'')).trim() : null; })
+    .filter(Boolean)
+    .filter(n => n!==chefName);
+
+  const kmProWeg = site.fahrtzeitKm!=null ? site.fahrtzeitKm : null;
+  const kmHinRueck = kmProWeg!=null ? Math.round(kmProWeg*2*10)/10 : null;
+  const abfahrt = site.abfahrtAllschwil || (site.startzeit && site.fahrtzeitMin!=null ? calcAbfahrt(site.startzeit, site.fahrtzeitMin) : null);
+
+  const sections=[];
+
+  sections.push({title:'AUFTRAG', lines:[
+    'Auftrag: '+v(site.name),
+    'Kunde: '+v(site.kunde),
+    'Auftragsnummer: '+v(site.auftragsnummer),
+    'Art der Montage: '+v(site.montageArt||site.montageTyp),
+    site.montageDetail ? 'Beschreibung: '+site.montageDetail.trim() : null,
+    'Anzahl benötigte Monteure: '+v(site.positionen),
+    site.sollStunden!=null ? 'Soll-Stunden gesamt: '+site.sollStunden : null
+  ].filter(Boolean)});
+
+  sections.push({title:'ZEITRAUM', lines:[
+    'Von: '+v(site.von),
+    'Bis: '+v(site.bis)
+  ]});
+
+  sections.push({title:'BAUSTELLE', lines:[
+    v(site.adresse),
+    'Ansprechperson: '+v(site.apName),
+    site.apTel ? 'Telefon: '+site.apTel : null,
+    site.apEmail ? 'E-Mail: '+site.apEmail : null
+  ].filter(Boolean)});
+
+  sections.push({title:'PERSONAL', lines:[
+    'Chef-Monteur: '+v(chefName),
+    'Team-Monteure: '+(teamNamen.length?teamNamen.join(', '):'–')
+  ]});
+
+  const anfahrt=[];
+  if (abfahrt) anfahrt.push('Abfahrt Allschwil: '+abfahrt+(site.abfahrtAllschwil?'':' (berechnet)'));
+  if (site.startzeit) anfahrt.push('Ankunft Baustelle / Montagestart: '+site.startzeit);
+  if (kmProWeg!=null) { anfahrt.push('Distanz pro Weg: '+kmProWeg+' km'); anfahrt.push('Hin- und Rückfahrt: '+kmHinRueck+' km'); }
+  if (anfahrt.length) sections.push({title:'ANFAHRT / ZEITEN', lines:anfahrt});
+
+  const parkZufahrt=[];
+  if (site.parkplatz) parkZufahrt.push('Parkplatz: '+site.parkplatz);
+  if (site.zufahrt) parkZufahrt.push('Zufahrt/Schlüssel: '+site.zufahrt);
+  if (parkZufahrt.length) sections.push({title:'PARKPLATZ / ZUFAHRT', lines:parkZufahrt});
+
+  if (site.material) sections.push({title:'MATERIAL', lines:[site.material]});
+  if (site.werkzeug) sections.push({title:'WERKZEUG', lines:[site.werkzeug]});
+
+  if (site.hotelName || site.hotelAdresse || site.hotelDaten) {
+    sections.push({title:'HOTEL / UNTERKUNFT', lines:[
+      site.hotelName ? 'Hotel: '+site.hotelName : null,
+      site.hotelAdresse ? 'Adresse: '+site.hotelAdresse : null,
+      site.hotelDaten ? 'Check-in/Check-out: '+site.hotelDaten : null
+    ].filter(Boolean)});
+  }
+
+  if ((site.tasks||[]).length) {
+    const lines=[];
+    site.tasks.filter(t=>(t.name||'').trim()).forEach((t,i)=>{
+      lines.push((i+1)+'. '+t.name.trim());
+      if (t.hours) lines.push('   Soll-Stunden: '+t.hours);
+      if (t.menge) lines.push('   Menge: '+t.menge);
+      if (t.beschreibung) lines.push('   '+t.beschreibung);
+    });
+    if (lines.length) sections.push({title:'POSITIONEN / ARBEITEN', lines});
+  }
+
+  // Notizen/Rapport-Verlauf unverändert 1:1 übernehmen.
+  if (site.notiz && site.notiz.trim()) {
+    sections.push({title:'NOTIZEN / WICHTIGE INFORMATIONEN', lines: site.notiz.trim().split('\n')});
+  }
+
+  if ((site.docs||[]).length) {
+    sections.push({title:'BAUSTELLENDOKUMENTE', lines:['Es sind '+site.docs.length+' Datei(en)/Anhänge bei dieser Baustelle hinterlegt (siehe Anhänge-Bereich).']});
+  }
+
+  return sections;
+}
+
+function montageaufgebotAlsText(site) {
+  const sections = buildMontageaufgebot(site);
+  const out = ['INTERNES MONTAGEAUFGEBOT','================================',''];
+  sections.forEach(s => { out.push(s.title); out.push(...s.lines); out.push(''); });
+  return out.join('\n').trim();
+}
+
+function copyMontageaufgebot(site) {
+  const text = montageaufgebotAlsText(site);
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(text)
-      .then(()=>toast('Kopiert','Montageaufgebot in Zwischenablage','📋'))
+      .then(()=>toast('Kopiert','Internes Montageaufgebot in Zwischenablage','📋'))
       .catch(()=>toast('Fehler','Kopieren fehlgeschlagen','⚠️'));
   } else {
     toast('Fehler','Zwischenablage nicht verfügbar','⚠️');
   }
+}
+
+function downloadMontageaufgebotPDF(site) {
+  if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
+    toast('Fehler','PDF-Bibliothek nicht geladen - bitte Seite neu laden','⚠️');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'mm', format:'a4'});
+  const marginL=18, marginR=18, pageW=210, pageH=297, maxW=pageW-marginL-marginR;
+  let y=20;
+  function neueSeiteFallsNoetig(brauchtMm) {
+    if (y+brauchtMm > pageH-18) { doc.addPage(); y=20; }
+  }
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('INTERNES MONTAGEAUFGEBOT', marginL, y); y+=9;
+  doc.setDrawColor(180); doc.line(marginL, y, pageW-marginR, y); y+=8;
+
+  const sections = buildMontageaufgebot(site);
+  sections.forEach(sec => {
+    neueSeiteFallsNoetig(12);
+    doc.setFont('helvetica','bold'); doc.setFontSize(11);
+    doc.text(sec.title, marginL, y); y+=6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    sec.lines.forEach(line => {
+      const wrapped = doc.splitTextToSize(String(line), maxW);
+      wrapped.forEach(wl => {
+        neueSeiteFallsNoetig(5.5);
+        doc.text(wl, marginL, y); y+=5.5;
+      });
+    });
+    y+=4;
+  });
+
+  const dateiname = 'Montageaufgebot_'+(site.auftragsnummer?site.auftragsnummer.replace(/[^\w-]/g,'_')+'_':'')+(site.name||'Baustelle').replace(/[^\w-]/g,'_')+'.pdf';
+  doc.save(dateiname);
+  toast('PDF erstellt', dateiname, '📄');
 }
 
 // ── HOTELPRÜFUNG (Priorität 8) ──────────────────────────────
@@ -8043,9 +8311,10 @@ async function saveBsModal() {
     positionen:parseInt(document.getElementById('bs-positionen').value)||1,
     montageArt:document.getElementById('bs-montageArt').value,
     montageDetail:document.getElementById('bs-montageDetail').value.trim(),
-    chefMonteurId:parseInt(document.getElementById('bs-chefMonteur-id').value)||null,
+    chefMonteurId:maIdValue(document.getElementById('bs-chefMonteur-id').value)||null,
     teamMonteurIds: bsGetTeamIds(),
     startzeit:document.getElementById('bs-startzeit').value.trim(),
+    abfahrtAllschwil:document.getElementById('bs-abfahrt-allschwil').value.trim(),
     fahrtzeitMin: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.min ?? null) : null,
     fahrtzeitKm: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.km ?? null) : null,
     fahrtzeitStr: (window._aktFahrtzeit?.adresse===document.getElementById('bs-adresse').value.trim()) ? (window._aktFahrtzeit?.str ?? null) : null,
@@ -8089,21 +8358,7 @@ async function saveBsModal() {
   const altTeamIds = oldBs ? [...new Set([...(oldBs.teamMonteurIds||[]), oldBs.chefMonteurId].filter(Boolean))] : [];
   const konflikte = bsUmdisponierePlan(id, data.farbeHex, oldBs?.von, oldBs?.bis, altTeamIds, data.von, data.bis, neueTeamIds);
 
-  // Dokumentation: jede Umdisposition und jeder übersprungene Konflikt
-  // bekommt einen To-do-Eintrag (bestehende Projekt-Konvention).
-  if (!state.todos) state.todos=[];
-  if (oldBs && (oldBs.von!==data.von || oldBs.bis!==data.bis)) {
-    state.todos.push({ id: Date.now()+Math.floor(Math.random()*1000), bsId: id,
-      text: 'Umdisponiert: '+name+' von '+(oldBs.von||'–')+'–'+(oldBs.bis||'–')+' auf '+(data.von||'–')+'–'+(data.bis||'–'),
-      zustaendig: currentLoginUser?((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim():'–',
-      erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'', erstelltAm:new Date().toISOString().slice(0,10) });
-  }
-  konflikte.forEach(k=>{
-    state.todos.push({ id: Date.now()+Math.floor(Math.random()*1000)+Math.floor(Math.random()*1000), bsId: id,
-      text: '⚠️ Konflikt bei Umdisposition '+name+': '+k+' – manuell prüfen',
-      zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'', erstelltAm:new Date().toISOString().slice(0,10) });
-  });
-
+  // Planänderungen erzeugen keine automatischen To-dos.
   // KRITISCH: erst nach bestätigtem, verifiziertem Speichern gilt die
   // Änderung als ausgeführt (gleiches Prinzip wie beim GPT-Assistenten).
   const saveResult = await save({verify:true});
@@ -8112,7 +8367,7 @@ async function saveBsModal() {
     return; // Modal bleibt bewusst offen
   }
   closeBsModal();
-  if (konflikte.length) toast('Teilweise gespeichert', konflikte.length+' Konflikt(e) übersprungen – siehe To-Do-Liste', '⚠️');
+  if (konflikte.length) toast('Teilweise gespeichert', konflikte.length+' Konflikt(e) übersprungen: '+konflikte.join('; '), '⚠️');
   // Falls die Baustelle in der aktuell angezeigten Woche nicht sichtbar wäre, zu ihrem Start springen
   if (data.von) {
     const vonDate = new Date(data.von + 'T12:00');
@@ -8151,7 +8406,7 @@ function buchungBearbeiten() {
 
 function buchungEinzel() {
   document.getElementById('buchungs-menu').classList.remove('open');
-  const maId  = parseInt(document.getElementById('buchungs-menu-maId').value);
+  const maId  = maIdValue(document.getElementById('buchungs-menu-maId').value);
   const datum = document.getElementById('buchungs-menu-datum').value;
   const key   = document.getElementById('buchungs-menu-key').value || null;
   wpMaOpenModal(maId, datum, key);
@@ -8159,7 +8414,7 @@ function buchungEinzel() {
 
 function buchungBlock() {
   document.getElementById('buchungs-menu').classList.remove('open');
-  const maId  = parseInt(document.getElementById('buchungs-menu-maId').value);
+  const maId  = maIdValue(document.getElementById('buchungs-menu-maId').value);
   const datum = document.getElementById('buchungs-menu-datum').value;
   // Block-Modal öffnen mit diesem Datum vorbelegt und Monteur vorselektiert
   showBlockModal(maId, datum);
@@ -8167,7 +8422,7 @@ function buchungBlock() {
 
 function buchungLoeschen() {
   document.getElementById('buchungs-menu').classList.remove('open');
-  const maId  = parseInt(document.getElementById('buchungs-menu-maId').value);
+  const maId  = maIdValue(document.getElementById('buchungs-menu-maId').value);
   const datum = document.getElementById('buchungs-menu-datum').value;
   const key   = document.getElementById('buchungs-menu-key').value;
   // NEU: löscht gezielt NUR den konkret ausgewählten Einsatz/Status-Eintrag
@@ -8187,7 +8442,7 @@ function buchungLoeschen() {
 // ── DRAG & DROP ────────────────────────────────────────
 let dragSrc=null;
 function wpDragStart(ev,rk,ds,maId,bsId){
-  dragSrc={rk,ds,maId:parseInt(maId),bsId:parseInt(bsId)||null};
+  dragSrc={rk,ds,maId:maIdValue(maId),bsId:parseInt(bsId)||null};
   ev.dataTransfer.effectAllowed='move';
   ev.target.style.opacity='0.35';
 }
@@ -8214,7 +8469,7 @@ function wpDrop(ev,tRk,tDs,tMaId,tBsId){
     state.plan[tDs][tRk]={...tE,maId:sE.maId};
   } else {
     // In leere Zelle: maId = Ziel-Monteur oder behalten
-    const nMa=parseInt(tMaId)||sE.maId;
+    const nMa=maIdValue(tMaId)||sE.maId;
     state.plan[tDs][tRk]={...sE,maId:nMa};
     delete state.plan[s.ds][s.rk];
   }
@@ -8263,7 +8518,7 @@ function showBlockModal(preselMaId, preselDatum) {
   const statusInput=document.getElementById('block-status-monteur');
   const statusHidden=document.getElementById('block-status-monteur-id');
   if (preselMaId) {
-    const preMa=(state.mitarbeiter||[]).find(m=>m.id===parseInt(preselMaId));
+    const preMa=(state.mitarbeiter||[]).find(m=>m.id===maIdValue(preselMaId));
     if(preMa){ statusInput.value=preMa.vorname+' '+(preMa.nachname||''); statusHidden.value=preMa.id; }
     else { statusInput.value=''; statusHidden.value=''; }
   } else { statusInput.value=''; statusHidden.value=''; }
@@ -8323,7 +8578,7 @@ function blockSelectBs(bsId) {
 
   const n=bs.positionen||1;
   const monteure=(state.mitarbeiter||[]).filter(m=>m.vorname);
-  const preselMaId=parseInt(document.getElementById('block-modal').dataset.preselMaId||0);
+  const preselMaId=maIdValue(document.getElementById('block-modal').dataset.preselMaId||0);
   document.getElementById('block-monteure-felder').innerHTML=
     Array.from({length:n},(_,i)=>{
       const presel = (i===0 && preselMaId) ? (state.mitarbeiter||[]).find(m=>m.id===preselMaId) : null;
@@ -8398,7 +8653,7 @@ function saveBlock() {
     const maIds=[];
     for(let i=0;i<n;i++){
       const hiddenId=document.getElementById('block-ma-id-'+i);
-      if(hiddenId && hiddenId.value) maIds.push(parseInt(hiddenId.value));
+      if(hiddenId && hiddenId.value) maIds.push(maIdValue(hiddenId.value));
     }
     if(!maIds.length) return toast('Fehler','Bitte mindestens einen Monteur wählen','⚠️');
 
@@ -8424,7 +8679,7 @@ function saveBlock() {
 
   } else {
     // Status: einzelner Monteur
-    const maId=parseInt(document.getElementById('block-status-monteur-id').value);
+    const maId=maIdValue(document.getElementById('block-status-monteur-id').value);
     if(!maId) return toast('Fehler','Bitte Monteur wählen','⚠️');
     const hex=statusHex(blockSelStatus);
     tage.forEach(ds=>{
@@ -9781,7 +10036,7 @@ function bsBuchen(bauId, taskId) {
   const mEl = document.getElementById('bsm_' + bauId + '_' + taskId);
   const h = parseFloat(hEl.value);
   if (!h || h <= 0) return;
-  const ma = state.mitarbeiter.find(m => m.id === parseInt(mEl.value));
+  const ma = state.mitarbeiter.find(m => m.id === maIdValue(mEl.value));
   if (!ma) return;
 
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
@@ -10119,7 +10374,7 @@ function renderBaustatusKVP() {
     const farbe = totalH===0?'#059669':totalH<2?'#d97706':'#dc2626';
     const offen = kvpDetailMaId === m.id;
     html += '<div style="border-bottom:1px solid var(--border);">' +
-      '<div onclick="kvpToggleDetail('+m.id+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;font-size:12px;">' +
+      '<div onclick="kvpToggleDetail('+maIdAttr(m.id)+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;font-size:12px;">' +
       '<span>'+(offen?'▼ ':'› ')+ m.vorname + ' ' + m.nachname + '</span>' +
       '<span style="color:'+farbe+';font-weight:600;">' + eintraege.length + ' Einträge · ' + totalH.toFixed(1) + 'h</span>' +
     '</div>';
@@ -10134,7 +10389,7 @@ function renderBaustatusKVP() {
             '<div style="color:var(--text2,var(--muted));margin-top:2px;">'+(e.beschreibung||'')+'</div></div>' +
             '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
             '<span style="font-weight:700;">'+(e.stunden||0).toFixed(1)+'h</span>' +
-            '<span onclick="event.stopPropagation();kvpEntryLoeschen('+m.id+',\''+e.id+'\')" style="cursor:pointer;color:var(--red);">🗑</span>' +
+            '<span onclick="event.stopPropagation();kvpEntryLoeschen('+maIdAttr(m.id)+',\''+e.id+'\')" style="cursor:pointer;color:var(--red);">🗑</span>' +
             '</div></div>';
         });
         html += '</div>';
@@ -10164,7 +10419,7 @@ function kvpUpdatePositionen() {
 }
 
 function kvpSpeichern() {
-  const maId = parseInt(document.getElementById('kvp-ma').value);
+  const maId = maIdValue(document.getElementById('kvp-ma').value);
   const bauVal = document.getElementById('kvp-bau').value;
   const bauId = bauVal === '__frei__' ? null : parseInt(bauVal);
   const bauFreiName = bauVal === '__frei__' ? (document.getElementById('kvp-bau-frei')?.value.trim()||'Freie Baustelle') : null;
@@ -10230,7 +10485,7 @@ function renderBaustatusBewertung() {
       const aktuell = letztes[kr.key] || 0;
       let sterne = '';
       for (let i=1;i<=5;i++) {
-        sterne += '<span id="bsstar_'+kr.key+'_'+m.id+'_'+i+'" onclick="bsSetStern('+m.id+',&quot;'+kr.key+'&quot;,'+i+')" style="cursor:pointer;font-size:20px;color:'+(i<=aktuell?'#f59e0b':'#d1d5db')+';">★</span>';
+        sterne += '<span id="bsstar_'+kr.key+'_'+m.id+'_'+i+'" onclick="bsSetStern('+maIdAttr(m.id)+',&quot;'+kr.key+'&quot;,'+i+')" style="cursor:pointer;font-size:20px;color:'+(i<=aktuell?'#f59e0b':'#d1d5db')+';">★</span>';
       }
       html += '<div style="margin-bottom:8px;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
@@ -10241,7 +10496,7 @@ function renderBaustatusBewertung() {
       '</div>';
     });
 
-    html += '<button class="btn btn-primary" id="bssave_'+m.id+'" style="width:100%;margin-top:4px;" onclick="bsSaveBewertung('+m.id+')">💾 Bewertung speichern</button>' +
+    html += '<button class="btn btn-primary" id="bssave_'+m.id+'" style="width:100%;margin-top:4px;" onclick="bsSaveBewertung('+maIdAttr(m.id)+')">💾 Bewertung speichern</button>' +
       '<div style="font-size:10px;color:var(--muted);margin-top:6px;">' + eintraege.length + ' Bewertung(en) gespeichert</div>' +
     '</div>';
   });
@@ -10581,6 +10836,11 @@ function forceSave() {
 </div>
 <script id="gpt-assistant-script">
 const GPT_ASSISTANT_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/';
+const LAGERTOOL_OAUTH_CLIENT_ID = 'lagertool-webapp';
+const LAGERTOOL_OAUTH_REDIRECT_URI = 'https://vorburgerlucp-svg.github.io/Auftr-ge/';
+let lagertoolOAuthToken = null;
+let lagertoolOAuthCodeVerifier = null;
+let lagertoolOAuthState = null;
 let gptBusy = false;
 let gptRecognition = null;
 let gptListening = false;
@@ -10588,11 +10848,110 @@ let gptListening = false;
 // wird beim Neuladen der Seite zurückgesetzt; keine Firebase-/LocalStorage-Ablage).
 let gptHistory = [];
 const GPT_HISTORY_MAX = 20;
+function lagertoolOAuthBase64Url(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+async function lagertoolOAuthChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return lagertoolOAuthBase64Url(new Uint8Array(digest));
+}
+
+async function lagertoolOAuthLogin() {
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const stateBytes = crypto.getRandomValues(new Uint8Array(32));
+
+  lagertoolOAuthCodeVerifier = lagertoolOAuthBase64Url(verifierBytes);
+  lagertoolOAuthState = lagertoolOAuthBase64Url(stateBytes);
+
+  const challenge = await lagertoolOAuthChallenge(lagertoolOAuthCodeVerifier);
+
+
+  const url = new URL('oauth/authorize', GPT_ASSISTANT_URL);
+  url.searchParams.set('client_id', LAGERTOOL_OAUTH_CLIENT_ID);
+  url.searchParams.set('redirect_uri', LAGERTOOL_OAUTH_REDIRECT_URI);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('state', lagertoolOAuthState);
+
+window.open(url.toString(), 'lagertool-oauth', 'width=560,height=720');
+}
+
+function lagertoolOAuthHandleCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+
+  if (!code || !state || !window.opener) return false;
+
+  window.opener.postMessage({
+    type: 'lagertool-oauth-code',
+    code,
+    state
+  }, window.location.origin);
+
+  window.close();
+  return true;
+}
+
+lagertoolOAuthHandleCallback();
+async function lagertoolOAuthExchangeCode(code, state) {
+  if (!code || !state ||
+      state !== lagertoolOAuthState ||
+      !lagertoolOAuthCodeVerifier) {
+    throw new Error('OAuth-Rückgabe ungültig.');
+  }
+
+  const body = new URLSearchParams();
+  body.set('grant_type', 'authorization_code');
+  body.set('client_id', LAGERTOOL_OAUTH_CLIENT_ID);
+  body.set('redirect_uri', LAGERTOOL_OAUTH_REDIRECT_URI);
+  body.set('code', code);
+  body.set('code_verifier', lagertoolOAuthCodeVerifier);
+
+  const response = await fetch(
+    new URL('oauth/token', GPT_ASSISTANT_URL),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    }
+  );
+
+  const data = await response.json();
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error || 'OAuth-Token konnte nicht geladen werden.');
+  }
+
+  lagertoolOAuthToken = data.access_token;
+  lagertoolOAuthCodeVerifier = null;
+  lagertoolOAuthState = null;
+
+  return data;
+}
+window.addEventListener('message', async (event) => {
+  if (event.origin !== window.location.origin) return;
+  if (!event.data || event.data.type !== 'lagertool-oauth-code') return;
+
+  try {
+    await lagertoolOAuthExchangeCode(event.data.code, event.data.state);
+    console.log('[OAuth] LagerTool erfolgreich verbunden');
+  } catch (err) {
+    console.error('[OAuth] Anmeldung fehlgeschlagen', err);
+    toast('LagerTool Anmeldung fehlgeschlagen', err.message || '', '⚠️');
+  }
+});
 
 function toggleGptAssistant(){
+
   const p=document.getElementById('gpt-assistant-panel');
   p.classList.toggle('open');
-  if(p.classList.contains('open')){
+ if(p.classList.contains('open')){
     gptUpdateSyncState();
     const m=document.getElementById('gpt-messages');
     if(m && !m.dataset.welcome){
@@ -11061,17 +11420,11 @@ async function gptExecuteActions(actions,originalMessage){
           const vehStr=vehRef?(' – Fahrzeug: '+vehRef.name):'';
           const aktionsWort = verschoben ? 'Mitarbeiter verschoben: ' : (existingForMerge ? 'Einsatz aktualisiert: ' : 'Mitarbeiter eingeplant: ');
           const auditText=aktionsWort+empName+' → '+site.name+' am '+a.date+zeitStr+vehStr;
-          gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
+          auditedTextsThisBatch.push(gptNorm(auditText));
           applied.push(empName+' am '+a.date+' bei '+site.name+zeitStr+' eingeplant');
 
-          // Wenn WEDER jetzt genannt NOCH aus einem bestehenden Einsatz
-          // bekannt ist, UND das Modell explizit "keine Zeit bekannt"
-          // signalisiert hat (a.time===null), zusätzlich einen
-          // Klärungs-Arbeits-To-do anlegen (Ziel 1: "offene" Startzeit).
           if(!startzeit && !endzeit && a.time===null && a.end_time===null){
-            const clarifyText='Startzeit '+empName+' für '+site.name+' am '+a.date+' noch klären.';
-            gptTodo(clarifyText,gptActor().name,site.id,'GPT-To-do',null,null,'arbeit');
-            applied.push('Klärungs-To-do erstellt: '+clarifyText);
+            applied.push('Hinweis: Startzeit '+empName+' für '+site.name+' am '+a.date+' noch offen.');
           }
         }
 
@@ -11101,7 +11454,7 @@ async function gptExecuteActions(actions,originalMessage){
         const oldSite=(state.baustellen||[]).find(b=>String(b.id)===String(target.entry.bsId));
         delete state.plan[a.date][target.key];
         const auditText=empName+' aus '+(oldSite?oldSite.name:'Einsatz')+' am '+a.date+' entfernt.';
-        gptAudit(auditText,target.entry.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
+        auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push(empName+' am '+a.date+' aus der Planung entfernt'+(oldSite?' ('+oldSite.name+')':''));
 
       } else if(a.type==='assign_vehicle'){
@@ -11136,7 +11489,7 @@ async function gptExecuteActions(actions,originalMessage){
         const site=(state.baustellen||[]).find(b=>String(b.id)===String(existing.bsId));
         gptPlanAssign(emp,site||{id:existing.bsId,farbeHex:existing.farbeHex},a.date,undefined,startzeit,endzeit,vehRef.id,vehRef.name,target.key);
         const auditText='Fahrzeug für '+empName+' am '+a.date+(site?' bei '+site.name:'')+' geändert auf: '+vehRef.name;
-        gptAudit(auditText,existing.bsId); auditedTextsThisBatch.push(gptNorm(auditText));
+        auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Fahrzeug '+vehRef.name+' für '+empName+' am '+a.date+' eingetragen');
 
       } else if(a.type==='add_note'){
@@ -11150,6 +11503,11 @@ async function gptExecuteActions(actions,originalMessage){
         const site=gptFindSite(a); if(!site) throw new Error('Baustelle nicht eindeutig gefunden');
         const note=(a.note||a.text||'').trim();
         const vorherVon=site.von, vorherBis=site.bis;
+        // WICHTIG: Team-Zusammensetzung VOR gptApplySiteFields sichern - sonst
+        // würde die Kollisionsprüfung unten fälschlich mit dem bereits neuen
+        // Team sowohl als "alt" als auch als "neu" rechnen (Bug: Monteure ohne
+        // Bezug zur Umdisposition erschienen dadurch in Konfliktmeldungen).
+        const vorherTeamIds=[...new Set([...(site.teamMonteurIds||[]), site.chefMonteurId].filter(Boolean))];
         const vorherSnapshot={adresse:site.adresse, fahrtzeitKm:site.fahrtzeitKm, fahrtzeitMin:site.fahrtzeitMin, fahrtzeitStr:site.fahrtzeitStr};
         // Expliziter Zeitraum (von/bis) hat Vorrang vor dem einfachen "date"-Feld -
         // erlaubt echte Umdisposition analog zur manuellen Bearbeiten-Maske.
@@ -11168,19 +11526,30 @@ async function gptExecuteActions(actions,originalMessage){
         site.notiz = bsNotizMitAufgebot(site.notiz, site);
         let umdispoHinweis='';
         if((vorherVon!==site.von || vorherBis!==site.bis)){
-          const teamIds=[...new Set([...(site.teamMonteurIds||[]), site.chefMonteurId].filter(Boolean))];
-          const umdispoKonflikte=bsUmdisponierePlan(site.id, site.farbeHex, vorherVon, vorherBis, teamIds, site.von, site.bis, teamIds);
+          const neuTeamIds=[...new Set([...(site.teamMonteurIds||[]), site.chefMonteurId].filter(Boolean))];
+          const umdispoKonflikte=bsUmdisponierePlan(site.id, site.farbeHex, vorherVon, vorherBis, vorherTeamIds, site.von, site.bis, neuTeamIds);
           umdispoHinweis=' – Zeitraum '+(vorherVon||'–')+'–'+(vorherBis||'–')+' → '+(site.von||'–')+'–'+(site.bis||'–');
-          umdispoKonflikte.forEach(k=>gptTodo('⚠️ Konflikt bei Umdisposition '+site.name+': '+k+' – manuell prüfen',gptActor().name,site.id,'GPT-Konflikt'));
+          if(umdispoKonflikte.length){
+            // Mehrere betroffene Monteure/Zeiträume zu EINEM Konflikt-To-do
+            // zusammenfassen (statt einer Meldung pro Monteur/Tag).
+            const konfliktText = umdispoKonflikte.length===1
+              ? ('⚠️ Konflikt bei Umdisposition '+site.name+': '+umdispoKonflikte[0]+' – manuell prüfen.')
+              : ('⚠️ Konflikte bei Umdisposition '+site.name+':\n'+umdispoKonflikte.map(k=>'• '+k).join('\n')+'\nBitte manuell prüfen.');
+            // Duplikat-Schutz: gleiche Kombination (Baustelle + exakt gleicher
+            // Konflikttext) nicht erneut anlegen, auch wenn bereits erledigt.
+            const dupExists=(state.todos||[]).some(t=>String(t.bsId)===String(site.id) && gptNorm(t.text)===gptNorm(konfliktText));
+            if(!dupExists) gptTodo(konfliktText, gptActor().name, site.id, 'GPT-Konflikt', null, null, 'arbeit');
+            umdispoKonflikte.forEach(k=>applied.push('⚠️ Konflikt bei Umdisposition '+site.name+': '+k+' – manuell prüfen'));
+          }
         }
         const auditText='Baustelle geändert: '+site.name+umdispoHinweis+(note?' – '+note:'');
-        gptAudit(auditText,site.id); auditedTextsThisBatch.push(gptNorm(auditText));
+        auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Baustelle '+site.name+' aktualisiert');
 
       } else if(a.type==='create_site'){
         const name=(a.site_name||a.target_name||a.text||'').trim(); if(!name) throw new Error('Baustellenname fehlt');
         const id=Date.now()+Math.floor(Math.random()*1000);
-        const site={id,name,kunde:'',adresse:'',auftragsnummer:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',fahrtzeitMin:null,fahrtzeitKm:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',parkplatz:'',zufahrt:'',material:'',werkzeug:'',hotelName:'',hotelAdresse:'',hotelDaten:'',sollStunden:null,notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
+        const site={id,name,kunde:'',adresse:'',auftragsnummer:'',von:a.date||'',bis:a.date||'',positionen:1,montageArt:'',montageDetail:'',chefMonteurId:null,teamMonteurIds:[],startzeit:a.time||'',abfahrtAllschwil:'',fahrtzeitMin:null,fahrtzeitKm:null,fahrtzeitStr:null,montageTyp:'',apName:'',apTel:'',apEmail:'',parkplatz:'',zufahrt:'',material:'',werkzeug:'',hotelName:'',hotelAdresse:'',hotelDaten:'',sollStunden:null,notiz:a.note||'',farbeHex:'#1a6b3a',docs:[],tasks:[]};
         gptApplySiteFields(site, a);
         await bsPruefeHotelBedarf(site, null);
         site.notiz = bsNotizMitAufgebot(site.notiz, site);
@@ -11229,7 +11598,10 @@ async function gptExecuteActions(actions,originalMessage){
   // dessen Text im Wesentlichen dem gerade erzeugten Audit-Text entspricht,
   // gilt als das formale "Pflicht-To-do" der Änderung und wird nicht
   // zusätzlich als eigener Arbeits-To-do abgelegt (Duplikatvermeidung).
+  const planningBatch = mutations.some(a => ['assign_employee','move_employee','remove_employee_assignment','assign_vehicle','update_site'].includes(a.type));
+  const requestedTodo = /(?:to[\s-]?do|aufgabe|erinner|pendenz)/i.test(originalMessage || '') && !/(?:kein\w*|ohne|nicht)[^.!?]{0,60}(?:to[\s-]?do|aufgabe|erinner|pendenz)/i.test(originalMessage || '');
   for(const a of standaloneTodos){
+    if (planningBatch && !requestedTodo) continue;
     const text=(a.text||a.note||a.target_name||originalMessage||'').trim(); if(!text) continue;
     const textNorm=gptNorm(text);
     const isRedundant=auditedTextsThisBatch.some(at=>at===textNorm || (at.length>8 && textNorm.length>8 && (at.indexOf(textNorm)!==-1 || textNorm.indexOf(at)!==-1)));
