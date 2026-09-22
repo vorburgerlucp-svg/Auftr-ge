@@ -1541,7 +1541,12 @@
       📎 Dateien hier reinziehen oder klicken (PDF, Bilder, Pläne)
     </div>
     <input type="file" id="bs-doc-input" accept="image/*,application/pdf,.dwg,.dxf" multiple style="display:none" onchange="handleBsDocUpload(event)">
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="bsLoadSharedDocuments(true)">Gemeinsame Dokumente laden / aktualisieren</button>
+      <span id="bs-shared-doc-status" style="font-size:12px" role="status"></span>
+    </div>
     <div class="doc-preview-grid" id="bs-doc-preview"></div>
+    <div class="doc-preview-grid" id="bs-shared-doc-preview"></div>
     <div id="bs-doc-upload-status" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
     <hr class="divider">
     <div>
@@ -7728,6 +7733,8 @@ function showBsModal(id) {
   renderBsPalette(hex);
   tempBsDocs = bs?.docs ? [...bs.docs] : [];
   renderBsDocPreview();
+  bsResetSharedDocuments();
+  if (bs && lagertoolOAuthToken) bsLoadSharedDocuments(false);
   // Tasks/Positionen laden
   tempBsTasks = bs?.tasks ? JSON.parse(JSON.stringify(bs.tasks)) : [];
   renderBsTasks();
@@ -7769,7 +7776,7 @@ function bsTasksSumme() {
   el.textContent = tempBsTasks.length > 0 ? ('Soll Total: ' + sum.toFixed(1) + 'h') : '';
 }
 
-function closeBsModal() { document.getElementById('bs-modal').classList.remove('open'); tempBsDocs=[]; }
+function closeBsModal() { document.getElementById('bs-modal').classList.remove('open'); tempBsDocs=[]; bsResetSharedDocuments(); }
 
 function deleteBaustelle() {
   const id = parseInt(document.getElementById('bs-modal-id').value);
@@ -7908,7 +7915,8 @@ async function bsUploadDocumentToServer(file) {
       },
       body: file
     });
-    data = await response.json().catch(() => ({}));
+    const envelope = await response.json().catch(() => ({}));
+    data = envelope.data || envelope;
   } catch (e) {
     setStatus('❌ Dokument konnte nicht gespeichert werden (Netzwerkfehler).');
     toast('Fehler', 'Dokument konnte nicht gespeichert werden', '⚠️');
@@ -7927,43 +7935,102 @@ async function bsUploadDocumentToServer(file) {
     return;
   }
 
-  // Erst jetzt, nach bestätigter physischer Speicherung: Metadaten anzeigen.
-  tempBsDocs.push({
-    name: data.fileName || file.name,
-    category: data.category || category,
-    orderFolder: data.orderFolder || null,
-    size: typeof data.size === 'number' ? data.size : file.size,
-    mimeType: file.type || null,
-    uploadedAt: new Date().toISOString(),
-    storage: 'site-document'
-  });
-  renderBsDocPreview();
-  setStatus('✅ "' + file.name + '" gespeichert (' + category + ')');
+  // The registry is authoritative across devices, including uploads from ChatGPT.
+  if (String(document.getElementById('bs-modal-id').value) === String(siteId)) {
+    setStatus('✅ "' + file.name + '" gespeichert (' + category + ')');
+    await bsLoadSharedDocuments(false);
+  }
   toast('Dokument gespeichert', file.name, '✅');
+}
+
+let bsSharedDocs = [];
+let bsSharedRequest = 0;
+function bsResetSharedDocuments() {
+  bsSharedRequest++;
+  bsSharedDocs = [];
+  document.getElementById('bs-shared-doc-preview').replaceChildren();
+  document.getElementById('bs-shared-doc-status').textContent = 'Dokumente für beide Benutzer aus der gemeinsamen Ablage laden.';
+}
+async function bsLoadSharedDocuments(interactive = true) {
+  const siteId = document.getElementById('bs-modal-id').value;
+  const status = document.getElementById('bs-shared-doc-status');
+  if (!siteId) { status.textContent = 'Bitte zuerst den Auftrag speichern.'; return; }
+  const request = ++bsSharedRequest;
+  const current = () => request === bsSharedRequest && String(document.getElementById('bs-modal-id').value) === String(siteId);
+  try {
+    if (!lagertoolOAuthToken && !interactive) return;
+    status.textContent = 'Gemeinsame Dokumente werden geladen…';
+    const token = await lagertoolOAuthEnsureToken();
+    const url = new URL(LAGERTOOL_SITE_DOCS_URL); url.searchParams.set('siteId', siteId);
+    const response = await fetch(url, {headers:{Authorization:'Bearer ' + token}, cache:'no-store'});
+    const result = await response.json();
+    if (response.status === 401) { lagertoolOAuthToken = null; throw new Error('Anmeldung abgelaufen. Bitte erneut auf Laden klicken.'); }
+    if (!response.ok || result.ok === false) throw new Error('Ablage nicht erreichbar. Bridge und Tunnel müssen laufen.');
+    const documents = (result.data || result).documents;
+    if (!Array.isArray(documents)) throw new Error('Ungültige Dokumentliste.');
+    if (!current()) return;
+    bsSharedDocs = documents;
+    const grid = document.getElementById('bs-shared-doc-preview'); grid.replaceChildren();
+    documents.forEach(doc => {
+      const card = document.createElement('div'); card.className = 'doc-preview-item';
+      const name = document.createElement('div'); name.className = 'doc-label'; name.textContent = doc.fileName || 'Dokument'; name.title = name.textContent;
+      const category = document.createElement('div'); category.style.fontSize = '11px'; category.textContent = doc.category || '';
+      card.append(name, category);
+      for (const [label, preview] of [['Öffnen',true], ['Herunterladen',false]]) {
+        const btn = document.createElement('button'); btn.type='button'; btn.className='btn btn-secondary btn-sm'; btn.textContent=label;
+        btn.onclick=()=>bsOpenSharedDocument(siteId, doc, preview); card.append(btn);
+      }
+      grid.append(card);
+    });
+    status.textContent = documents.length ? documents.length + ' gemeinsame Dokumente – Stand jetzt' : 'Noch keine gemeinsamen Dokumente vorhanden.';
+  } catch (err) { if (current()) status.textContent = '⚠️ ' + err.message; }
+}
+async function bsOpenSharedDocument(siteId, doc, preview) {
+  // Open synchronously during the click, avoiding popup blocking after fetch.
+  const tab = preview ? window.open('about:blank','_blank') : null;
+  if (tab) tab.opener = null;
+  try {
+    const token = await lagertoolOAuthEnsureToken();
+    const url = new URL(LAGERTOOL_SITE_DOCS_URL);
+    url.searchParams.set('siteId',siteId); url.searchParams.set('documentId',doc.id);
+    const response = await fetch(url,{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+    if (response.status === 401) { lagertoolOAuthToken=null; throw new Error('Bitte erneut anmelden.'); }
+    if (!response.ok) throw new Error('Datei nicht erreichbar. Bitte Ablage prüfen.');
+    const blob = await response.blob(), objectUrl = URL.createObjectURL(blob);
+    const safePreview = ['application/pdf','image/jpeg','image/png','image/gif','image/webp','text/plain'].includes(blob.type.split(';')[0]);
+    if (preview && tab && safePreview) tab.location.href=objectUrl;
+    else {
+      if (tab) tab.close();
+      const a=document.createElement('a'); a.href=objectUrl; a.download=doc.fileName||'Dokument'; document.body.append(a); a.click(); a.remove();
+    }
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),300000);
+  } catch (err) { if(tab) tab.close(); toast('Dokument konnte nicht geöffnet werden',err.message,'⚠️'); }
 }
 
 function renderBsDocPreview() {
   const g=document.getElementById('bs-doc-preview'); if(!g) return;
   if(!tempBsDocs.length){g.innerHTML='';return;}
   g.innerHTML=tempBsDocs.map((d,i)=>{
-    if (d.storage === 'site-document') {
-      // Server-Dokument: keine Bytes lokal vorhanden (nur Metadaten) - kein
-      // Bild-Preview, kein lokaler Download, kein Entfernen-Button (es gibt
-      // noch keine Löschfunktion gegen die physische Ablage).
-      return `<div class="doc-preview-item">
-        <div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px">📄<span style="font-size:9px;color:var(--muted)">${(d.category||'').toUpperCase()}</span></div>
-        <div class="doc-label" title="${d.name}">${d.name}</div>
-        <div style="font-size:9px;color:var(--muted);text-align:center">✅ gespeichert</div>
-      </div>`;
-    }
+    if (d.storage === 'site-document') return '';
+
     return `<div class="doc-preview-item">
     ${d.type?.startsWith('image')
       ?`<img src="${d.data}" onclick="openLightbox('${d.data}')" style="cursor:pointer">`
       :`<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px;cursor:pointer" onclick="openBsDoc(${i})">📄<span style="font-size:9px;color:var(--muted)">${d.name.split('.').pop().toUpperCase()}</span></div>`}
     <button class="doc-remove" onclick="removeBsDoc(${i})">✕</button>
-    <div class="doc-label">${d.name}</div>
+    <div class="doc-label">${String(d.name||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</div>
+    <div style="font-size:10px">Bisher nur lokal verfügbar</div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="bsShareLegacyDocument(${i})">Gemeinsam speichern</button>
   </div>`;
   }).join('');
+}
+async function bsShareLegacyDocument(i) {
+  const doc=tempBsDocs[i]; if(!doc?.data) return;
+  try {
+    await lagertoolOAuthEnsureToken();
+    const blob=await (await fetch(doc.data)).blob();
+    await bsUploadDocumentToServer(new File([blob],doc.name||'Dokument',{type:blob.type}));
+  } catch(err) { toast('Übernahme fehlgeschlagen',err.message,'⚠️'); }
 }
 function openBsDoc(i){const d=tempBsDocs[i];if(!d||!d.data)return;const a=document.createElement('a');a.href=d.data;a.download=d.name;a.click();}
 function removeBsDoc(i){tempBsDocs.splice(i,1);renderBsDocPreview();}
@@ -8060,6 +8127,7 @@ function bsModalKopieren() {
   const origName = document.getElementById('bs-name').value.trim();
   if (!origName) return toast('Fehler','Keine Baustelle geladen','⚠️');
   document.getElementById('bs-modal-id').value = '';
+  bsResetSharedDocuments();
   document.getElementById('bs-modal-title').textContent = 'Baustelle anlegen (Kopie von "'+origName+'")';
   document.getElementById('bs-name').value = origName + ' (Kopie)';
   // Neuer Zeitraum ist Pflicht - wird bewusst nicht übernommen.
@@ -11036,6 +11104,8 @@ async function lagertoolOAuthChallenge(verifier) {
 }
 
 async function lagertoolOAuthLogin() {
+  const loginWindow = window.open('about:blank', 'lagertool-oauth', 'width=560,height=720');
+  if (!loginWindow) throw new Error('Bitte Pop-ups für die Anmeldung erlauben.');
   const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
   const stateBytes = crypto.getRandomValues(new Uint8Array(32));
 
@@ -11053,7 +11123,7 @@ async function lagertoolOAuthLogin() {
   url.searchParams.set('code_challenge_method', 'S256');
   url.searchParams.set('state', lagertoolOAuthState);
 
-window.open(url.toString(), 'lagertool-oauth', 'width=560,height=720');
+loginWindow.location.href = url.toString();
 }
 
 function lagertoolOAuthHandleCallback() {
