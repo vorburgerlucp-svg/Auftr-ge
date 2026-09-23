@@ -6009,7 +6009,7 @@ function renderWochenplan() {
           });
           const e=dayEntriesSorted[0]?.entry;
           if(e?.bsId){
-            const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
+            const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
             if(bs?.startzeit && bs?.fahrtzeitMin){
               const stm=bs.startzeit.match(/(\d{1,2})[:\.](\d{2})/);
               if(stm){
@@ -6048,7 +6048,7 @@ function renderWochenplan() {
 
         if(dayEntries.length){
           const cellsHtml=dayEntries.map(({key,entry:e})=>{
-            const bs=(state.baustellen||[]).find(b=>b.id===e.bsId);
+            const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
             const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
             const label=bs?bs.name:'?';
             const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
@@ -6251,7 +6251,7 @@ function wpAbfahrtEdit(maId, ev) {
   for(const d of allDates){
     const ds=fmtDate(d);
     const e=state.plan[ds]?.['ma'+maId+'_'+ds];
-    if(e?.bsId){ bs=(state.baustellen||[]).find(b=>b.id===e.bsId); break; }
+    if(e?.bsId){ bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId)); break; }
   }
   if(!bs) return;
 
@@ -6501,7 +6501,7 @@ function showBuchungsMenu(maId, datum, key) {
   const e = state.plan[datum]?.[planKey];
   if (e?.bsId) {
     hasEntry = true;
-    entryBs = (state.baustellen||[]).find(b=>b.id===e.bsId);
+    entryBs = (state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
   }
   if(!hasEntry){
     const se=state.plan[datum]?.['status_ma'+maId];
@@ -9043,7 +9043,7 @@ function wpExcelExport() {
       const planKey = `ma${m.id}_${ds}`;
       const e = state.plan?.[ds]?.[planKey] || state.plan?.[ds]?.['status_ma'+m.id];
       if (!e) { row.push(''); return; }
-      const bs = e.bsId ? (state.baustellen||[]).find(b=>b.id===e.bsId) : null;
+      const bs = e.bsId ? (state.baustellen||[]).find(b=>String(b.id)===String(e.bsId)) : null;
       row.push(bs ? bs.name : (e.status||''));
     });
     csv += row.join(';') + '\n';
@@ -9082,7 +9082,7 @@ function wpPrint() {
         text = s.status;
         bg = s.farbeHex || '#8B0000'; col = '#fff';
       } else if (e?.bsId) {
-        const bs = (state.baustellen||[]).find(b=>b.id===e.bsId);
+        const bs = (state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
         text = bs?.name || '?';
         bg = e.farbeHex || '#333'; col = '#fff';
       }
