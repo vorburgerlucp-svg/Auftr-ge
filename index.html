@@ -561,8 +561,8 @@
       <button class="btn btn-secondary btn-sm" onclick="wpPrint()">🖨️ Drucken</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
     </div>
-    <!-- Baustellen Legende -->
-    <div id="wp-legende" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px"></div>
+    <!-- Baustellen dieser KW (neutrale Liste) -->
+    <div id="wp-legende" style="margin-top:10px"></div>
   </div>
 
   <!-- Monteur-Suche (nur Darstellungsfilter) -->
@@ -5900,10 +5900,8 @@ function renderWochenplan() {
       (a.vorname+' '+a.nachname).localeCompare(b.vorname+' '+b.nachname, 'de', {sensitivity:'base'})
     );
   }
-  const baustellen = (state.baustellen||[]).filter(bs=>{
-    const von=bs.von||'0000-00-00', bis=bs.bis||'9999-12-31';
-    return von<=wEnd && bis>=wStart;
-  });
+  // Nur Baustellen mit echten Planeinträgen in dieser KW (nicht von/bis), A–Z
+  const baustellen = wpPlanBaustellenDerWoche(wpBaseMonday).baustellen;
   const cols = allDates.length + 3;
 
   // HEADER
@@ -5930,30 +5928,25 @@ function renderWochenplan() {
       +(collapsed?'▶':'▼')+' BAUSTELLEN ('+baustellen.length+')'+(collapsed?' – eingeklappt':'')+'</button>'
       +'</td></tr>';
     if(!collapsed){
-    baustellen.forEach((bs,bsIdx)=>{
-      const hex=getHex(bs), tc=textCol(hex);
-      if(bsIdx>0) html+='<tr><td colspan="'+cols+'" style="height:6px;background:var(--bg);border:none;padding:0"></td></tr>';
+    baustellen.forEach(bs=>{
       const vonStr=bs.von?new Date(bs.von+'T12:00').toLocaleDateString('de-CH'):'';
       const bisStr=bs.bis?new Date(bs.bis+'T12:00').toLocaleDateString('de-CH'):'';
-      html+='<tr><td class="sticky-col" colspan="3" onclick="showBsModal('+bs.id+')" '
-        +'style="cursor:pointer;padding:6px 12px;border-left:4px solid '+hex+';background:var(--surface2)">'
+      html+='<tr><td class="sticky-col" colspan="3" onclick="showBsModal('+maIdAttr(bs.id)+')" '
+        +'style="cursor:pointer;padding:5px 10px;background:var(--surface2);border-bottom:1px solid var(--border)">'
         +'<div style="display:flex;align-items:center;gap:8px">'
-        +'<div style="width:10px;height:26px;border-radius:3px;background:'+hex+';flex-shrink:0"></div>'
-        +'<div style="flex:1"><div style="font-weight:700;font-size:13px">'+bs.name+'</div>'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+bs.name+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">'+vonStr+(bisStr?' – '+bisStr:'')+(bs.montageTyp?' · '+bs.montageTyp:'')+'</div>'
         +'</div><span style="font-size:11px;color:var(--muted)">'+(bs.positionen||1)+'×</span>'
         +'</div></td>';
       allDates.forEach((d,i)=>{
         const ds=fmtDate(d), isSo=i===6, isT=ds===today;
         const inRange=(!bs.von||ds>=bs.von)&&(!bs.bis||ds<=bs.bis);
-        const done=inRange?monteure.filter(m=>gptEmployeeDayEntries(m.id,ds).some(en=>en.entry.bsId===bs.id)).length:0;
+        const soll=bs.positionen||1;
+        const done=inRange?monteure.filter(m=>gptEmployeeDayEntries(m.id,ds).some(en=>String(en.entry.bsId)===String(bs.id))).length:0;
         const bg=isT?'background:rgba(232,184,75,.06);':isSo?'background:rgba(42,48,69,.4);':'background:var(--surface2);';
-        html+='<td style="'+bg+'text-align:center;padding:3px;border-bottom:2px solid '+hex+'44">';
-        if(inRange) html+='<div style="display:inline-flex;align-items:center;justify-content:center;'
-          +'width:30px;height:18px;border-radius:9px;font-size:10px;font-weight:700;'
-          +'background:'+(done>0?hex:'transparent')+';color:'+(done>0?tc:'var(--muted)')+';'
-          +'border:1px solid '+(done>0?hex:'var(--border)')+'">'+done+'/'+(bs.positionen||1)+'</div>';
-        else html+='<span style="color:var(--border)">·</span>';
+        html+='<td style="'+bg+'text-align:center;padding:3px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">';
+        if(inRange) html+='<span style="font-weight:'+(done>0?'700':'400')+';color:'+(done>=soll?'var(--text)':'var(--muted)')+'">'+done+'/'+soll+'</span>';
+        else html+='<span style="color:var(--muted)">–</span>';
         html+='</td>';
       });
       html+='</tr>';
@@ -6049,7 +6042,6 @@ function renderWochenplan() {
         if(dayEntries.length){
           const cellsHtml=dayEntries.map(({key,entry:e})=>{
             const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
-            const hex=e.farbeHex||getHex(bs)||'#1a6b3a', tc=textCol(hex);
             const label=bs?bs.name:'?';
             const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
@@ -6057,7 +6049,7 @@ function renderWochenplan() {
             const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
             return '<div class="wp-cell" draggable="true" '
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
-              +'style="background:'+hex+';color:'+tc+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
+              +'style="background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:11px;position:relative;min-height:26px;cursor:grab" '
               +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
               +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
               +'</div>';
@@ -7144,33 +7136,96 @@ function randomColor() {
 }
 
 
+// Baustellen der KW: nur mit mindestens einem Eintrag in state.plan (Mo–So), A–Z.
+// Status-Einträge (inkl. "Baustelle ungeklärt") werden keiner Baustelle zugeordnet.
+function wpPlanBaustellenDerWoche(mon) {
+  const einsaetze = {};
+  for (let i = 0; i < 7; i++) {
+    const ds = fmtDate(addDays(mon, i));
+    Object.entries((state.plan||{})[ds] || {}).forEach(([key, e]) => {
+      if (!e || e.bsId == null || e.bsId === '' || String(key).indexOf('status_ma') === 0) return;
+      einsaetze[String(e.bsId)] = (einsaetze[String(e.bsId)] || 0) + 1;
+    });
+  }
+  const baustellen = Object.keys(einsaetze)
+    .map(id => (state.baustellen||[]).find(b => String(b.id) === String(id)))
+    .filter(Boolean)
+    .sort((a,b) => (a.name||'').localeCompare(b.name||'', 'de', {sensitivity:'base'}));
+  return { baustellen, einsaetze };
+}
+
 function renderWpLegende() {
   const el = document.getElementById('wp-legende');
-  if (!(state.baustellen||[]).length) {
-    el.innerHTML = `<span style="font-size:12px;color:var(--muted)">Noch keine Baustellen – klicke "+ Baustelle anlegen"</span>`;
-    return;
+  if (!el) return;
+  // Grundgerüst nur einmal aufbauen, damit das Suchfeld beim Neu-Rendern den Fokus behält
+  if (!document.getElementById('wp-bs-suche')) {
+    el.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+        '<span id="wp-bs-titel" style="font-size:12px;font-weight:700;letter-spacing:.3px"></span>' +
+        '<button type="button" class="btn btn-secondary btn-sm" id="wp-bs-toggle" onclick="window._wpBsListeOffen=!window._wpBsListeOffen;wpBsListeRender()"></button>' +
+        '<div class="spacer"></div>' +
+        '<input type="text" id="wp-bs-suche" placeholder="🔎 Baustelle suchen..." autocomplete="off" oninput="wpBsListeRender()" ' +
+          'style="flex:1;min-width:160px;max-width:260px;padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px">' +
+        '<span style="font-size:11px;color:var(--muted)">Sortierung:</span>' +
+        '<button type="button" class="btn btn-secondary btn-sm" id="wp-bs-sort" onclick="window._wpBsSortZA=!window._wpBsSortZA;wpBsListeRender()"></button>' +
+      '</div>' +
+      '<div id="wp-bs-liste"></div>';
   }
-  // Nur Baustellen der aktuellen Woche
+  wpBsListeRender();
+}
+
+// Neutrale Baustellenliste der angezeigten KW (keine Baustellenfarben)
+function wpBsListeRender() {
+  const liste = document.getElementById('wp-bs-liste');
+  if (!liste) return;
   const mon = wpBaseMonday || getMonday(new Date());
-  const wStart = fmtDate(mon);
-  const wEnd   = fmtDate(addDays(mon, 6));
-  const dieseWoche = state.baustellen.filter(b => {
-    const von = b.von || '0000-00-00';
-    const bis = b.bis || '9999-12-31';
-    return von <= wEnd && bis >= wStart;
-  });
+  // Nur Baustellen mit echten Planeinträgen in dieser KW (nicht von/bis)
+  const { baustellen: dieseWoche, einsaetze } = wpPlanBaustellenDerWoche(mon);
+  const q = wpSucheNorm(document.getElementById('wp-bs-suche')?.value || '');
+  const sichtbar = dieseWoche.filter(b => !q ||
+    wpSucheNorm(b.name).includes(q) || wpSucheNorm(b.kunde).includes(q) || wpSucheNorm(b.adresse).includes(q) || wpSucheNorm(b.ort).includes(q));
+  sichtbar.sort((a, b) => (a.name||'').localeCompare(b.name||'', 'de', {sensitivity:'base'}));
+  if (window._wpBsSortZA) sichtbar.reverse();
+
+  const offen = !!window._wpBsListeOffen;
+  const titel = document.getElementById('wp-bs-titel');
+  if (titel) titel.textContent = 'Baustellen dieser KW (' + (q ? sichtbar.length + ' von ' : '') + dieseWoche.length + ')';
+  const tg = document.getElementById('wp-bs-toggle');
+  if (tg) tg.textContent = offen ? 'Einklappen' : 'Aufklappen';
+  const so = document.getElementById('wp-bs-sort');
+  if (so) so.textContent = window._wpBsSortZA ? 'Z–A' : 'A–Z';
+
   if (!dieseWoche.length) {
-    el.innerHTML = `<span style="font-size:12px;color:var(--muted)">Keine Baustellen diese Woche</span>`;
+    liste.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0">' +
+      ((state.baustellen||[]).length ? 'Keine Baustellen diese Woche' : 'Noch keine Baustellen – klicke "+ Baustelle anlegen"') + '</div>';
     return;
   }
-  dieseWoche.sort((a, b) => (a.name||'').localeCompare(b.name||'', 'de', {sensitivity:'base'}));
-  el.innerHTML = dieseWoche.map(b => {
-    const hex = getHex(b);
-    const tc = textCol(hex);
-    return `<div class="bs-chip" style="background:${hex};color:${tc}" onclick="showBsModal(${b.id})">
-      ${b.name} <span style="opacity:.6;font-size:10px">${b.positionen||1}×</span>
-    </div>`;
-  }).join('');
+  if (!sichtbar.length) {
+    liste.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0">Keine Baustelle gefunden</div>';
+    return;
+  }
+  const MAX_ZU = 8;
+  const zeilen = offen ? sichtbar : sichtbar.slice(0, MAX_ZU);
+  let html = '<div style="border:1px solid var(--border);border-radius:6px;background:var(--surface2);' +
+    (offen ? 'max-height:300px;overflow-y:auto;' : '') + '">' +
+    '<div style="display:flex;padding:5px 10px;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface2)">' +
+      '<span style="flex:1">BAUSTELLE</span><span style="width:70px;text-align:right">EINSÄTZE</span></div>';
+  zeilen.forEach(b => {
+    const ort = [b.kunde, b.adresse].filter(Boolean).join(' · ');
+    html += '<div onclick="showBsModal(' + maIdAttr(b.id) + ')" style="display:flex;align-items:center;padding:5px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px" ' +
+      'onmouseover="this.style.background=\'rgba(255,255,255,.03)\'" onmouseout="this.style.background=\'\'">' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+        '<span style="font-weight:600;color:var(--text)">' + bsKwEsc(b.name) + '</span>' +
+        (ort ? '<span style="color:var(--muted);font-size:11px"> · ' + bsKwEsc(ort) + '</span>' : '') +
+      '</span>' +
+      '<span style="width:70px;text-align:right;font-family:var(--mono);color:' + (einsaetze[String(b.id)] ? 'var(--text)' : 'var(--muted)') + '">' + (einsaetze[String(b.id)] || 0) + '</span>' +
+    '</div>';
+  });
+  if (!offen && sichtbar.length > MAX_ZU) {
+    html += '<div onclick="window._wpBsListeOffen=true;wpBsListeRender()" style="padding:5px 10px;font-size:11px;color:var(--muted);cursor:pointer">… ' + (sichtbar.length - MAX_ZU) + ' weitere anzeigen</div>';
+  }
+  html += '</div>';
+  liste.innerHTML = html;
 }
 
 // ── BAUSTELLEN MODAL ────────────────────────────────────
