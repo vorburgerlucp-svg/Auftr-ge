@@ -793,7 +793,9 @@
     <button class="nav-btn active" id="todo-filter-offen" onclick="setTodoFilter('offen')">Offen</button>
     <button class="nav-btn" id="todo-filter-alle" onclick="setTodoFilter('alle')">Alle</button>
     <button class="nav-btn" id="todo-filter-erledigt" onclick="setTodoFilter('erledigt')">Erledigt</button>
+    <button class="nav-btn" id="todo-filter-bereinigt" onclick="setTodoFilter('bereinigt')" title="Aus der offenen Liste genommene reine Meldungen (wiederherstellbar)">Bereinigt</button>
   </div>
+  <div id="todo-bereinigung"></div>
 
   <div id="todo-list"></div>
 </div>
@@ -2779,13 +2781,8 @@ function pruefeGeburtstagsTodos() {
     if (gd.getMonth()!==ziel.getMonth() || gd.getDate()!==ziel.getDate()) return;
     if (m._geburtstagTodoJahr === jahr) return; // dieses Jahr bereits angelegt
     const name = ((m.vorname||'')+' '+(m.nachname||'')).trim();
-    if (!state.todos) state.todos = [];
-    state.todos.push({
-      id: Date.now()+Math.floor(Math.random()*1000)+23, bsId: null,
-      text: 'Geburtstagsgeschenk vorbereiten – '+name,
-      zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'',
-      erstelltAm: new Date().toISOString().slice(0,10)
-    });
+    todoErstellen({ text: 'Geburtstagsgeschenk vorbereiten – '+name, quelle:'Automatisch' },
+      { schluessel: 'geburtstag:'+m.id+':'+jahr });
     m._geburtstagTodoJahr = jahr;
     geaendert = true;
   });
@@ -3196,11 +3193,109 @@ function showPage(id) {
 // ============================================================
 // TO-DO RUBRIK
 // ============================================================
+// ════════════════════════════════════════════════════════
+// TO-DO-REGELN – nur echte Aufgaben speichern
+// ════════════════════════════════════════════════════════
+// Gespeichert werden: ausdrücklich beauftragte Aufgaben, Fahrzeugservice und
+// andere konkrete betriebliche Aufgaben sowie wichtige offene Abklärungen.
+// NICHT gespeichert werden reine Änderungs-/Sync-/Update-Meldungen
+// (Monteurwechsel, Datumsverschiebung, erfolgreiche Synchronisation …).
+// Gleiche Abklärungen werden nicht doppelt angelegt (Schlüssel oder Text+Baustelle).
+const TODO_ABKLAERUNG_RE = /(klär|unklar|ungeklärt|prüf|fehlt|fehlend|nicht gefunden|konflikt|\?|nachfrag|rückfrag|bestätig|verfügbarkeit|widerspr|doppel)/i;
+const TODO_AKTION_RE = /(senden|schicken|informier|anrufen|telefonier|bestell|organisier|buchen|abholen|vorbereit|weiterleit|mitteil|melden|einlad|reservier|reparier|service|garage|mfk|reifen|rechnung|offerte|abnahme|geburtstag|hotel)/i;
+const TODO_MELDUNG_RE = /^(?:änderung(?:en)?\s*(?:im\s*|am\s*)?(?:wochenplan|plan)|wochenplan(?:änderung|[\s-]*(?:geändert|aktualisiert|angepasst|synchronisiert|abgeglichen))|plan(?:änderung|ung)?\s*(?:geändert|aktualisiert|angepasst)|umdisposition\b|umgeplant|(?:monteur|mitarbeiter)(?:wechsel|tausch)|(?:datum|termin)(?:sänderung|s?\s*(?:geändert|verschoben))|(?:excel|gpt|mcp)[\s-]*(?:sync|abgleich|import|synchronisation)|synchronisation\b|sync\b|abgleich\s+(?:erfolgreich|abgeschlossen|durchgeführt)|update:|status(?:meldung|update)|info:|hinweis:|baustelle\s+(?:erstellt|geändert|aktualisiert)|notiz\s+bei\s|to-do\s+aktualisiert|fahrzeug\s+für\s.+\sgeändert)/i;
+
+function todoTextNorm(t) {
+  return String(t||'').replace(/🤖/g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+}
+// Reine Änderungs-/Updatemeldung (keine Aufgabe, keine Abklärung)?
+function todoIstReineMeldung(t) {
+  if (!t) return false;
+  if (t.quelle === 'Manuell' || t.ausdruecklich) return false;   // manuell / ausdrücklich beauftragt
+  const text = String(t.text||'').replace(/^\s*🤖\s*/,'').trim();
+  if (!text) return false;
+  if (TODO_ABKLAERUNG_RE.test(text) || TODO_AKTION_RE.test(text)) return false;
+  if (t.kind === 'audit') return true;                           // automatisches Änderungsprotokoll
+  return TODO_MELDUNG_RE.test(text.split('\n')[0].trim());
+}
+function todoIstOffen(t) { return !!t && !t.erledigt && !t.bereinigt; }
+// Eindeutiger reiner Audit-Eintrag: vom früheren gptAudit() erzeugt (kind 'audit',
+// quelle 'GPT-Änderung', '🤖'-Präfix) UND einer der bekannten Protokolltexte.
+// Garagentermine ('🤖 Fahrzeug … – Garagentermin …') sind Serviceaufgaben und zählen NIE dazu.
+const GPT_AUDIT_PROTOKOLL_RE = /^🤖\s*(?:Notiz bei .+ ergänzt:|Baustelle erstellt:|Baustelle geändert:|To-do aktualisiert:|Mitarbeiter eingeplant:|Mitarbeiter verschoben:|Einsatz aktualisiert:|Fahrzeug für .+ geändert auf:)/;
+function todoIstEindeutigerAudit(t) {
+  if (!t || t.kind !== 'audit' || t.quelle !== 'GPT-Änderung') return false;
+  const text = String(t.text||'').trim();
+  if (/–\s*Garagentermin\b/.test(text)) return false;
+  return GPT_AUDIT_PROTOKOLL_RE.test(text);
+}
+function todoFindeOffeneDublette(neu) {
+  const n = todoTextNorm(neu.text);
+  return (state.todos||[]).find(t => todoIstOffen(t) && (
+    (neu.schluessel && t.schluessel === neu.schluessel) ||
+    (todoTextNorm(t.text) === n && String(t.bsId ?? '') === String(neu.bsId ?? ''))
+  )) || null;
+}
+// Zentrale Anlage: Rückgabe {status:'neu'|'dublette'|'meldung', todo}
+function todoErstellen(daten, opts) {
+  opts = opts || {};
+  if (!state.todos) state.todos = [];
+  const t = Object.assign({
+    id: Date.now()+Math.floor(Math.random()*10000), text:'', bsId:null, zustaendig:'–',
+    erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'',
+    erstelltAm: new Date().toISOString().slice(0,10)
+  }, daten);
+  if (opts.schluessel) t.schluessel = opts.schluessel;
+  if (opts.ausdruecklich) t.ausdruecklich = true;
+  if (!opts.ausdruecklich && todoIstReineMeldung(t)) return { status:'meldung', todo:null };
+  const dup = todoFindeOffeneDublette(t);
+  if (dup) return { status:'dublette', todo:dup };
+  state.todos.push(t);
+  return { status:'neu', todo:t };
+}
+
+// ── Bereinigung bestehender Einträge (reversibel) ──
+// Bereinigte Einträge werden NICHT als erledigt markiert, sondern mit
+// t.bereinigt={am,durch,grund} aus der offenen Liste genommen und sind im
+// Tab "Bereinigt" jederzeit wiederherstellbar.
+let todoBereinigungVorschau = false;
+// Kandidaten: eindeutige Audit-Einträge (vorausgewählt) + weitere erkannte
+// Meldungen z.B. aus externem Abgleich (NICHT vorausgewählt, nur zur Prüfung).
+function todoBereinigungKandidaten() {
+  return (state.todos||[]).filter(t => todoIstOffen(t) &&
+    (todoIstEindeutigerAudit(t) || (t.kind !== 'audit' && todoIstReineMeldung(t))));
+}
+function todoBereinigungToggle() { todoBereinigungVorschau = !todoBereinigungVorschau; renderTodoPage(); }
+async function todoBereinigungAusfuehren() {
+  const boxen = [...document.querySelectorAll('.todo-bereinigen-cb:checked')];
+  const ids = new Set(boxen.map(b => b.dataset.id));
+  if (!ids.size) return toast('Hinweis','Nichts ausgewählt','ℹ️');
+  if (!confirm(ids.size+' Meldung(en) aus der offenen Liste nehmen?\n\nSie werden NICHT als erledigt markiert und bleiben im Tab "Bereinigt" wiederherstellbar.')) return;
+  const vorher = JSON.stringify(state.todos);
+  const am = new Date().toISOString(), durch = (typeof gptActor==='function' ? gptActor().name : '') || '–';
+  (state.todos||[]).forEach(t => { if (ids.has(String(t.id))) t.bereinigt = { am, durch, grund:'Reine Änderungs-/Updatemeldung' }; });
+  const res = await save({verify:true});
+  if (!res || !res.ok) { state.todos = JSON.parse(vorher); renderTodoPage(); return toast('Fehler','Speichern nicht bestätigt – nichts geändert','⚠️'); }
+  todoBereinigungVorschau = false;
+  renderTodoPage();
+  toast('Bereinigt', ids.size+' Meldung(en) aus der offenen Liste genommen', '🧹');
+}
+async function todoWiederherstellen(id) {
+  const t = (state.todos||[]).find(x => String(x.id) === String(id));
+  if (!t || !t.bereinigt) return;
+  const alt = t.bereinigt;
+  delete t.bereinigt;
+  const res = await save({verify:true});
+  if (!res || !res.ok) { t.bereinigt = alt; renderTodoPage(); return toast('Fehler','Speichern nicht bestätigt','⚠️'); }
+  renderTodoPage();
+}
+
 let todoFilter = 'offen';
 
 function setTodoFilter(f) {
   todoFilter = f;
-  ['offen','alle','erledigt'].forEach(k => {
+  ['offen','alle','erledigt','bereinigt'].forEach(k => {
     const b = document.getElementById('todo-filter-'+k);
     if (b) b.classList.toggle('active', k===f);
   });
@@ -3229,14 +3324,41 @@ function renderTodoPage() {
   const gueltigeIds = new Set(state.todos.map(t=>t.id));
   [...todoAusgewaehlt].forEach(id=>{ if(!gueltigeIds.has(id)) todoAusgewaehlt.delete(id); });
 
-  const offen = state.todos.filter(t => !t.erledigt).length;
-  const erledigt = state.todos.filter(t => t.erledigt).length;
+  const offen = state.todos.filter(t => todoIstOffen(t)).length;
+  const erledigt = state.todos.filter(t => t.erledigt && !t.bereinigt).length;
   document.getElementById('todo-stat-offen').textContent = offen;
   document.getElementById('todo-stat-erledigt').textContent = erledigt;
 
   let liste = state.todos.slice().sort((a,b) => (b.erstelltAm||'').localeCompare(a.erstelltAm||''));
-  if (todoFilter === 'offen') liste = liste.filter(t => !t.erledigt);
-  if (todoFilter === 'erledigt') liste = liste.filter(t => t.erledigt);
+  if (todoFilter === 'offen') liste = liste.filter(t => todoIstOffen(t));
+  if (todoFilter === 'erledigt') liste = liste.filter(t => t.erledigt && !t.bereinigt);
+  if (todoFilter === 'alle') liste = liste.filter(t => !t.bereinigt);
+  if (todoFilter === 'bereinigt') liste = liste.filter(t => t.bereinigt);
+
+  // Bereinigungs-Hinweis + Vorschau (nichts wird ohne Bestätigung verändert)
+  const bereinWrap = document.getElementById('todo-bereinigung');
+  if (bereinWrap) {
+    const kand = todoBereinigungKandidaten();
+    if (!kand.length) bereinWrap.innerHTML = '';
+    else {
+      let h = '<div class="card" style="padding:10px 14px;margin-bottom:12px;border-left:3px solid var(--muted)">'
+        + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+        + '<span style="font-size:13px">🧹 '+kand.length+' reine Änderungs-/Updatemeldung(en) in der offenen Liste erkannt</span>'
+        + '<button class="btn btn-secondary btn-sm" onclick="todoBereinigungToggle()">'+(todoBereinigungVorschau?'Vorschau schliessen':'Vorschau')+'</button></div>';
+      if (todoBereinigungVorschau) {
+        h += '<div style="font-size:12px;color:var(--muted);margin:8px 0">Diese Einträge werden nicht als erledigt markiert, sondern nur aus der offenen Liste genommen (wiederherstellbar im Tab „Bereinigt“). GPT-Protokolleinträge sind vorausgewählt; andere erkannte Meldungen nur nach eigener Prüfung ankreuzen.</div>';
+        kand.forEach(t => {
+          const tx = String(t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          h += '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">'
+            + '<input type="checkbox" class="todo-bereinigen-cb" data-id="'+String(t.id).replace(/"/g,'&quot;')+'"'+(todoIstEindeutigerAudit(t)?' checked':'')+' style="margin-top:2px">'
+            + '<span style="white-space:pre-wrap">'+tx+'</span>'
+            + '<span style="margin-left:auto;font-size:10px;color:var(--muted);white-space:nowrap">'+(todoIstEindeutigerAudit(t)?'GPT-Protokoll':'bitte prüfen')+'</span></label>';
+        });
+        h += '<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="todoBereinigungAusfuehren()">Ausgewählte aus offener Liste nehmen</button>';
+      }
+      bereinWrap.innerHTML = h + '</div>';
+    }
+  }
 
   const wrap = document.getElementById('todo-list');
   const auswahlBar = todoAusgewaehlt.size
@@ -3252,9 +3374,12 @@ function renderTodoPage() {
     return;
   }
   wrap.innerHTML = auswahlBar + liste.map(t => {
-    const bs = t.bsId ? (state.baustellen||[]).find(b => b.id === t.bsId) : null;
-    const bsHtml = bs ? '<span onclick="showBsModal('+bs.id+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
-    const erledigtInfo = t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
+    const bs = t.bsId ? (state.baustellen||[]).find(b => String(b.id) === String(t.bsId)) : null;
+    const bsHtml = bs ? '<span onclick="showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
+    const erledigtInfo = t.bereinigt
+      ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">🧹 Bereinigt – reine Meldung, keine ausgeführte Aufgabe ('+String(t.bereinigt.am||'').slice(0,10)+') '
+        + '<button class="btn btn-secondary btn-sm" style="margin-left:6px" onclick="todoWiederherstellen('+todoIdAttr(t.id)+')">↩ Wiederherstellen</button></div>'
+      : t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
     const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
     const textEsc = (t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const istAusgewaehlt = todoAusgewaehlt.has(t.id);
@@ -3337,7 +3462,8 @@ function addTodoItem() {
     id: Date.now(), text, bsId: null,
     zustaendig: zustEl.value.trim() || '\u2013',
     erledigt: false, erledigtDurch: null, erledigtAm: null,
-    notiz: '', erstelltAm: new Date().toISOString().slice(0,10)
+    notiz: '', erstelltAm: new Date().toISOString().slice(0,10),
+    quelle: 'Manuell'
   });
   textEl.value = ''; zustEl.value = '';
   save();
@@ -8615,14 +8741,11 @@ async function bsPruefeHotelBedarf(data, oldBs) {
   }
   if (data.fahrtzeitKm != null && data.fahrtzeitKm > 60) {
     if (!state.todos) state.todos = [];
-    const bereitsOffen = state.todos.some(t => t.bsId===data.id && !t.erledigt && /^Hotel erforderlich/i.test(t.text||''));
+    const bereitsOffen = state.todos.some(t => String(t.bsId)===String(data.id) && todoIstOffen(t) && /^Hotel erforderlich/i.test(t.text||''));
     if (!bereitsOffen) {
-      state.todos.push({
-        id: Date.now()+Math.floor(Math.random()*1000)+11, bsId: data.id,
-        text: 'Hotel erforderlich / Hotel prüfen – '+data.name+' ('+data.fahrtzeitKm+' km von Allschwil)',
-        zustaendig:'–', erledigt:false, erledigtDurch:null, erledigtAm:null, notiz:'',
-        erstelltAm: new Date().toISOString().slice(0,10)
-      });
+      todoErstellen({ bsId: data.id, quelle:'Automatisch',
+        text: 'Hotel erforderlich / Hotel prüfen – '+data.name+' ('+data.fahrtzeitKm+' km von Allschwil)' },
+        { schluessel: 'hotel:'+data.id });
     }
   }
 }
@@ -10443,6 +10566,14 @@ function bsKwNavi(delta) {
 function bsKwEsc(t) {
   return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// Gespeicherte Ansicht des KW-Tabs: 'mitarbeiter' (A–Z, Standard) oder 'baustellen'
+function bsKwAnsicht() {
+  try { return localStorage.getItem('lagertool.kwAnsicht') === 'baustellen' ? 'baustellen' : 'mitarbeiter'; } catch(_) { return 'mitarbeiter'; }
+}
+function bsKwAnsichtSetzen(v) {
+  try { localStorage.setItem('lagertool.kwAnsicht', v); } catch(_) {}
+  renderBaustatusKW();
+}
 function renderBaustatusKW() {
   const mo = window.kwTabMonday ? new Date(window.kwTabMonday) : getMonday(new Date());
   mo.setHours(12,0,0,0);
@@ -10476,6 +10607,8 @@ function renderBaustatusKW() {
     });
   });
 
+  const nameSort = (a,b) => a.localeCompare(b, 'de', {sensitivity:'base'});
+  const ansicht = bsKwAnsicht();
   const karten = [...gruppen.values()].map(g => ({
     ...g, bau: (state.baustellen||[]).find(b => String(b.id) === String(g.bsId)) || null
   })).sort((a,b) => (a.bau?.name || '~').localeCompare(b.bau?.name || '~', 'de', {sensitivity:'base'}));
@@ -10486,19 +10619,63 @@ function renderBaustatusKW() {
     '<button class="btn btn-secondary btn-sm" onclick="bsKwNavi(1)">▶</button>' +
     '<button class="btn btn-secondary btn-sm" onclick="bsKwNavi(0)"' + (istAktKW ? ' disabled' : '') + '>Aktuelle KW</button>' +
     '<span style="font-size:12px;color:var(--muted)">' + karten.length + ' Baustelle' + (karten.length === 1 ? '' : 'n') + '</span>' +
+    '<div class="spacer"></div>' +
+    '<span style="font-size:11px;color:var(--muted)">Ansicht:</span>' +
+    '<button class="btn btn-' + (ansicht==='mitarbeiter'?'primary':'secondary') + ' btn-sm" onclick="bsKwAnsichtSetzen(\'mitarbeiter\')">Mitarbeiter A–Z</button>' +
+    '<button class="btn btn-' + (ansicht==='baustellen'?'primary':'secondary') + ' btn-sm" onclick="bsKwAnsichtSetzen(\'baustellen\')">Baustellen A–Z</button>' +
   '</div>';
 
-  if (!karten.length) {
+  // ── Ansicht Mitarbeiter A–Z: eine Zeile je Mitarbeiter mit Einsätzen/Status der KW ──
+  if (ansicht === 'mitarbeiter') {
+    const zeilen = new Map(); // String(maId) -> {name, tage:{ds:[text]}}
+    const add = (maId, ds, txt, status) => {
+      const k = String(maId);
+      if (!zeilen.has(k)) zeilen.set(k, { maId: k, name: maName(maId), tage: {} });
+      (zeilen.get(k).tage[ds] = zeilen.get(k).tage[ds] || []).push({ txt, status });
+    };
+    tage.forEach(d => {
+      const ds = fmtDate(d);
+      Object.entries((state.plan||{})[ds] || {}).forEach(([key, e]) => {
+        if (!e) return;
+        const maId = bsPlanMaId(key, e);
+        if (maId == null) return;
+        if (String(key).indexOf('status_ma') === 0 || e.status) { if (e.status) add(maId, ds, (e.status === 'Baustelle ungeklärt' && e.notiz) ? e.notiz : e.status, true); return; }
+        if (e.bsId == null) return;
+        const bau = (state.baustellen||[]).find(b => String(b.id) === String(e.bsId));
+        add(maId, ds, (bau ? bau.name : 'Baustelle ' + e.bsId) + (e.startzeit ? ' · ' + e.startzeit : ''), false);
+      });
+    });
+    const liste = [...zeilen.values()].sort((a,b) => nameSort(a.name, b.name));
+    if (!liste.length) {
+      html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Einträge im Wochenplan für KW ' + kw + '.</div>';
+    } else {
+      html += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface2)"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        + '<thead><tr><th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);letter-spacing:.5px">MITARBEITER (' + liste.length + ')</th>'
+        + tage.map((d,i) => '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);white-space:nowrap">' + TAGE[i] + ' ' + fmtT(d) + '</th>').join('')
+        + '</tr></thead><tbody>';
+      liste.forEach(z => {
+        html += '<tr><td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap">' + bsKwEsc(z.name) + '</td>';
+        tage.forEach(d => {
+          const eintr = z.tage[fmtDate(d)] || [];
+          html += '<td style="padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:top">'
+            + (eintr.length ? eintr.map(x => '<div style="' + (x.status ? 'color:var(--muted);font-style:italic' : '') + '">' + bsKwEsc(x.txt) + '</div>').join('') : '<span style="color:var(--muted)">–</span>')
+            + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+  }
+
+  if (ansicht === 'baustellen' && !karten.length) {
     html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Baustellen im Wochenplan für KW ' + kw + '.</div>';
   }
 
-  karten.forEach(k => {
+  if (ansicht === 'baustellen') karten.forEach(k => {
     const bau = k.bau;
-    const hex = bau ? getHex(bau) : '#6b7280';
     const klick = bau ? ' onclick="showBsModal(' + maIdAttr(bau.id) + ')"' : '';
-    html += '<div class="card"' + klick + ' style="margin-bottom:8px;border-left:4px solid ' + hex + ';padding:12px 14px;' + (bau ? 'cursor:pointer;' : '') + '">';
+    html += '<div class="card"' + klick + ' style="margin-bottom:8px;padding:12px 14px;' + (bau ? 'cursor:pointer;' : '') + '">';
     html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-      '<span style="width:10px;height:10px;border-radius:3px;background:' + hex + ';flex-shrink:0"></span>' +
       '<span style="font-size:14px;font-weight:700">' + bsKwEsc(bau ? bau.name : 'Baustelle nicht gefunden (ID ' + k.bsId + ')') + '</span>' +
       (bau?.auftragsnummer ? '<span class="badge" style="font-size:10px"># ' + bsKwEsc(bau.auftragsnummer) + '</span>' : '') +
       (bau?.beendet ? '<span class="badge" style="font-size:10px">✅ beendet</span>' : '') +
@@ -10510,8 +10687,8 @@ function renderBaustatusKW() {
       const set = k.tage[fmtDate(d)];
       if (!set || !set.size) return;
       html += '<div style="min-width:110px">' +
-        '<div style="font-size:11px;font-weight:700;color:' + hex + '">' + TAGE[i] + ' ' + fmtT(d) + '</div>' +
-        [...set].map(id => '<div style="font-size:12px">' + bsKwEsc(maName(id)) + '</div>').join('') +
+        '<div style="font-size:11px;font-weight:700;color:var(--muted)">' + TAGE[i] + ' ' + fmtT(d) + '</div>' +
+        [...set].map(id => maName(id)).sort(nameSort).map(n => '<div style="font-size:12px">' + bsKwEsc(n) + '</div>').join('') +
       '</div>';
     });
     html += '</div></div>';
@@ -11139,7 +11316,7 @@ function forceSave() {
       <button id="gpt-mic" class="gpt-round" type="button" onclick="gptToggleSpeech()" title="Spracheingabe">🎤</button>
       <button class="gpt-round" type="button" onclick="gptSend()" title="Senden">➤</button>
     </div>
-    <div class="gpt-foot"><span>Jede GPT-Änderung → To-do/Protokoll</span><span id="gpt-actor">–</span></div>
+    <div class="gpt-foot"><span>To-dos nur für Aufgaben &amp; Abklärungen</span><span id="gpt-actor">–</span></div>
   </div>
 </div>
 <script id="gpt-assistant-script">
@@ -11266,7 +11443,7 @@ function toggleGptAssistant(){
     const m=document.getElementById('gpt-messages');
     if(m && !m.dataset.welcome){
       m.dataset.welcome='1';
-      gptAddMessage('ai','Bereit. Du kannst mir Arbeitsaufträge schreiben oder diktieren. Änderungen werden erst nach erfolgreichem Firebase-Sync ausgeführt und automatisch in der To-do-Liste protokolliert.');
+      gptAddMessage('ai','Bereit. Du kannst mir Arbeitsaufträge schreiben oder diktieren. Änderungen werden erst nach erfolgreichem Firebase-Sync ausgeführt. Reine Planänderungen erzeugen keine To-dos – nur ausdrücklich beauftragte Aufgaben, Fahrzeugservice und offene Abklärungen (z.B. fehlende Startzeit) landen in der To-do-Liste.');
     }
     setTimeout(()=>document.getElementById('gpt-input')?.focus(),50);
   }
@@ -11316,7 +11493,7 @@ function gptContext(){
   const slimEmp=(state.mitarbeiter||[]).map(m=>({id:String(m.id),name:((m.vorname||'')+' '+(m.nachname||'')).trim(),rolle:m.rolle||'',aktiv:m.abgemeldet?false:true}));
   const slimVeh=(state.fahrzeuge||[]).map(f=>({id:String(f.id),name:f.name||'',schild:f.schild||'',marke:f.marke||'',monteur:f.monteur||'',monteurId:f.monteurId??null}));
   const slimSites=(state.baustellen||[]).map(b=>({id:String(b.id),name:b.name||'',kunde:b.kunde||'',adresse:b.adresse||'',von:b.von||'',bis:b.bis||'',chefMonteurId:b.chefMonteurId??null,teamMonteurIds:b.teamMonteurIds||[],notiz:b.notiz||''}));
-  const upcomingTodos=(state.todos||[]).filter(t=>!t.erledigt).slice(-80).map(t=>({id:String(t.id),text:t.text||'',zustaendig:t.zustaendig||'',bsId:t.bsId??null,erstelltAm:t.erstelltAm||'',dueDate:t.dueDate||null,dueTime:t.dueTime||null,kind:t.kind||'arbeit'}));
+  const upcomingTodos=(state.todos||[]).filter(t=>todoIstOffen(t)).slice(-80).map(t=>({id:String(t.id),text:t.text||'',zustaendig:t.zustaendig||'',bsId:t.bsId??null,erstelltAm:t.erstelltAm||'',dueDate:t.dueDate||null,dueTime:t.dueTime||null,kind:t.kind||'arbeit'}));
   return {today:new Date().toISOString().slice(0,10),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Europe/Zurich',firebaseSynced:!!(dbRef&&hasReceivedFirebaseSync),mitarbeiter:slimEmp,fahrzeuge:slimVeh,baustellen:slimSites,todos:upcomingTodos,planEntries:gptPlanWindow()};
 }
 function gptActor(){ return currentLoginUser ? {id:String(currentLoginUser.id),name:((currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'')).trim()} : {id:'unknown',name:'Unbekannt'}; }
@@ -11370,11 +11547,21 @@ function gptFindSite(a){
 }
 // dueDate/dueTime optional (Fälligkeit), kind unterscheidet 'arbeit' (vom
 // Benutzer verlangte Aufgabe) von 'audit' (automatisches Änderungsprotokoll).
-function gptTodo(text,responsible,bsId,source='GPT',dueDate,dueTime,kind){
-  if(!state.todos) state.todos=[];
-  state.todos.push({id:Date.now()+Math.floor(Math.random()*10000),text,bsId:bsId||null,zustaendig:responsible||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:new Date().toISOString().slice(0,10),quelle:source,erstelltDurch:gptActor().name,dueDate:dueDate||null,dueTime:dueTime||null,kind:kind||'arbeit'});
+function gptTodo(text,responsible,bsId,source='GPT',dueDate,dueTime,kind,opts){
+  return todoErstellen({text,bsId:bsId||null,zustaendig:responsible||'–',quelle:source,erstelltDurch:gptActor().name,dueDate:dueDate||null,dueTime:dueTime||null,kind:kind||'arbeit'}, opts);
 }
-function gptAudit(text,bsId){ gptTodo('🤖 '+text,gptActor().name,bsId,'GPT-Änderung',null,null,'audit'); }
+// Änderungsprotokoll wird NICHT mehr als To-do gespeichert (reine Meldung).
+// Die ausgeführte Änderung erscheint weiterhin in der Chat-Antwort (applied).
+function gptAudit(text,bsId){ console.info('[GPT-Änderung]', text, bsId ?? ''); }
+// Eine konkrete Abklärung je Baustelle für fehlende Adresse/Startzeit (keine Dubletten).
+function gptAbklaerungBaustelle(site){
+  if(!site) return null;
+  const fehlend=[];
+  if(!String(site.adresse||'').trim()) fehlend.push('Adresse');
+  if(!String(site.startzeit||'').trim()) fehlend.push('Startzeit');
+  if(!fehlend.length) return null;
+  return gptTodo('Abklärung '+site.name+': '+fehlend.join(' und ')+' fehlt',gptActor().name,site.id,'GPT-Abklärung',null,null,'arbeit',{schluessel:'abklaerung:baustelle-daten:'+site.id});
+}
 
 // Prüft/normalisiert eine Uhrzeit. Toleriert kleine, vom Modell manchmal
 // abweichende Schreibweisen (z.B. "07:00 Uhr", "07.00", "07:00:00",
@@ -11604,6 +11791,7 @@ async function gptExecuteActions(actions,originalMessage){
   // doppelt als eigenen Arbeits-To-do abzulegen. Ein echter, inhaltlich
   // eigenständiger Arbeits-To-do wird dadurch NIE unterdrückt.
   const auditedTextsThisBatch=[];
+  let abklaerungenNeu=0; // programmatisch erzeugte Abklärungen (müssen gespeichert werden)
 
   for(const a of mutations){
     try{
@@ -11613,7 +11801,9 @@ async function gptExecuteActions(actions,originalMessage){
         const beschr=(a.text||a.note||'Garagentermin').trim();
         f.service.push({id:Date.now()+Math.floor(Math.random()*1000),typ:'reminder',datum:a.date,km:'',beschreibung:beschr,kosten:'',reminderDate:a.date,reminderKm:'',erstelltDurch:gptActor().name,quelle:'GPT'});
         const auditText='Fahrzeug '+(f.name||f.schild)+' – Garagentermin '+a.date+(a.time?' '+a.time:'')+(beschr&&beschr!=='Garagentermin'?' – '+beschr:'');
-        gptAudit(auditText,null); auditedTextsThisBatch.push(gptNorm(auditText));
+        // Fahrzeugservice = konkrete betriebliche Aufgabe -> To-do mit Fälligkeit (ohne Dubletten)
+        gptTodo(auditText,gptActor().name,null,'GPT-Fahrzeugservice',a.date,gptNormTime(a.time),'arbeit',{schluessel:'fahrzeugservice:'+f.id+':'+a.date});
+        auditedTextsThisBatch.push(gptNorm(auditText));
         applied.push('Garagentermin für '+(f.name||f.schild)+' am '+a.date+' eingetragen');
 
       } else if(a.type==='assign_employee' || a.type==='move_employee'){
@@ -11629,7 +11819,10 @@ async function gptExecuteActions(actions,originalMessage){
           throw new Error(empName+' ist am '+a.date+' als "'+absence+'" markiert – keine Einplanung möglich');
         }
         if(gptStatusMatches(GPT_AMBIGUOUS_STATUSES,absence)){
-          throw new Error('Status "'+absence+'" für '+empName+' am '+a.date+' ist unklar – bitte zuerst klären');
+          // Tatsächlich ungeklärte Verfügbarkeit -> eine Abklärung je Mitarbeiter+Tag
+          const r=gptTodo('Verfügbarkeit klären: '+empName+' am '+a.date+' (Status "'+absence+'") – geplant: '+site.name,gptActor().name,site.id,'GPT-Abklärung',null,null,'arbeit',{schluessel:'abklaerung:verfuegbarkeit:'+emp.id+':'+a.date});
+          if(r.status==='neu') abklaerungenNeu++;
+          throw new Error('Status "'+absence+'" für '+empName+' am '+a.date+' ist unklar – bitte zuerst klären'+(r.status==='neu'?' (Abklärung als To-do angelegt)':''));
         }
 
         // Rohwerte aus der Aktion (nur was das Modell für DIESE Nachricht
@@ -11733,8 +11926,12 @@ async function gptExecuteActions(actions,originalMessage){
           auditedTextsThisBatch.push(gptNorm(auditText));
           applied.push(empName+' am '+a.date+' bei '+site.name+zeitStr+' eingeplant');
 
-          if(!startzeit && !endzeit && a.time===null && a.end_time===null){
-            applied.push('Hinweis: Startzeit '+empName+' für '+site.name+' am '+a.date+' noch offen.');
+          // Echte Abklärung (programmatisch, nicht wortbasiert): weder Einsatz
+          // noch Baustelle haben eine Startzeit -> höchstens EIN To-do je Baustelle+Tag.
+          if(!startzeit && !String(site.startzeit||'').trim()){
+            const r=gptTodo('Abklärung Startzeit: '+site.name+' am '+a.date+' – keine Startzeit hinterlegt',gptActor().name,site.id,'GPT-Abklärung',null,null,'arbeit',{schluessel:'abklaerung:startzeit:'+site.id+':'+a.date});
+            if(r.status==='neu') abklaerungenNeu++;
+            applied.push('Hinweis: Startzeit '+empName+' für '+site.name+' am '+a.date+' noch offen'+(r.status==='neu'?' – Abklärung als To-do angelegt.':'.'));
           }
         }
 
@@ -11866,6 +12063,7 @@ async function gptExecuteActions(actions,originalMessage){
         if(!state.baustellen)state.baustellen=[]; state.baustellen.push(site);
         const auditText='Baustelle erstellt: '+name+(a.date?' – '+a.date:'');
         gptAudit(auditText,id); auditedTextsThisBatch.push(gptNorm(auditText));
+        if(gptAbklaerungBaustelle(site)?.status==='neu') abklaerungenNeu++;
         applied.push('Baustelle '+name+' erstellt');
 
       } else if(a.type==='update_todo'){
@@ -11910,19 +12108,39 @@ async function gptExecuteActions(actions,originalMessage){
   // zusätzlich als eigener Arbeits-To-do abgelegt (Duplikatvermeidung).
   const planningBatch = mutations.some(a => ['assign_employee','move_employee','remove_employee_assignment','assign_vehicle','update_site'].includes(a.type));
   const requestedTodo = /(?:to[\s-]?do|aufgabe|erinner|pendenz)/i.test(originalMessage || '') && !/(?:kein\w*|ohne|nicht)[^.!?]{0,60}(?:to[\s-]?do|aufgabe|erinner|pendenz)/i.test(originalMessage || '');
+  // Namen/Baustellen der in diesem Durchlauf geänderten Einsätze (strukturelle
+  // Erkennung von Begleit-Meldungen zu genau diesen Änderungen).
+  const mutationRefs=[];
+  mutations.forEach(m=>{
+    const e=gptFindEmployee(m), s=gptFindSite(m);
+    if(e) mutationRefs.push(gptNorm((e.vorname||'')+' '+(e.nachname||'')), gptNorm(e.nachname||''));
+    if(s) mutationRefs.push(gptNorm(s.name));
+  });
   for(const a of standaloneTodos){
-    if (planningBatch && !requestedTodo) continue;
     const text=(a.text||a.note||a.target_name||originalMessage||'').trim(); if(!text) continue;
     const textNorm=gptNorm(text);
     const isRedundant=auditedTextsThisBatch.some(at=>at===textNorm || (at.length>8 && textNorm.length>8 && (at.indexOf(textNorm)!==-1 || textNorm.indexOf(at)!==-1)));
     if(isRedundant) continue;
+    // Nicht mehr pauschal verwerfen. Ohne ausdrücklichen Auftrag gilt ein
+    // create_todo als reine Begleitmeldung, wenn es
+    //  (a) einem bekannten Meldungsmuster entspricht (ein dueDate ändert daran nichts), oder
+    //  (b) in einem Planungsdurchlauf eine gerade geänderte Person/Baustelle
+    //      betrifft und weder offene Frage/fehlende Angabe noch konkrete
+    //      Handlung (z.B. "Kunden über den Monteurwechsel informieren") enthält.
+    // Echte Abklärungen und echte Aufgaben bleiben erlaubt.
+    if(!requestedTodo){
+      const betrifftAenderung = planningBatch && mutationRefs.some(r=>r && r.length>2 && textNorm.includes(r));
+      const istMeldung = todoIstReineMeldung({text}) || (betrifftAenderung && !TODO_ABKLAERUNG_RE.test(text) && !TODO_AKTION_RE.test(text));
+      if(istMeldung) continue;
+    }
     const site=gptFindSite(a);
     const dueDate=gptNormDate(a.due_date), dueTime=gptNormTime(a.due_time);
-    gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do',dueDate,dueTime,'arbeit');
-    applied.push('To-do erstellt: '+text+(dueDate?' (fällig '+dueDate+(dueTime?' '+dueTime:'')+')':''));
+    const r=gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do',dueDate,dueTime,'arbeit',{ausdruecklich:requestedTodo});
+    if(r.status==='neu') applied.push('To-do erstellt: '+text+(dueDate?' (fällig '+dueDate+(dueTime?' '+dueTime:'')+')':''));
+    else if(r.status==='dublette') applied.push('To-do bereits offen: '+text);
   }
 
-  if(applied.length){
+  if(applied.length || abklaerungenNeu){
     // KRITISCH: hier NIE mehr nur "save()" feuern und sofort "ausgeführt"
     // melden. Erst auf die Firebase-Bestätigung warten (verify:true liest
     // den gespeicherten Stand danach neu ein und vergleicht ihn) - nur wenn
