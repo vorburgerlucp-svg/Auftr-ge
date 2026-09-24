@@ -560,13 +560,19 @@
       <button class="btn btn-secondary btn-sm" onclick="wpToggleSort()">🔀 Gruppieren</button>
       <button class="btn btn-secondary btn-sm" onclick="wpPrint()">🖨️ Drucken</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
-      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wp-excel-upload').click()">⬆ Import (Excel/PDF)</button>
-      <input type="file" id="wp-excel-upload" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="wpFileImport(event)">
     </div>
     <!-- Baustellen Legende -->
     <div id="wp-legende" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px"></div>
   </div>
 
+  <!-- Monteur-Suche (nur Darstellungsfilter) -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+    <input type="text" id="wp-monteur-suche" placeholder="🔎 Monteur suchen..." autocomplete="off"
+      oninput="renderWochenplan()" style="flex:1;min-width:180px;max-width:320px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
+    <button type="button" class="btn btn-secondary btn-sm" title="Suche leeren"
+      onclick="document.getElementById('wp-monteur-suche').value='';renderWochenplan()">×</button>
+    <span id="wp-monteur-zaehler" style="font-size:12px;color:var(--muted);white-space:nowrap"></span>
+  </div>
   <!-- Plan-Tabelle -->
   <div class="wp-container">
     <div id="wp-table-wrap"></div>
@@ -4727,19 +4733,20 @@ function getMaFahrzeug(m) {
   if (typeof m === 'string') {
     return state.fahrzeuge.find(f => f.monteur && f.monteur.toLowerCase().includes(m.toLowerCase())) || null;
   }
-  // Manuelle Überschreibung im Wochenplan hat Priorität
+  // 1. Manuelle Überschreibung im Wochenplan hat Priorität
   if (m.fahrzeugManuell !== undefined) {
     if (m.fahrzeugManuell === null) return null;
-    return state.fahrzeuge.find(f => f.id === m.fahrzeugManuell) || null;
+    return state.fahrzeuge.find(f => String(f.id) === String(m.fahrzeugManuell)) || null;
   }
-  // Standard: via fahrzeugHint
+  // 2. Feste Zuordnung über Mitarbeiter-ID (hat Vorrang vor fahrzeugHint)
+  const byId = state.fahrzeuge.find(f => f.monteurId != null && String(f.monteurId) === String(m.id));
+  if (byId) return byId;
+  // 3. fahrzeugHint nur als Alt-Daten-Fallback
   if (m.fahrzeugHint && m.fahrzeugHint !== 'Kein' && m.fahrzeugHint !== 'Keins' && m.fahrzeugHint !== '') {
     const byHint = state.fahrzeuge.find(f => f.name === m.fahrzeugHint);
     if (byHint) return byHint;
   }
-  // Feste Zuordnung über Mitarbeiter-ID (zuverlässig, kein Textvergleich)
-  const byId = state.fahrzeuge.find(f => f.monteurId === m.id);
-  if (byId) return byId;
+  // 4. Alter exakter Namensvergleich als letzter Fallback.
   // Fallback nur für Alt-Datensätze, die noch keine monteurId haben:
   // exakter Namensvergleich statt Fuzzy-includes(), um Fehlzuordnungen
   // bei ähnlichen/doppelten Namen zu vermeiden.
@@ -4752,7 +4759,7 @@ function getMaFahrzeug(m) {
 // Prüft, ob ein Mitarbeiter (über monteurId) bereits ein anderes Fahrzeug fest zugewiesen hat.
 // excludeFzgId: das Fahrzeug, das gerade bearbeitet wird, wird bei der Prüfung ausgenommen.
 function findFahrzeugFuerMitarbeiterId(maId, excludeFzgId) {
-  return state.fahrzeuge.find(f => f.monteurId === maId && f.id !== excludeFzgId) || null;
+  return state.fahrzeuge.find(f => f.monteurId != null && String(f.monteurId) === String(maId) && String(f.id) !== String(excludeFzgId)) || null;
 }
 
 function maCardHtml(m) {
@@ -5866,6 +5873,12 @@ function textCol(hex) {
   return (r*0.299+g*0.587+b*0.114)>100?'#0f1117':'#e8eaf0';
 }
 
+// Suche normalisieren: Gross/Klein + Umlaute/Diakritika tolerant (Gunther → Günther)
+function wpSucheNorm(t) {
+  return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/ß/g,'ss').toLowerCase().replace(/\s+/g,' ').trim();
+}
+
 function renderWochenplan() {
   wpInit();
   const allDates = [];
@@ -5949,13 +5962,22 @@ function renderWochenplan() {
     } // end if(!collapsed)
   }
 
-  // ALLE MONTEURE als Zeilen
-  if(!monteure.length){
-    html+='<tr><td colspan="'+cols+'" class="empty">Keine Mitarbeiter</td></tr>';
+  // ALLE MONTEURE als Zeilen (Monteur-Suche filtert nur die Darstellung)
+  const wpSuche=wpSucheNorm(document.getElementById('wp-monteur-suche')?.value||'');
+  const monteureAnzeige = wpSuche ? monteure.filter(m=>{
+    const v=wpSucheNorm(m.vorname), n=wpSucheNorm(m.nachname);
+    return v.includes(wpSuche) || n.includes(wpSuche) || (v+' '+n).includes(wpSuche) || (n+' '+v).includes(wpSuche);
+  }) : monteure;
+  const wpZaehler=document.getElementById('wp-monteur-zaehler');
+  if(wpZaehler) wpZaehler.textContent = wpSuche
+    ? monteureAnzeige.length+' von '+monteure.length+' Monteuren'
+    : monteure.length+' Monteure';
+  if(!monteureAnzeige.length){
+    html+='<tr><td colspan="'+cols+'" class="empty">'+(wpSuche?'Kein Monteur gefunden':'Keine Mitarbeiter')+'</td></tr>';
   } else {
-    monteure.forEach(m=>{
+    monteureAnzeige.forEach(m=>{
       const fzg=getMaFahrzeug(m);
-      const fzgName=fzg?fzg.name:(m.fahrzeugHint&&m.fahrzeugHint!=='Kein'?m.fahrzeugHint:'—');
+      const fzgName = fzg ? fzg.name : '–';
       const isSwapSrc=wpSwapSource?.maId===m.id;
       html+='<tr style="'+(isSwapSrc?'background:rgba(232,184,75,.06)':'')+'">';
       // Name
@@ -5995,37 +6017,15 @@ function renderWochenplan() {
         })()
         +'</td>';
 
-      // Abfahrt: Startzeit der Baustelle minus Fahrtzeit
-      // Finde die Baustelle dieses Monteurs diese Woche
+      // Abfahrt für den FOLGETAG (Baustelle aus state.plan des Folgetags)
       (()=>{
-        let abfahrtHtml = m.startzeit||'—';
-        // Suche erste Baustelle dieser Woche für diesen Monteur
-        for(const d of allDates){
-          const ds=fmtDate(d);
-          const dayEntriesSorted=gptEmployeeDayEntries(m.id,ds).slice().sort((x,y)=>{
-            const xs=x.entry.startzeit, ys=y.entry.startzeit;
-            if(xs&&ys) return xs<ys?-1:xs>ys?1:0;
-            if(xs&&!ys) return -1; if(!xs&&ys) return 1; return 0;
-          });
-          const e=dayEntriesSorted[0]?.entry;
-          if(e?.bsId){
-            const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
-            if(bs?.startzeit && bs?.fahrtzeitMin){
-              const stm=bs.startzeit.match(/(\d{1,2})[:\.](\d{2})/);
-              if(stm){
-                const abfahrt=calcAbfahrt(bs.startzeit, bs.fahrtzeitMin);
-                if(!abfahrt) return;
-                // Manuelle Überschreibung prüfen
-                const manuell = bs.abfahrtManuell?.[m.id];
-                const anzeige = manuell || abfahrt;
-                abfahrtHtml='<span style="color:var(--text);cursor:pointer'+(manuell?';text-decoration:underline dotted':'')+'" onclick="wpAbfahrtEdit('+maIdAttr(m.id)+',event)" title="Klicken zum Ändern">'+anzeige+'</span>'
-                  +'<div style="font-size:9px;color:var(--muted)">🚗'+bs.fahrtzeitStr+'</div>';
-              }
-            } else if(bs?.startzeit){
-              abfahrtHtml=bs.startzeit;
-            }
-            break;
-          }
+        let abfahrtHtml = '–';
+        const af = wpAbfahrtFolgetag(m);
+        if(af && af.zeit){
+          abfahrtHtml='<span style="color:var(--text);cursor:pointer'+(af.manuell?';text-decoration:underline dotted':'')+'" onclick="wpAbfahrtEdit('+maIdAttr(m.id)+',event)" title="'+af.tooltip.replace(/"/g,'&quot;')+'">'+af.zeit+'</span>'
+            +(af.bs.fahrtzeitStr?'<div style="font-size:9px;color:var(--muted)">🚗'+af.bs.fahrtzeitStr+'</div>':'');
+        } else if(af && af.bs){
+          abfahrtHtml='<span title="'+af.tooltip.replace(/"/g,'&quot;')+'">–</span>';
         }
         html+='<td style="text-align:center;font-size:11px;color:var(--muted);vertical-align:middle;line-height:1.3">'+abfahrtHtml+'</td>';
       })();
@@ -6243,20 +6243,15 @@ function wpFzgEdit(maId, ev) {
 // ── ABFAHRTSZEIT INLINE EDIT ───────────────────────────
 function wpAbfahrtEdit(maId, ev) {
   ev.stopPropagation();
-  // Finde Baustelle dieses Monteurs diese Woche
+  // Baustelle des Folgetags (gleiche Logik wie Anzeige)
   wpInit();
-  const allDates=[];
-  for(let d=0;d<7;d++) allDates.push(addDays(wpBaseMonday,d));
-  let bs=null;
-  for(const d of allDates){
-    const ds=fmtDate(d);
-    const e=state.plan[ds]?.['ma'+maId+'_'+ds];
-    if(e?.bsId){ bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId)); break; }
-  }
+  const maObj=(state.mitarbeiter||[]).find(x=>String(x.id)===String(maId));
+  const af=maObj?wpAbfahrtFolgetag(maObj):null;
+  const bs=af?.bs||null;
   if(!bs) return;
 
-  // Berechne aktuelle Abfahrt
-  const aktuell = calcAbfahrt(bs.startzeit, bs.fahrtzeitMin||0) || bs.startzeit || '06:00';
+  // Aktuell angezeigte Abfahrt als Ausgangswert
+  const aktuell = af.zeit || bs.startzeit || '06:00';
   const m = aktuell.match(/(\d{1,2}):(\d{2})/);
   if(!m) return;
   let abfahrtMin = parseInt(m[1])*60 + parseInt(m[2]);
@@ -6289,7 +6284,7 @@ function wpAbfahrtEdit(maId, ev) {
       </div>
       <div style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:10px">Schritte: 15 Minuten</div>
       <div style="display:flex;gap:8px">
-        <button onclick="wpAbfahrtSave(${maId},${bs.id})" style="flex:1;padding:7px;border-radius:7px;border:none;background:var(--accent);color:#1a1e2e;font-weight:700;cursor:pointer">💾 Speichern</button>
+        <button onclick="wpAbfahrtSave(${maIdAttr(maId)},${maIdAttr(bs.id)})" style="flex:1;padding:7px;border-radius:7px;border:none;background:var(--accent);color:#1a1e2e;font-weight:700;cursor:pointer">💾 Speichern</button>
         <button onclick="document.getElementById('abfahrt-popup').remove()" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);cursor:pointer">✕</button>
       </div>`;
   }
@@ -6303,7 +6298,7 @@ function wpAbfahrtEdit(maId, ev) {
   };
 
   window.wpAbfahrtSave = function(maId, bsId) {
-    const bsObj = (state.baustellen||[]).find(b=>b.id===bsId);
+    const bsObj = (state.baustellen||[]).find(b=>String(b.id)===String(bsId));
     if(!bsObj) return;
     const min = window._abfahrtPopupMin;
     const h = Math.floor(min/60), m2 = min%60;
@@ -7207,6 +7202,48 @@ function selectBsFarbe(hex) {
 }
 
 // ── FAHRTZEIT BERECHNUNG ───────────────────────────────
+
+// ── ABFAHRT FOLGETAG ───────────────────────────────────
+// Bezugstag: liegt heute in der angezeigten Woche → morgen, sonst Montag der Woche.
+function wpFolgetagDatum() {
+  wpInit();
+  const heute=new Date(); heute.setHours(12,0,0,0);
+  const mo=new Date(wpBaseMonday); mo.setHours(12,0,0,0);
+  const so=addDays(mo,6);
+  return (heute>=mo && heute<=so) ? addDays(heute,1) : mo;
+}
+// Abfahrt = Startzeit − Fahrzeit (exakt, ohne Puffer). Nur vorhandene Daten, nichts schätzen.
+// Rückgabe: null (kein Einsatz / Status) oder {bs, date, zeit|null, manuell, tooltip}
+function wpAbfahrtFolgetag(m) {
+  const d=wpFolgetagDatum(), ds=fmtDate(d);
+  const dayPlan=(state.plan||{})[ds]||{};
+  if(dayPlan['status_ma'+m.id]) return null; // Urlaub/Krank/Frei/Info folgt usw.
+  const eintraege=gptEmployeeDayEntries(m.id,ds).slice().sort((x,y)=>{
+    const xs=x.entry.startzeit, ys=y.entry.startzeit;
+    if(xs&&ys) return xs<ys?-1:xs>ys?1:0;
+    if(xs&&!ys) return -1; if(!xs&&ys) return 1; return 0;
+  });
+  const e=eintraege[0]?.entry;
+  if(!e || e.bsId==null) return null; // kein Planeintrag
+  const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
+  if(!bs) return null;
+  const TAGE=['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const tagTxt=TAGE[d.getDay()]+' '+fmtDE(d).replace(/\.?$/,'.');
+  let zeit=null;
+  const manuell=bs.abfahrtManuell?.[m.id] || bs.abfahrtManuell?.[String(m.id)] || null;
+  if(manuell) zeit=manuell;
+  else if(bs.abfahrtAllschwil && /\d{1,2}[:\.]\d{2}/.test(bs.abfahrtAllschwil)) zeit=bs.abfahrtAllschwil.replace('.',':');
+  else {
+    const stm=(bs.startzeit||'').match(/(\d{1,2})[:\.](\d{2})/);
+    const fz=Number(bs.fahrtzeitMin);
+    if(stm && bs.fahrtzeitMin!=null && bs.fahrtzeitMin!=='' && isFinite(fz) && fz>0){
+      const min=((parseInt(stm[1])*60+parseInt(stm[2])-Math.round(fz))%1440+1440)%1440;
+      zeit=String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0');
+    }
+  }
+  const tooltip=tagTxt+' · '+bs.name+(zeit?' · Abfahrt '+zeit:' · keine Fahrzeit vorhanden');
+  return {bs, date:ds, zeit, manuell:!!manuell, tooltip};
+}
 
 // Abfahrtszeit: immer auf Viertelstunde abrunden (zurückrechnen, nie vorwärts)
 function calcAbfahrt(ankunftZeit, fahrtzeitMin) {
@@ -10050,13 +10087,19 @@ function bsZugewieseneMonteure(bauId) {
   const ids = new Set();
   Object.values(state.plan || {}).forEach(tagPlan => {
     Object.entries(tagPlan || {}).forEach(([key, eintrag]) => {
-      if (eintrag && eintrag.bsId === bauId) {
-        const m = key.match(/^ma(\d+)_/);
-        if (m) ids.add(parseInt(m[1]));
+      if (eintrag && eintrag.bsId != null && String(eintrag.bsId) === String(bauId)) {
+        const maId = bsPlanMaId(key, eintrag);
+        if (maId != null) ids.add(String(maId));
       }
     });
   });
-  return (state.mitarbeiter || []).filter(m => ids.has(m.id));
+  return (state.mitarbeiter || []).filter(m => ids.has(String(m.id)));
+}
+// maId eines Plan-Eintrags: Feld maId, sonst aus dem Key ('ma{id}_{datum}[__n]' bzw. 'status_ma{id}')
+function bsPlanMaId(key, eintrag) {
+  if (eintrag && eintrag.maId != null) return eintrag.maId;
+  const m = String(key).match(/^(?:status_)?ma(.+?)(?:_\d{4}-\d{2}-\d{2}(?:__\d+)?)?$/);
+  return m ? m[1] : null;
 }
 
 function switchBaustatusTab(tab) {
@@ -10084,7 +10127,7 @@ function renderBaustatusStatus() {
   let baustellen = (state.baustellen || []);
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = istLeiterUser();
-  const istChefMonteurFn = (bau) => bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  const istChefMonteurFn = (bau) => bau.chefMonteurId && String(bau.chefMonteurId) === String(currentLoginUser?.id);
 
   // Nur Admin/Entwickler sehen alle Baustellen.
   // Leiter UND Monteure sehen nur Baustellen, denen sie effektiv zugeteilt sind
@@ -10097,7 +10140,7 @@ function renderBaustatusStatus() {
         t.monteurHours && Object.keys(t.monteurHours).some(k => k === meinName)
       );
       const hatZuweisung = Object.values(state.plan||{}).some(tag =>
-        Object.values(tag||{}).some(e => e.maId === currentLoginUser.id && e.bsId === bau.id)
+        Object.values(tag||{}).some(e => String(e.maId) === String(currentLoginUser.id) && String(e.bsId) === String(bau.id))
       );
       return hatStunden || hatZuweisung;
     });
@@ -10241,7 +10284,7 @@ function renderBaustatusStatus() {
 // Stunden eines Monteurs auf einer Task löschen
 
 function bsTaskToggleFertig(bauId, taskId) {
-  const bau = (state.baustellen||[]).find(b => b.id === bauId);
+  const bau = (state.baustellen||[]).find(b => String(b.id) === String(bauId));
   const task = (bau?.tasks||[]).find(t => t.id === taskId);
   if (!task) return;
   task.fertig = !task.fertig;
@@ -10251,11 +10294,11 @@ function bsTaskToggleFertig(bauId, taskId) {
 }
 
 function bsDeleteStunden(bauId, taskId, monteurName) {
-  const bau = state.baustellen.find(b => b.id === bauId);
+  const bau = state.baustellen.find(b => String(b.id) === String(bauId));
   if (!bau) return;
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = istLeiterUser();
-  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  const istChef = bau.chefMonteurId && String(bau.chefMonteurId) === String(currentLoginUser?.id);
   const meinName = currentLoginUser ? (currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim() : null;
   if (!istAdmin && !istLeiter && !istChef && monteurName !== meinName) {
     return toast('Keine Berechtigung', 'Du kannst nur deine eigenen Stunden löschen', '⛔');
@@ -10272,18 +10315,18 @@ function bsDeleteStunden(bauId, taskId, monteurName) {
 
 // Stunden buchen
 function bsBuchen(bauId, taskId) {
-  const bau = state.baustellen.find(b => b.id === bauId);
+  const bau = state.baustellen.find(b => String(b.id) === String(bauId));
   const task = (bau.tasks||[]).find(t => t.id === taskId);
   const hEl = document.getElementById('bsh_' + bauId + '_' + taskId);
   const mEl = document.getElementById('bsm_' + bauId + '_' + taskId);
   const h = parseFloat(hEl.value);
   if (!h || h <= 0) return;
-  const ma = state.mitarbeiter.find(m => m.id === maIdValue(mEl.value));
+  const ma = state.mitarbeiter.find(m => String(m.id) === String(maIdValue(mEl.value)));
   if (!ma) return;
 
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = istLeiterUser();
-  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  const istChef = bau.chefMonteurId && String(bau.chefMonteurId) === String(currentLoginUser?.id);
   if (!istAdmin && !istLeiter && !istChef && ma.id !== currentLoginUser?.id) {
     return toast('Keine Berechtigung', 'Du kannst nur deine eigenen Stunden buchen', '⛔');
   }
@@ -10306,11 +10349,11 @@ function bsBuchen(bauId, taskId) {
 
 // Tasks für eine Baustelle anlegen (einfacher Prompt-Dialog, mehrere Tasks per Zeile)
 function bsAddTasksPrompt(bauId) {
-  const bau = state.baustellen.find(b => b.id === bauId);
+  const bau = state.baustellen.find(b => String(b.id) === String(bauId));
   if (!bau) return;
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = istLeiterUser();
-  const istChef = bau.chefMonteurId && bau.chefMonteurId === currentLoginUser?.id;
+  const istChef = bau.chefMonteurId && String(bau.chefMonteurId) === String(currentLoginUser?.id);
   if (!istAdmin && !istLeiter && !istChef) {
     return toast('Keine Berechtigung', 'Nur Admin/Leiter/Chef-Monteur dürfen Tasks hinzufügen', '⛔');
   }
@@ -10335,138 +10378,105 @@ function bsAddTasksPrompt(bauId) {
 // ============================================================
 // TAB 2: KW-ÜBERSICHT
 // ============================================================
+// KW-Übersicht: Datenquelle ausschliesslich state.plan (Mo–So der gewählten KW)
+function bsKwNavi(delta) {
+  if (delta === 0) window.kwTabMonday = null;
+  else window.kwTabMonday = addDays(window.kwTabMonday || getMonday(new Date()), delta * 7);
+  renderBaustatusKW();
+}
+function bsKwEsc(t) {
+  return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 function renderBaustatusKW() {
-  const heute = new Date();
-  const aktKW = bsGetKW(heute);
-  const aktJahr = heute.getFullYear();
+  const mo = window.kwTabMonday ? new Date(window.kwTabMonday) : getMonday(new Date());
+  mo.setHours(12,0,0,0);
+  const tage = []; for (let i=0; i<7; i++) tage.push(addDays(mo, i));
+  const TAGE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+  const kw = bsGetKW(mo), so = tage[6];
+  const istAktKW = fmtDate(mo) === fmtDate(getMonday(new Date()));
+  const fmtT = d => String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.';
+  const maName = id => {
+    const m = (state.mitarbeiter||[]).find(x => String(x.id) === String(id));
+    return m ? ((m.vorname||'') + ' ' + (m.nachname||'')).trim() : 'Mitarbeiter ' + id;
+  };
 
-  // Globale KW für Filter (beendete Baustellen sichtbar wenn diese KW in ihrer Range)
-  if (!window.kwTabGlobalKW) window.kwTabGlobalKW = aktKW;
-  const filterKW = window.kwTabGlobalKW;
+  // Plan lesen und nach bsId gruppieren; ungeklärte Einträge separat sammeln
+  const gruppen = new Map();   // String(bsId) -> { bsId, tage: {datum: Set(maId)} }
+  const ungeklaert = [];
+  tage.forEach(d => {
+    const ds = fmtDate(d);
+    Object.entries((state.plan||{})[ds] || {}).forEach(([key, e]) => {
+      if (!e) return;
+      const maId = bsPlanMaId(key, e);
+      if (e.status === 'Baustelle ungeklärt') {
+        ungeklaert.push({ datum: d, maId, text: e.notiz || 'Baustelle ungeklärt' });
+        return;
+      }
+      if (e.bsId == null || String(key).indexOf('status_ma') === 0) return;
+      const k = String(e.bsId);
+      if (!gruppen.has(k)) gruppen.set(k, { bsId: e.bsId, tage: {} });
+      const g = gruppen.get(k);
+      (g.tage[ds] = g.tage[ds] || new Set()).add(String(maId));
+    });
+  });
 
-  const kws = [];
-  for (let i=-4; i<=8; i++) {
-    let kw = aktKW+i, jahr = aktJahr;
-    if (kw<1) { kw+=52; jahr--; } if (kw>52) { kw-=52; jahr++; }
-    kws.push({kw,jahr});
+  const karten = [...gruppen.values()].map(g => ({
+    ...g, bau: (state.baustellen||[]).find(b => String(b.id) === String(g.bsId)) || null
+  })).sort((a,b) => (a.bau?.name || '~').localeCompare(b.bau?.name || '~', 'de', {sensitivity:'base'}));
+
+  let html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
+    '<button class="btn btn-secondary btn-sm" onclick="bsKwNavi(-1)">◀</button>' +
+    '<span class="wp-kw-badge">KW ' + kw + ' · ' + fmtT(mo) + '–' + fmtT(so) + so.getFullYear() + '</span>' +
+    '<button class="btn btn-secondary btn-sm" onclick="bsKwNavi(1)">▶</button>' +
+    '<button class="btn btn-secondary btn-sm" onclick="bsKwNavi(0)"' + (istAktKW ? ' disabled' : '') + '>Aktuelle KW</button>' +
+    '<span style="font-size:12px;color:var(--muted)">' + karten.length + ' Baustelle' + (karten.length === 1 ? '' : 'n') + '</span>' +
+  '</div>';
+
+  if (!karten.length) {
+    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Baustellen im Wochenplan für KW ' + kw + '.</div>';
   }
 
-  // Aktive: immer anzeigen; Beendete: nur wenn filterKW in ihrer KW-Range
-  const allBaustellen = (state.baustellen||[]).filter(b => (b.tasks||[]).length > 0);
-  const sichtbar = allBaustellen.filter(bau => {
-    if (!bau.beendet) return true;
-    const kwVon = bau.von ? bsGetKW(new Date(bau.von)) : aktKW;
-    const kwBis = bau.bis ? bsGetKW(new Date(bau.bis)) : aktKW;
-    return filterKW >= kwVon && filterKW <= kwBis;
-  });
-
-  let html = '';
-
-  // Globaler KW-Filter (für beendete Baustellen sichtbar machen)
-  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none">' +
-    '<span style="font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0">KW-Filter:</span>';
-  kws.forEach(({kw,jahr}) => {
-    const isAkt = kw === aktKW && jahr === aktJahr;
-    const isSel = filterKW === kw;
-    const monday = bsGetMondayOfKW(kw, jahr);
-    html += '<div onclick="window.kwTabGlobalKW=' + kw + ';renderBaustatusKW();" style="' +
-      'min-width:44px;padding:4px 3px;text-align:center;border-radius:6px;font-size:11px;cursor:pointer;flex-shrink:0;' +
-      'background:' + (isSel?'#2563eb':'var(--surface2)') + ';' +
-      'color:' + (isSel?'white':'var(--muted)') + ';' +
-      'border:2px solid ' + (isSel?'#1d4ed8':isAkt?'#f59e0b':'var(--border)') + ';' +
-      'font-weight:' + (isSel?'600':'400') + ';">' +
-      '<div>KW' + kw + '</div>' +
-      '<div style="font-size:9px">' + monday.getDate() + '.' + (monday.getMonth()+1) + '.</div>' +
+  karten.forEach(k => {
+    const bau = k.bau;
+    const hex = bau ? getHex(bau) : '#6b7280';
+    const klick = bau ? ' onclick="showBsModal(' + maIdAttr(bau.id) + ')"' : '';
+    html += '<div class="card"' + klick + ' style="margin-bottom:8px;border-left:4px solid ' + hex + ';padding:12px 14px;' + (bau ? 'cursor:pointer;' : '') + '">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+      '<span style="width:10px;height:10px;border-radius:3px;background:' + hex + ';flex-shrink:0"></span>' +
+      '<span style="font-size:14px;font-weight:700">' + bsKwEsc(bau ? bau.name : 'Baustelle nicht gefunden (ID ' + k.bsId + ')') + '</span>' +
+      (bau?.auftragsnummer ? '<span class="badge" style="font-size:10px"># ' + bsKwEsc(bau.auftragsnummer) + '</span>' : '') +
+      (bau?.beendet ? '<span class="badge" style="font-size:10px">✅ beendet</span>' : '') +
     '</div>';
+    if (bau?.kunde)   html += '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + bsKwEsc(bau.kunde) + '</div>';
+    if (bau?.adresse) html += '<div style="font-size:12px;color:var(--muted)">📍 ' + bsKwEsc(bau.adresse) + '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">';
+    tage.forEach((d, i) => {
+      const set = k.tage[fmtDate(d)];
+      if (!set || !set.size) return;
+      html += '<div style="min-width:110px">' +
+        '<div style="font-size:11px;font-weight:700;color:' + hex + '">' + TAGE[i] + ' ' + fmtT(d) + '</div>' +
+        [...set].map(id => '<div style="font-size:12px">' + bsKwEsc(maName(id)) + '</div>').join('') +
+      '</div>';
+    });
+    html += '</div></div>';
   });
-  html += '</div>';
 
-  if (sichtbar.length === 0) {
-    html += '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Keine Baustellen für KW' + filterKW + ' gefunden.</div>';
-    document.getElementById('baustatus-content').innerHTML = html;
-    return;
+  if (ungeklaert.length) {
+    ungeklaert.sort((a,b) => a.datum - b.datum);
+    html += '<h3 style="margin:18px 0 8px;font-size:14px">⚠ Ungeklärte Baustellen</h3>';
+    ungeklaert.forEach(u => {
+      html += '<div class="card" style="margin-bottom:6px;border-left:4px solid #f59e0b;padding:10px 14px">' +
+        '<div style="font-size:13px;font-weight:600">' + bsKwEsc(u.text) + '</div>' +
+        '<div style="font-size:12px;color:var(--muted)">' + TAGE[(u.datum.getDay()+6)%7] + ' ' + fmtT(u.datum) + ' · ' + bsKwEsc(maName(u.maId)) + '</div>' +
+      '</div>';
+    });
   }
 
-  sichtbar.forEach(bau => {
-    const { soll, ist, pct } = bsSollIst(bau);
-    const beendet = !!bau.beendet;
-    const kwVon = bau.von ? bsGetKW(new Date(bau.von)) : aktKW;
-    const kwBis = bau.bis ? bsGetKW(new Date(bau.bis)) : aktKW;
-    const selKW = baustatusSelKW[bau.id] || aktKW;
-
-    // Beendete Baustelle: nur zeigen wenn die selKW (oder aktKW) in ihrer Range liegt
-
-    const expanded = baustatusExpanded[bau.id] || false;
-    const borderCol = beendet ? '#6b7280' : '#2563eb';
-    const icon = beendet ? '✅' : '🏗️';
-
-    // Header (immer sichtbar)
-    html += '<div class="card" style="margin-bottom:8px;border-left:4px solid ' + borderCol + ';padding:0;overflow:hidden;">';
-    // Klickbarer Header-Bereich
-    html += '<div onclick="baustatusExpanded[' + bau.id + ']=!' + expanded + ';renderBaustatusKW();" style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;gap:12px">' +
-      '<div style="display:flex;align-items:center;gap:10px;min-width:0">' +
-        '<span style="font-size:15px">' + icon + '</span>' +
-        '<div style="min-width:0">' +
-          '<div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + bau.name + '</div>' +
-          '<div style="font-size:11px;color:var(--muted)">KW' + kwVon + '–KW' + kwBis + ' · ' + soll.toFixed(1) + 'h Soll · ' + ist.toFixed(1) + 'h gebucht (' + pct + '%)</div>' +
-        '</div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">' +
-        '<button onclick="event.stopPropagation();bsToggleBeendet(' + bau.id + ')" class="btn btn-secondary btn-sm" style="font-size:11px;' + (beendet ? 'color:var(--green);border-color:var(--green)' : 'color:var(--muted)') + '">' +
-          (beendet ? '✅ Beendet' : '○ Beenden') +
-        '</button>' +
-        '<span style="color:var(--muted);font-size:14px">' + (expanded ? '▲' : '▼') + '</span>' +
-      '</div>' +
-    '</div>';
-
-    // Aufgeklappter Bereich
-    if (expanded) {
-      html += '<div style="padding:0 14px 14px 14px;border-top:1px solid var(--border)">';
-
-      // KW-Buttons
-      html += '<div style="overflow-x:auto;margin-top:10px;"><div style="display:flex;gap:4px;min-width:max-content;padding-bottom:6px;">';
-      kws.forEach(({kw,jahr}) => {
-        const inRange = kw>=kwVon && kw<=kwBis;
-        const isAkt = kw===aktKW && jahr===aktJahr;
-        const isSel = selKW===kw;
-        const monday = bsGetMondayOfKW(kw,jahr);
-        html += '<div onclick="event.stopPropagation();baustatusSelKW[' + bau.id + ']=' + kw + ';renderBaustatusKW();" style="' +
-          'min-width:48px;padding:5px 3px;text-align:center;border-radius:6px;font-size:11px;cursor:pointer;' +
-          'background:' + (isSel?'#2563eb':inRange?'#dbeafe':'var(--surface2)') + ';' +
-          'color:' + (isSel?'white':inRange?'#1e40af':'var(--muted)') + ';' +
-          'border:2px solid ' + (isSel?'#1d4ed8':isAkt?'#f59e0b':inRange?'#93c5fd':'var(--border)') + ';' +
-          'font-weight:' + (isSel||inRange?'600':'400') + ';">' +
-          '<div>KW' + kw + '</div><div style="font-size:9px;margin-top:1px;">' + monday.getDate() + '.' + (monday.getMonth()+1) + '.</div>' +
-        '</div>';
-      });
-      html += '</div></div>';
-
-      // Tasks-Tabelle
-      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px;">' +
-        '<tr style="color:var(--muted);font-size:10px;font-weight:600;"><td>Task</td><td style="text-align:right;width:50px;">Soll</td><td style="text-align:right;width:50px;">Gesamt</td><td style="text-align:right;width:50px;color:#7c3aed;">KW' + selKW + '</td></tr>';
-      (bau.tasks||[]).forEach(t => {
-        const tIst = Object.values(t.monteurHours||{}).reduce((a,b)=>a+b,0);
-        const kwIst = Object.values((t.kwHours&&t.kwHours['KW'+selKW])||{}).reduce((a,b)=>a+b,0);
-        html += '<tr style="border-bottom:1px solid var(--border);">' +
-          '<td style="padding:4px;' + (t.fertig?'text-decoration:line-through;color:var(--muted);':'') + '">' + (t.fertig?'✓ ':'') + t.name + '</td>' +
-          '<td style="padding:4px;text-align:right;color:var(--muted);">' + t.hours.toFixed(1) + 'h</td>' +
-          '<td style="padding:4px;text-align:right;color:#2563eb;">' + tIst.toFixed(1) + 'h</td>' +
-          '<td style="padding:4px;text-align:right;color:#7c3aed;font-weight:600;">' + (kwIst>0?kwIst.toFixed(1)+'h':'–') + '</td>' +
-        '</tr>';
-      });
-      html += '</table>';
-      html += '</div>'; // end expanded
-    }
-
-    html += '</div>'; // end card
-  });
-
-  if (!html) html = '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Alle Baustellen beendet – KW wählen um abgeschlossene anzuzeigen.</div>';
   document.getElementById('baustatus-content').innerHTML = html;
 }
 
 function bsToggleBeendet(bauId) {
-  const bau = (state.baustellen||[]).find(b => b.id === bauId);
+  const bau = (state.baustellen||[]).find(b => String(b.id) === String(bauId));
   if (!bau) return;
   const istAdmin = currentLoginUser?.admin || currentLoginUser?.entwickler;
   const istLeiter = istLeiterUser();
@@ -10564,12 +10574,12 @@ function kvpJahrWaehlen(j) {
   renderBaustatusKVP();
 }
 function kvpToggleDetail(maId) {
-  kvpDetailMaId = (kvpDetailMaId === maId) ? null : maId;
+  kvpDetailMaId = (kvpDetailMaId != null && String(kvpDetailMaId) === String(maId)) ? null : maId;
   renderBaustatusKVP();
 }
 function kvpEntryLoeschen(maId, entryId) {
   if (!confirm('Nacharbeit-Eintrag löschen?')) return;
-  const ma = state.mitarbeiter.find(m=>m.id===maId);
+  const ma = state.mitarbeiter.find(m => String(m.id) === String(maId));
   if (!ma) return;
   ma.kvp = (ma.kvp||[]).filter(e=>e.id!==entryId);
   save();
@@ -10614,7 +10624,7 @@ function renderBaustatusKVP() {
     const eintraege = alleEintraege.filter(e => kvpJahrVon(e.datum) === kvpJahr);
     const totalH = eintraege.reduce((s,e)=>s+(e.stunden||0),0);
     const farbe = totalH===0?'#059669':totalH<2?'#d97706':'#dc2626';
-    const offen = kvpDetailMaId === m.id;
+    const offen = kvpDetailMaId != null && String(kvpDetailMaId) === String(m.id);
     html += '<div style="border-bottom:1px solid var(--border);">' +
       '<div onclick="kvpToggleDetail('+maIdAttr(m.id)+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;font-size:12px;">' +
       '<span>'+(offen?'▼ ':'› ')+ m.vorname + ' ' + m.nachname + '</span>' +
@@ -10655,7 +10665,7 @@ function kvpUpdatePositionen() {
   freiWrap.style.display = 'none';
   sel.innerHTML = '<option value="">-- Task wählen --</option>';
   const bauId = parseInt(val);
-  const bau = (state.baustellen||[]).find(b=>b.id===bauId);
+  const bau = (state.baustellen||[]).find(b => String(b.id) === String(bauId));
   if (!bau) return;
   (bau.tasks||[]).forEach(t => sel.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>');
 }
@@ -10674,8 +10684,8 @@ function kvpSpeichern() {
   if (!beschreibung) return toast('Fehler','Beschreibung eingeben','⚠️');
   if (!stunden || stunden<=0) return toast('Fehler','Stunden eingeben','⚠️');
 
-  const ma = state.mitarbeiter.find(m=>m.id===maId);
-  const bau = bauId ? state.baustellen.find(b=>b.id===bauId) : null;
+  const ma = state.mitarbeiter.find(m => String(m.id) === String(maId));
+  const bau = bauId ? state.baustellen.find(b => String(b.id) === String(bauId)) : null;
   const task = bau ? (bau.tasks||[]).find(t=>t.id===taskId) : null;
   const bauName = bau ? bau.name : (bauFreiName || 'Freie Baustelle');
 
@@ -10781,7 +10791,7 @@ function blSetStern(key, wert) {
   document.getElementById('bl_val_'+key).value=neu;
 }
 function openBlBewertung(bauId) {
-  const bau=(state.baustellen||[]).find(b=>b.id===bauId); if(!bau) return;
+  const bau=(state.baustellen||[]).find(b => String(b.id) === String(bauId)); if(!bau) return;
   document.getElementById('bl-bew-bauId').value=bauId;
   document.getElementById('bl-bew-bs-name').textContent=bau.name;
   document.getElementById('bl-bew-bl-name').textContent=
@@ -10824,7 +10834,7 @@ function openBlBewertung(bauId) {
 }
 function saveBlBewertung() {
   const bauId=parseInt(document.getElementById('bl-bew-bauId').value);
-  const bau=(state.baustellen||[]).find(b=>b.id===bauId); if(!bau) return;
+  const bau=(state.baustellen||[]).find(b => String(b.id) === String(bauId)); if(!bau) return;
   const entry={datum:new Date().toLocaleDateString('de-CH'), bewerterName:currentLoginUser?(currentLoginUser.vorname+' '+(currentLoginUser.nachname||'')).trim():'?', notiz:document.getElementById('bl-bew-notiz').value.trim()};
   let hasWert=false;
   blKriterien.forEach(kr=>{const v=parseInt(document.getElementById('bl_val_'+kr.key)?.value||0);entry[kr.key]=v;if(v>0)hasWert=true;});
@@ -10867,7 +10877,7 @@ function bsaSetStern(key, wert) {
   document.getElementById('bsa_val_'+key).value=neu;
 }
 function openBsAbschlussModal(bauId) {
-  const bau=(state.baustellen||[]).find(b=>b.id===bauId);
+  const bau=(state.baustellen||[]).find(b => String(b.id) === String(bauId));
   if(!bau) return;
   document.getElementById('bsa-id').value=bauId;
   document.getElementById('bsa-name').textContent=bau.name;
@@ -10904,7 +10914,7 @@ function openBsAbschlussModal(bauId) {
       <div style="font-size:10px;color:var(--muted)">Positionen fertig</div>
     </div>`;
   // Chef
-  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m=>m.id===bau.chefMonteurId):null;
+  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m => String(m.id) === String(bau.chefMonteurId)):null;
   document.getElementById('bsa-chef-title').textContent=chefMa?'👷 Chef-Monteur bewerten: '+chefMa.vorname+' '+(chefMa.nachname||''):'👷 Kein Chef-Monteur erfasst';
   document.getElementById('bsa-chef-block').style.display=chefMa?'':'none';
   bsaKriterien.forEach(kr=>bsaRenderStars(kr.el,kr.key));
@@ -10915,7 +10925,7 @@ function closeBsAbschlussModal() {
 }
 function saveBsAbschluss() {
   const bauId=parseInt(document.getElementById('bsa-id').value);
-  const bau=(state.baustellen||[]).find(b=>b.id===bauId);
+  const bau=(state.baustellen||[]).find(b => String(b.id) === String(bauId));
   if(!bau) return;
   const tasks=bau.tasks||[];
   const soll=tasks.reduce((s,t)=>s+(t.hours||0),0);
@@ -10934,7 +10944,7 @@ function saveBsAbschluss() {
     nacharbeitStunden:+naStd.toFixed(1), bewerterName
   };
   // Chef-Bewertung
-  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m=>m.id===bau.chefMonteurId):null;
+  const chefMa=bau.chefMonteurId?(state.mitarbeiter||[]).find(m => String(m.id) === String(bau.chefMonteurId)):null;
   if(chefMa && document.getElementById('bsa-chef-block')?.style.display!=='none'){
     const chefBew={datum:new Date().toLocaleDateString('de-CH'),bauId,bauName:bau.name,bewerterName};
     let hasWert=false;
@@ -10957,7 +10967,7 @@ function saveBsAbschluss() {
 }
 
 function bsSaveBewertung(maId) {
-  const m = state.mitarbeiter.find(x=>x.id===maId);
+  const m = state.mitarbeiter.find(x => String(x.id) === String(maId));
   if (!m) return;
   if (!m.bewertungen) m.bewertungen = {};
   const bew = {};
