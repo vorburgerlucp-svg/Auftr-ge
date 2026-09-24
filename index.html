@@ -6042,6 +6042,7 @@ function renderWochenplan() {
         if(dayEntries.length){
           const cellsHtml=dayEntries.map(({key,entry:e})=>{
             const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
+            const bsHex=getHex(bs)||'#1a6b3a', bsText=textCol(bsHex);
             const label=bs?bs.name:'?';
             const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
@@ -6049,7 +6050,7 @@ function renderWochenplan() {
             const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
             return '<div class="wp-cell" draggable="true" '
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
-              +'style="background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:11px;position:relative;min-height:26px;cursor:grab" '
+              +'style="background:'+bsHex+';color:'+bsText+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
               +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
               +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
               +'</div>';
