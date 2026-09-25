@@ -622,6 +622,22 @@
     </div>
     <div id="ma-grid-abgemeldet"></div>
   </div>
+
+  <div class="card" id="schl-uebersicht" style="margin-top:24px;padding:14px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="card-title" style="margin:0">🔑 Schlüsselübersicht</div>
+      <span id="schl-zaehler" style="font-size:12px;color:var(--muted)"></span>
+      <div class="spacer"></div>
+      <input type="text" id="schl-suche" placeholder="🔎 Schlüsselnummer oder Name..." oninput="renderSchluesselUebersicht()" style="min-width:200px;max-width:260px">
+      <button type="button" class="btn btn-sm btn-primary" id="schl-f-alle" onclick="setSchlFilter('alle')">Alle</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="schl-f-ausgegeben" onclick="setSchlFilter('ausgegeben')">Ausgegeben</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="schl-f-zurückgegeben" onclick="setSchlFilter('zurückgegeben')">Zurückgegeben</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="schl-f-ungeklärt" onclick="setSchlFilter('ungeklärt')">Ungeklärt</button>
+      <button type="button" class="btn btn-sm btn-secondary" id="schl-import-btn" onclick="schluesselImportVorschau()" style="display:none">📥 Schlüsselliste übernehmen</button>
+    </div>
+    <div id="schl-import"></div>
+    <div id="schl-tabelle"></div>
+  </div>
 </div>
 
 <div id="page-fahrzeuge" class="page">
@@ -1084,6 +1100,14 @@
     </div>
     <input type="file" id="ma-doc-input" accept="image/*,application/pdf" multiple style="display:none" onchange="handleMaDoc(event)">
     <div class="doc-preview-grid" id="ma-doc-preview"></div>
+    <hr class="divider">
+    <div style="display:flex;align-items:center;gap:8px"><div class="card-title" style="margin:0">🔑 Schlüssel</div><div class="spacer"></div>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="maSchluesselNeu()">+ Schlüssel hinzufügen</button></div>
+    <datalist id="ma-schl-berechtigungen"><option value="Büro komplette Berechtigung"><option value="Eingang und Tiefgarage"></datalist>
+    <div id="ma-schluessel-liste" style="margin-top:6px"></div>
+    <hr class="divider">
+    <div class="card-title">💳 Firmen-Kreditkarte</div>
+    <div id="ma-kk-bereich"></div>
     <div style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
       🚐 Fahrzeugzuweisung erfolgt in der <strong style="color:var(--text)">Fahrzeugverwaltung</strong>
     </div>
@@ -1099,9 +1123,10 @@
       <div class="form-row cols-1">
         <div><label>Infoschreiben / Kündigungsgrund *</label><textarea id="ma-abmelde-grund" rows="3" placeholder="z.B. Grund der Kündigung, Verhalten, Empfehlung für später..."></textarea></div>
       </div>
+      <div id="ma-rueckgabe-kontrolle" style="margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px">
         <button class="btn btn-secondary btn-sm" onclick="cancelAbmeldung()">Abbrechen</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmAbmeldung()">🔴 Abmeldung bestätigen</button>
+        <button class="btn btn-danger btn-sm" id="ma-abmelde-confirm-btn" onclick="confirmAbmeldung()">🔴 Abmeldung bestätigen</button>
       </div>
     </div>
 
@@ -4901,6 +4926,7 @@ function maCardHtml(m) {
       <div>
         <div class="ma-name">${m.vorname} ${m.nachname} ${abg?'<span class="badge badge-red" style="font-size:9px;vertical-align:middle">🔴 Abgemeldet</span>':''}</div>
         <div class="ma-info">${m.funktion || 'Monteur'}</div>
+        ${(() => { const o = maOffeneFirmensachen(m); return o.offen ? `<div style="display:flex;gap:4px;margin-top:3px">${o.schluessel.length ? `<span class="badge" style="font-size:10px" title="Schlüssel ${o.schluessel.map(k=>k.nummer).join(', ')}">🔑 ${o.schluessel.length}</span>` : ''}${o.kreditkarte ? '<span class="badge" style="font-size:10px">💳 Karte</span>' : ''}</div>` : ''; })()}
         ${m.eintritt ? `<div class="ma-info">Seit ${new Date(m.eintritt).toLocaleDateString('de-CH')}</div>` : ''}
       </div>
     </div>
@@ -4959,6 +4985,7 @@ function renderMitarbeiterPage() {
       abgGrid.innerHTML = '';
     }
   }
+  renderSchluesselUebersicht();
 }
 
 // ── TEMPORÄRBÜRO-STAMMDATEN (Priorität 9) ───────────────────
@@ -5147,6 +5174,11 @@ function showMaModal(id) {
   tempMaFoto = m?.foto || null;
   tempMaDocs = m?.docs ? [...m.docs] : [];
   renderMaDocPreview();
+  // Schlüssel / Kreditkarte (fehlende Felder = leere Standardwerte)
+  tempMaSchluessel = (m?.schluessel || []).map(k => ({...k}));
+  tempMaKreditkarte = m?.kreditkarte ? {...m.kreditkarte} : maKkLeer();
+  maSchluesselEditIdx = null; maKkEdit = false;
+  renderMaSchluessel(); renderMaKreditkarte();
 
   // Fähigkeiten-Checkboxen setzen
   const faehMap = m?.faehigkeiten || [];
@@ -5206,6 +5238,7 @@ function openAbmeldeForm() {
   tempAbmeldeBewertung = 0;
   document.getElementById('ma-abmelde-grund').value = '';
   renderAbmeldeSterne();
+  renderMaRueckgabeKontrolle();
   document.getElementById('ma-abmelde-form').style.display = '';
   document.getElementById('ma-abmelde-form').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -5218,6 +5251,14 @@ function confirmAbmeldung() {
   const id = maIdValue(document.getElementById('ma-modal-id').value);
   const m = (state.mitarbeiter||[]).find(x => x.id === id);
   if (!m) return;
+  // SPERRE: offene Schlüssel / Kreditkarte -> keine Abmeldung (auch wenn der Button umgangen wird)
+  const offeneSachen = maOffeneFirmensachen(m);
+  if (offeneSachen.offen) {
+    renderMaRueckgabeKontrolle();
+    alert(maAbmeldeSperreText(offeneSachen));
+    toast('Abmeldung nicht möglich', 'Zuerst Schlüssel/Kreditkarte zurücknehmen', '⚠️');
+    return;
+  }
   const grund = document.getElementById('ma-abmelde-grund').value.trim();
   if (!tempAbmeldeBewertung) return toast('Fehler', 'Bitte Bewertung (1-5 Sterne) auswählen', '⚠️');
   if (!grund) return toast('Fehler', 'Bitte Infoschreiben / Kündigungsgrund eingeben', '⚠️');
@@ -5307,6 +5348,401 @@ function removeMaDoc(i) {
   renderMaDocPreview();
 }
 
+// ════════════════════════════════════════════════════════
+// SCHLÜSSEL & FIRMEN-KREDITKARTE (Mitarbeiterverwaltung)
+// ════════════════════════════════════════════════════════
+// Datenquelle: state.mitarbeiter[].schluessel (Array, nie gelöscht → Historie)
+// und state.mitarbeiter[].kreditkarte (Objekt). Nur Schlüssel ohne klare
+// Person liegen in state.schluesselUngeklaert (keine Doppelhaltung: ein
+// zugeordneter Schlüssel wird dort entfernt).
+let tempMaSchluessel = [];
+let tempMaKreditkarte = null;
+let maSchluesselEditIdx = null;   // null = Formular zu, -1 = neuer Schlüssel, >=0 = Index
+let maKkEdit = false;
+function maKkLeer() { return { vorhanden:false, bezeichnung:'', ausgabedatum:'', bemerkung:'', status:'ausgegeben', rueckgabedatum:'' }; }
+function maSchluesselIstOffen(k) { return !!k && k.status !== 'zurückgegeben'; }
+function maKreditkarteIstOffen(kk) { return !!kk && kk.vorhanden === true && kk.status !== 'zurückgegeben'; }
+function maOffeneFirmensachen(m) {
+  const schluessel = ((m && m.schluessel) || []).filter(maSchluesselIstOffen);
+  const kreditkarte = maKreditkarteIstOffen(m && m.kreditkarte);
+  return { schluessel, kreditkarte, offen: schluessel.length > 0 || kreditkarte };
+}
+function maDatumCH(d) { if (!d) return ''; const x = new Date(d + 'T12:00'); return isNaN(x) ? String(d) : x.toLocaleDateString('de-CH'); }
+function maHeute() { return new Date().toISOString().slice(0,10); }
+function maAbmeldeSperreText(o) {
+  if (o.schluessel.length && o.kreditkarte) {
+    return '⚠️ Abmeldung nicht möglich\n\nVor der Abmeldung müssen folgende Firmensachen zurückgegeben werden:\n\n'
+      + '🔑 ' + o.schluessel.length + ' Schlüssel\n'
+      + o.schluessel.map(k => '   • Schlüssel ' + k.nummer + (k.berechtigung ? ' – ' + k.berechtigung : '')).join('\n')
+      + '\n💳 Firmen-Kreditkarte\n\nDie Abmeldung darf erst danach bestätigt werden.';
+  }
+  if (o.schluessel.length) {
+    return '⚠️ Abmeldung nicht möglich\n\nSchlüsselrückgabe muss zuerst erfolgen.\n\nOffene Schlüssel:\n'
+      + o.schluessel.map(k => '• Schlüssel ' + k.nummer + (k.berechtigung ? ' – ' + k.berechtigung : '')).join('\n')
+      + '\n\nBitte zuerst alle Schlüssel als zurückgegeben markieren.';
+  }
+  return '⚠️ Abmeldung nicht möglich\n\nDie Firmen-Kreditkarte wurde noch nicht zurückgegeben.\n\nBitte zuerst die Kreditkarte als zurückgegeben markieren.';
+}
+// Keine vollständigen Kartendaten speichern: lange Ziffernfolgen maskieren, CVV/PIN entfernen.
+function maKartenBezeichnungSicher(t) {
+  let s = String(t || '').trim(), maskiert = false;
+  s = s.replace(/\d(?:[ -]?\d){11,18}/g, x => { maskiert = true; return '**** ' + x.replace(/\D/g,'').slice(-4); });
+  s = s.replace(/\b(cvv|cvc|pin)\b\s*[:=]?\s*\d{3,6}/gi, () => { maskiert = true; return ''; }).replace(/\s{2,}/g,' ').trim();
+  return { text: s, maskiert };
+}
+function maAktuellerMa() {
+  const id = maIdValue(document.getElementById('ma-modal-id')?.value);
+  return id ? (state.mitarbeiter || []).find(x => String(x.id) === String(id)) || null : null;
+}
+// Bestehender Mitarbeiter: Änderung sofort speichern (mit Verifikation, bei Fehler zurücknehmen).
+// Neuer Mitarbeiter: nur temporär, wird mit saveMaModal() gespeichert.
+async function maFirmensachenSpeichern(onFail) {
+  const m = maAktuellerMa();
+  if (m) {
+    const altS = m.schluessel, altK = m.kreditkarte;
+    m.schluessel = tempMaSchluessel.map(k => ({...k}));
+    if (tempMaKreditkarte && (tempMaKreditkarte.vorhanden || m.kreditkarte)) m.kreditkarte = {...tempMaKreditkarte};
+    const res = await save({verify:true});
+    if (!res || !res.ok) {
+      if (altS === undefined) delete m.schluessel; else m.schluessel = altS;
+      if (altK === undefined) delete m.kreditkarte; else m.kreditkarte = altK;
+      tempMaSchluessel = (m.schluessel || []).map(k => ({...k}));
+      tempMaKreditkarte = m.kreditkarte ? {...m.kreditkarte} : maKkLeer();
+      if (typeof onFail === 'function') onFail();
+      toast('Fehler', 'Speichern nicht bestätigt – Änderung zurückgenommen', '⚠️');
+    }
+    try { renderMitarbeiterPage(); } catch(_) {}
+  }
+  renderMaSchluessel(); renderMaKreditkarte(); renderMaRueckgabeKontrolle();
+}
+
+function renderMaSchluessel() {
+  const wrap = document.getElementById('ma-schluessel-liste');
+  if (!wrap) return;
+  const esc = bsKwEsc;
+  const liste = tempMaSchluessel.map((k, i) => ({k, i}))
+    .sort((a, b) => (maSchluesselIstOffen(b.k) - maSchluesselIstOffen(a.k)) || String(a.k.nummer).localeCompare(String(b.k.nummer), 'de', {numeric:true}));
+  let h = '';
+  if (!liste.length) h += '<div style="font-size:12px;color:var(--muted)">Keine Schlüssel erfasst.</div>';
+  liste.forEach(({k, i}) => {
+    const offen = maSchluesselIstOffen(k);
+    h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px' + (offen ? '' : ';color:var(--muted)') + '">'
+      + '<div style="flex:1;min-width:180px">'
+      + (offen
+          ? '🔑 <strong>' + esc(k.nummer) + '</strong>' + (k.berechtigung ? ' · ' + esc(k.berechtigung) : '') + ' · <span class="badge badge-yellow" style="font-size:9px">AUSGEGEBEN</span>'
+            + (k.ausgabedatum ? '<span style="color:var(--muted)"> · seit ' + maDatumCH(k.ausgabedatum) + '</span>' : '')
+          : '✅ ' + esc(k.nummer) + (k.berechtigung ? ' · ' + esc(k.berechtigung) : '') + ' · zurückgegeben' + (k.rueckgabedatum ? ' am ' + maDatumCH(k.rueckgabedatum) : ''))
+      + (k.bemerkung ? '<div style="color:var(--muted);font-size:11px">' + esc(k.bemerkung) + '</div>' : '')
+      + '</div>'
+      + '<button type="button" class="btn btn-secondary btn-sm" onclick="maSchluesselBearbeiten(' + i + ')">Bearbeiten</button>'
+      + (offen ? '<button type="button" class="btn btn-secondary btn-sm" onclick="maSchluesselZurueck(' + i + ')">✅ Zurückgegeben</button>' : '')
+      + '</div>';
+  });
+  if (maSchluesselEditIdx !== null) {
+    const k = maSchluesselEditIdx >= 0 ? tempMaSchluessel[maSchluesselEditIdx] : { status:'ausgegeben', ausgabedatum: maHeute() };
+    h += '<div style="margin-top:8px;padding:10px;background:var(--surface2);border-radius:8px">'
+      + '<div class="form-row cols-2">'
+      + '<div><label>Schlüsselnummer *</label><input type="text" id="ma-schl-nummer" value="' + esc(k.nummer || '') + '" placeholder="z.B. 1433"></div>'
+      + '<div><label>Berechtigung / Bereich *</label><input type="text" id="ma-schl-berechtigung" list="ma-schl-berechtigungen" value="' + esc(k.berechtigung || '') + '" placeholder="z.B. Eingang und Tiefgarage"></div>'
+      + '</div><div class="form-row cols-2">'
+      + '<div><label>Ausgabedatum</label><input type="date" id="ma-schl-ausgabe" value="' + esc(k.ausgabedatum || '') + '"></div>'
+      + '<div><label>Status</label><select id="ma-schl-status"><option value="ausgegeben"' + (k.status !== 'zurückgegeben' ? ' selected' : '') + '>ausgegeben</option><option value="zurückgegeben"' + (k.status === 'zurückgegeben' ? ' selected' : '') + '>zurückgegeben</option></select></div>'
+      + '</div><div class="form-row cols-2">'
+      + '<div><label>Rückgabedatum</label><input type="date" id="ma-schl-rueckgabe" value="' + esc(k.rueckgabedatum || '') + '"></div>'
+      + '<div><label>Bemerkung</label><input type="text" id="ma-schl-bemerkung" value="' + esc(k.bemerkung || '') + '"></div>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+      + '<button type="button" class="btn btn-secondary btn-sm" onclick="maSchluesselEditIdx=null;renderMaSchluessel()">Abbrechen</button>'
+      + '<button type="button" class="btn btn-primary btn-sm" onclick="maSchluesselUebernehmen()">Übernehmen</button>'
+      + '</div></div>';
+  }
+  wrap.innerHTML = h;
+}
+function maSchluesselNeu() { maSchluesselEditIdx = -1; renderMaSchluessel(); }
+function maSchluesselBearbeiten(i) { maSchluesselEditIdx = i; renderMaSchluessel(); }
+async function maSchluesselUebernehmen() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const nummer = v('ma-schl-nummer'), berechtigung = v('ma-schl-berechtigung');
+  if (!nummer || !berechtigung) return toast('Fehler', 'Schlüsselnummer und Berechtigung erforderlich', '⚠️');
+  const status = v('ma-schl-status') === 'zurückgegeben' ? 'zurückgegeben' : 'ausgegeben';
+  let rueckgabedatum = v('ma-schl-rueckgabe');
+  if (status === 'zurückgegeben' && !rueckgabedatum) rueckgabedatum = maHeute();
+  if (status === 'ausgegeben') rueckgabedatum = '';
+  const neu = { nummer, berechtigung, ausgabedatum: v('ma-schl-ausgabe'), bemerkung: v('ma-schl-bemerkung'), status, rueckgabedatum };
+  let ungBackup = null;
+  // Doppelte Ausgabe desselben Schlüssels verhindern (Hinweis mit Bestätigung)
+  if (status === 'ausgegeben') {
+    const m = maAktuellerMa();
+    const andere = schluesselAlleZeilen().filter(z => z.status === 'ausgegeben' && String(z.nummer) === nummer
+      && !(m && String(z.maId) === String(m.id) && z.idx === maSchluesselEditIdx));
+    if (andere.length && !confirm('Schlüssel ' + nummer + ' ist bereits als ausgegeben erfasst bei: ' + andere.map(z => z.name).join(', ') + '.\n\nTrotzdem übernehmen?')) return;
+    ungBackup = state.schluesselUngeklaert ? state.schluesselUngeklaert.slice() : undefined;
+    const ung = (state.schluesselUngeklaert || []).findIndex(u => String(u.nummer) === nummer);
+    if (ung >= 0 && confirm('Schlüssel ' + nummer + ' steht in der Liste „Ungeklärt“. Dort entfernen, da er jetzt zugeordnet ist?')) state.schluesselUngeklaert.splice(ung, 1);
+  }
+  if (maSchluesselEditIdx >= 0) tempMaSchluessel[maSchluesselEditIdx] = { ...tempMaSchluessel[maSchluesselEditIdx], ...neu };
+  else tempMaSchluessel.push(neu);
+  maSchluesselEditIdx = null;
+  await maFirmensachenSpeichern(() => { if (ungBackup !== null) { if (ungBackup === undefined) delete state.schluesselUngeklaert; else state.schluesselUngeklaert = ungBackup; } });
+}
+async function maSchluesselZurueck(i) {
+  const k = tempMaSchluessel[i]; if (!k) return;
+  const d = prompt('Schlüssel ' + k.nummer + ' zurückgegeben am (JJJJ-MM-TT):', maHeute());
+  if (d === null) return;
+  const datum = /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : maHeute();
+  tempMaSchluessel[i] = { ...k, status: 'zurückgegeben', rueckgabedatum: datum };
+  await maFirmensachenSpeichern();
+}
+
+function renderMaKreditkarte() {
+  const wrap = document.getElementById('ma-kk-bereich');
+  if (!wrap) return;
+  const esc = bsKwEsc, kk = tempMaKreditkarte || maKkLeer();
+  let h = '';
+  if (!maKkEdit) {
+    if (!kk.vorhanden) h += '<div style="font-size:12px;color:var(--muted)">Keine Firmen-Kreditkarte.</div>';
+    else if (maKreditkarteIstOffen(kk)) h += '<div style="font-size:12px">💳 <strong>' + esc(kk.bezeichnung || 'Firmenkarte') + '</strong> · <span class="badge badge-yellow" style="font-size:9px">AUSGEGEBEN</span>'
+      + (kk.ausgabedatum ? '<span style="color:var(--muted)"> · seit ' + maDatumCH(kk.ausgabedatum) + '</span>' : '')
+      + (kk.bemerkung ? '<div style="color:var(--muted);font-size:11px">' + esc(kk.bemerkung) + '</div>' : '') + '</div>';
+    else h += '<div style="font-size:12px;color:var(--muted)">✅ ' + esc(kk.bezeichnung || 'Firmenkarte') + ' · zurückgegeben' + (kk.rueckgabedatum ? ' am ' + maDatumCH(kk.rueckgabedatum) : '') + '</div>';
+    h += '<div style="display:flex;gap:8px;margin-top:6px">'
+      + '<button type="button" class="btn btn-secondary btn-sm" onclick="maKkEdit=true;renderMaKreditkarte()">' + (kk.vorhanden ? 'Bearbeiten' : '+ Kreditkarte erfassen') + '</button>'
+      + (maKreditkarteIstOffen(kk) ? '<button type="button" class="btn btn-secondary btn-sm" onclick="maKreditkarteZurueck()">✅ Als zurückgegeben markieren</button>' : '')
+      + '</div>';
+  } else {
+    h += '<div style="padding:10px;background:var(--surface2);border-radius:8px">'
+      + '<div class="form-row cols-2">'
+      + '<div><label>Hat Kreditkarte</label><select id="ma-kk-vorhanden"><option value="ja"' + (kk.vorhanden ? ' selected' : '') + '>Ja</option><option value="nein"' + (!kk.vorhanden ? ' selected' : '') + '>Nein</option></select></div>'
+      + '<div><label>Kartenbezeichnung (nur letzte 4 Ziffern)</label><input type="text" id="ma-kk-bezeichnung" value="' + esc(kk.bezeichnung || '') + '" placeholder="z.B. Firmenkarte **** 1234" autocomplete="off"></div>'
+      + '</div><div class="form-row cols-2">'
+      + '<div><label>Ausgabedatum</label><input type="date" id="ma-kk-ausgabe" value="' + esc(kk.ausgabedatum || '') + '"></div>'
+      + '<div><label>Status</label><select id="ma-kk-status"><option value="ausgegeben"' + (kk.status !== 'zurückgegeben' ? ' selected' : '') + '>ausgegeben</option><option value="zurückgegeben"' + (kk.status === 'zurückgegeben' ? ' selected' : '') + '>zurückgegeben</option></select></div>'
+      + '</div><div class="form-row cols-2">'
+      + '<div><label>Rückgabedatum</label><input type="date" id="ma-kk-rueckgabe" value="' + esc(kk.rueckgabedatum || '') + '"></div>'
+      + '<div><label>Bemerkung</label><input type="text" id="ma-kk-bemerkung" value="' + esc(kk.bemerkung || '') + '"></div>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Keine vollständige Kartennummer, kein CVV und keine PIN erfassen.</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+      + '<button type="button" class="btn btn-secondary btn-sm" onclick="maKkEdit=false;renderMaKreditkarte()">Abbrechen</button>'
+      + '<button type="button" class="btn btn-primary btn-sm" onclick="maKreditkarteUebernehmen()">Übernehmen</button>'
+      + '</div></div>';
+  }
+  wrap.innerHTML = h;
+}
+async function maKreditkarteUebernehmen() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const vorhanden = v('ma-kk-vorhanden') === 'ja';
+  const sicher = maKartenBezeichnungSicher(v('ma-kk-bezeichnung'));
+  if (sicher.maskiert) toast('Hinweis', 'Kartendaten gekürzt – nur die letzten 4 Ziffern werden gespeichert', '🔒');
+  const status = v('ma-kk-status') === 'zurückgegeben' ? 'zurückgegeben' : 'ausgegeben';
+  let rueckgabedatum = v('ma-kk-rueckgabe');
+  if (status === 'zurückgegeben' && !rueckgabedatum) rueckgabedatum = maHeute();
+  if (status === 'ausgegeben') rueckgabedatum = '';
+  tempMaKreditkarte = { vorhanden, bezeichnung: sicher.text, ausgabedatum: v('ma-kk-ausgabe'), bemerkung: v('ma-kk-bemerkung'), status, rueckgabedatum };
+  maKkEdit = false;
+  await maFirmensachenSpeichern();
+}
+async function maKreditkarteZurueck() {
+  if (!tempMaKreditkarte) return;
+  const d = prompt('Firmen-Kreditkarte zurückgegeben am (JJJJ-MM-TT):', maHeute());
+  if (d === null) return;
+  tempMaKreditkarte = { ...tempMaKreditkarte, status: 'zurückgegeben', rueckgabedatum: /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : maHeute() };
+  await maFirmensachenSpeichern();
+}
+
+// Rückgabekontrolle im Abmeldebereich + Button-Sperre
+function renderMaRueckgabeKontrolle() {
+  const box = document.getElementById('ma-rueckgabe-kontrolle');
+  const btn = document.getElementById('ma-abmelde-confirm-btn');
+  if (!box) return;
+  const m = maAktuellerMa();
+  const o = maOffeneFirmensachen(m || { schluessel: tempMaSchluessel, kreditkarte: tempMaKreditkarte });
+  if (!o.offen) {
+    box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">✅ Rückgabekontrolle</div>'
+      + '<div style="font-size:12px">✅ Keine offenen Schlüssel</div><div style="font-size:12px">✅ Keine Kreditkarte offen</div>';
+    box.style.borderColor = 'var(--border)';
+  } else {
+    box.innerHTML = '<div style="font-weight:700;color:var(--red);margin-bottom:4px">⚠️ Rückgabekontrolle</div>'
+      + o.schluessel.map(k => '<div style="font-size:12px">🔑 Schlüssel ' + bsKwEsc(k.nummer) + (k.berechtigung ? ' (' + bsKwEsc(k.berechtigung) + ')' : '') + ' noch nicht zurückgegeben</div>').join('')
+      + (o.kreditkarte ? '<div style="font-size:12px">💳 Kreditkarte noch nicht zurückgegeben</div>' : '')
+      + '<div style="font-size:11px;color:var(--muted);margin-top:4px">Abmeldung erst möglich, wenn alles zurückgegeben ist.</div>';
+    box.style.borderColor = 'rgba(232,87,75,.5)';
+  }
+  if (btn) { btn.disabled = o.offen; btn.style.opacity = o.offen ? '.45' : ''; btn.style.cursor = o.offen ? 'not-allowed' : ''; btn.title = o.offen ? 'Zuerst Schlüssel/Kreditkarte zurücknehmen' : ''; }
+}
+
+// ── Zentrale Schlüsselübersicht (abgeleitet aus Mitarbeiterdaten) ──
+let schlFilter = 'alle';
+let schlImportDaten = null;
+function schluesselAlleZeilen() {
+  const zeilen = [];
+  (state.mitarbeiter || []).forEach(m => (m.schluessel || []).forEach((k, idx) => zeilen.push({
+    nummer: String(k.nummer || ''), maId: m.id, idx, name: ((m.vorname || '') + ' ' + (m.nachname || '')).trim() + (m.abgemeldet ? ' (abgemeldet)' : ''),
+    berechtigung: k.berechtigung || '', status: k.status === 'zurückgegeben' ? 'zurückgegeben' : 'ausgegeben',
+    ausgabedatum: k.ausgabedatum || '', rueckgabedatum: k.rueckgabedatum || ''
+  })));
+  (state.schluesselUngeklaert || []).forEach((u, uIdx) => zeilen.push({
+    nummer: String(u.nummer || ''), maId: null, uIdx, name: '', hinweis: u.hinweis || '', berechtigung: u.berechtigung || '',
+    status: 'ungeklärt', ausgabedatum: '', rueckgabedatum: ''
+  }));
+  return zeilen;
+}
+function setSchlFilter(f) { schlFilter = f; renderSchluesselUebersicht(); }
+function renderSchluesselUebersicht() {
+  const tab = document.getElementById('schl-tabelle');
+  if (!tab) return;
+  const esc = bsKwEsc;
+  const darf = !!(currentLoginUser?.admin || currentLoginUser?.entwickler);
+  const ib = document.getElementById('schl-import-btn'); if (ib) ib.style.display = darf ? '' : 'none';
+  ['alle','ausgegeben','zurückgegeben','ungeklärt'].forEach(f => {
+    const b = document.getElementById('schl-f-' + f); if (b) b.className = 'btn btn-sm ' + (schlFilter === f ? 'btn-primary' : 'btn-secondary');
+  });
+  const alle = schluesselAlleZeilen();
+  const offenZaehl = {}; alle.filter(z => z.status === 'ausgegeben').forEach(z => offenZaehl[z.nummer] = (offenZaehl[z.nummer] || 0) + 1);
+  const q = wpSucheNorm(document.getElementById('schl-suche')?.value || '');
+  const zeilen = alle.filter(z => (schlFilter === 'alle' || z.status === schlFilter)
+      && (!q || wpSucheNorm(z.nummer).includes(q) || wpSucheNorm(z.name).includes(q) || wpSucheNorm(z.hinweis).includes(q)))
+    .sort((a, b) => a.nummer.localeCompare(b.nummer, 'de', {numeric:true}) || (a.status === 'ausgegeben' ? -1 : 1));
+  const zz = document.getElementById('schl-zaehler');
+  if (zz) zz.textContent = alle.filter(z => z.status === 'ausgegeben').length + ' ausgegeben · ' + alle.filter(z => z.status === 'ungeklärt').length + ' ungeklärt';
+  if (!zeilen.length) { tab.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Keine Schlüssel gefunden.</div>'; return; }
+  const aktive = (state.mitarbeiter || []).filter(m => !m.abgemeldet).slice().sort((a, b) => ((a.vorname||'') + ' ' + (a.nachname||'')).localeCompare((b.vorname||'') + ' ' + (b.nachname||''), 'de'));
+  const th = t => '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);letter-spacing:.4px;white-space:nowrap">' + t + '</th>';
+  let h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+    + th('SCHLÜSSEL') + th('MITARBEITER') + th('BERECHTIGUNG') + th('STATUS') + th('AUSGABE') + th('RÜCKGABE') + '</tr></thead><tbody>';
+  zeilen.forEach(z => {
+    const td = (x, extra) => '<td style="padding:6px 8px;border-bottom:1px solid var(--border);' + (extra || '') + '">' + x + '</td>';
+    const doppelt = z.status === 'ausgegeben' && offenZaehl[z.nummer] > 1;
+    let maZelle;
+    if (z.status === 'ungeklärt') {
+      maZelle = '<span style="color:var(--muted)">– ' + esc(z.hinweis) + '</span>'
+        + (darf ? '<div style="display:flex;gap:4px;margin-top:4px"><select id="schl-zuordnen-' + z.uIdx + '" style="font-size:11px;padding:2px 4px"><option value="">Mitarbeiter wählen…</option>'
+          + aktive.map(m => '<option value="' + esc(String(m.id)) + '">' + esc((m.vorname||'') + ' ' + (m.nachname||'')) + '</option>').join('')
+          + '</select><button type="button" class="btn btn-secondary btn-sm" onclick="schluesselZuordnen(' + z.uIdx + ')">Zuordnen</button></div>' : '');
+    } else {
+      maZelle = '<span style="cursor:pointer;color:var(--accent2)" onclick="showMaModal(' + maIdAttr(z.maId) + ')">' + esc(z.name) + '</span>';
+    }
+    const statusTxt = z.status === 'ausgegeben' ? '🔑 ausgegeben' : z.status === 'zurückgegeben' ? '✅ zurückgegeben' : '❓ ungeklärt';
+    h += '<tr' + (z.status === 'zurückgegeben' ? ' style="color:var(--muted)"' : '') + '>'
+      + td('<strong>' + esc(z.nummer) + '</strong>', 'font-family:var(--mono)') + td(maZelle) + td(esc(z.berechtigung))
+      + td(statusTxt + (doppelt ? ' <span style="color:var(--red)" title="Mehrfach als ausgegeben erfasst">⚠ doppelt</span>' : ''), 'white-space:nowrap')
+      + td(maDatumCH(z.ausgabedatum)) + td(maDatumCH(z.rueckgabedatum)) + '</tr>';
+  });
+  tab.innerHTML = h + '</tbody></table></div>';
+}
+async function schluesselZuordnen(uIdx) {
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return toast('Zugriff verweigert', 'Nur für Personalverantwortliche', '🔒');
+  const u = (state.schluesselUngeklaert || [])[uIdx]; if (!u) return;
+  const maId = document.getElementById('schl-zuordnen-' + uIdx)?.value;
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(maId));
+  if (!m) return toast('Hinweis', 'Bitte Mitarbeiter wählen', 'ℹ️');
+  if (!confirm('Schlüssel ' + u.nummer + ' (' + (u.berechtigung || '') + ') an ' + m.vorname + ' ' + m.nachname + ' zuordnen?')) return;
+  const vorherM = m.schluessel, vorherU = state.schluesselUngeklaert.slice();
+  m.schluessel = [...(m.schluessel || []), { nummer: String(u.nummer), berechtigung: u.berechtigung || '', ausgabedatum: '', bemerkung: 'Zugeordnet aus ungeklärter Liste' + (u.hinweis ? ' (' + u.hinweis + ')' : ''), status: 'ausgegeben', rueckgabedatum: '' }];
+  state.schluesselUngeklaert.splice(uIdx, 1);
+  const res = await save({verify:true});
+  if (!res || !res.ok) {
+    if (vorherM === undefined) delete m.schluessel; else m.schluessel = vorherM;
+    state.schluesselUngeklaert = vorherU;
+    toast('Fehler', 'Speichern nicht bestätigt – nichts geändert', '⚠️');
+  }
+  renderMitarbeiterPage();
+}
+
+// ── Ausgangs-Schlüsselliste (Stand 25.09.2026) ──
+// person:null = bewusst NICHT automatisch zuordnen (unklar / Lager / Schlüsselkasten).
+const SCHLUESSEL_AUSGANGSLISTE = (() => {
+  const B = 'Büro komplette Berechtigung', E = 'Eingang und Tiefgarage';
+  const L = [
+    ['1424',B,null,'fehlt, gemeldet Verwaltung'], ['1425',B,'Tobias Dräyer'], ['1426',B,'Patrick Günter'], ['1427',B,'Voltz Emmanuelle'],
+    ['1428',B,'Luc Vorburger'], ['1429',B,null,'Schlüsselkasten'],
+    ['1430',E,'Bekim Ibrahimaj'], ['1431',E,'Mitteregger Christian'], ['1432',E,'Fournier Johan'], ['1433',E,'Colin Clement'],
+    ['1434',E,'Patrick Härter'], ['1435',E,'Bonneville Emmanuelle'], ['1436',E,'Ducki Michal'], ['1437',E,'Golec Mateus'],
+    ['1438',E,null,'Zwei Namen: Lionell Umbrecht / Thibeault Riedel'], ['1439',E,'Peter Gompköto'], ['1440',E,'Alexander Weingant'],
+    ['1441',E,'Tristan Fieller'], ['1442',E,null,'bei Tobias / Lager'], ['1443',E,'Boguslaw Stefanovic'], ['1444',E,'Buhadjar Ahmed'],
+    ['1445',E,'Riedel Thibault'], ['1446',E,'Bauer Simon'], ['1447',E,'Jeremy Caniard'], ['1448',E,'Bodein David'], ['1449',E,'Günter Peter'],
+    ['1450',E,null,'rot markiert, Zuordnung aus Bild nicht eindeutig'], ['1451',E,'Scholz Thomas'], ['1452',E,'Sebastian Franck'],
+    ['1453',E,'Marbois Florent'], ['1454',E,'Bohler Yohann'], ['1049',E,null,'bei Tobias / Lager'], ['1054',E,'Jean Philippe Rucklin'],
+    ['1060',E,'Teo Pompiliu'], ['1063',E,'Berhard Bissinger'], ['1064',E,null,'ohne klar erkennbare Zuordnung']
+  ];
+  return L.map(([nummer, berechtigung, person, hinweis]) => ({ nummer, berechtigung, person, hinweis: hinweis || '' }));
+})();
+function schluesselNameTokens(t) { return wpSucheNorm(t).replace(/[^a-z ]/g,' ').split(' ').filter(Boolean).sort(); }
+// Nur EXAKTE Namensübereinstimmung (Reihenfolge/Akzente egal) wird vorausgewählt.
+// Ähnliche Namen werden nur als Vorschlag gezeigt (nicht vorausgewählt).
+function schluesselPersonFinden(person) {
+  const ziel = schluesselNameTokens(person).join(' ');
+  const mas = (state.mitarbeiter || []);
+  const exakt = mas.filter(m => schluesselNameTokens((m.vorname||'') + ' ' + (m.nachname||'')).join(' ') === ziel);
+  if (exakt.length === 1) return { m: exakt[0], art: 'eindeutig' };
+  if (exakt.length > 1) return { m: null, art: 'mehrdeutig' };
+  const zt = schluesselNameTokens(person);
+  const aehnlich = mas.filter(m => {
+    const mt = schluesselNameTokens((m.vorname||'') + ' ' + (m.nachname||''));
+    return zt.length >= 2 && zt.every(z => mt.some(x => x === z || (x.length > 3 && z.length > 3 && (x.startsWith(z.slice(0,4)) || z.startsWith(x.slice(0,4))))));
+  });
+  if (aehnlich.length === 1) return { m: aehnlich[0], art: 'vorschlag' };
+  return { m: null, art: aehnlich.length ? 'mehrdeutig' : 'nicht gefunden' };
+}
+function schluesselImportVorschau() {
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return toast('Zugriff verweigert', 'Nur für Personalverantwortliche', '🔒');
+  const box = document.getElementById('schl-import'); if (!box) return;
+  if (schlImportDaten) { schlImportDaten = null; box.innerHTML = ''; return; }
+  const vorhanden = new Set(schluesselAlleZeilen().map(z => z.nummer));
+  schlImportDaten = SCHLUESSEL_AUSGANGSLISTE.map(e => {
+    if (vorhanden.has(e.nummer)) return { ...e, art: 'bereits erfasst', m: null };
+    if (!e.person) return { ...e, art: 'ungeklärt', m: null };
+    const r = schluesselPersonFinden(e.person);
+    return { ...e, art: r.art, m: r.m };
+  });
+  const esc = bsKwEsc;
+  let h = '<div style="margin:10px 0;padding:10px;background:var(--surface2);border-radius:8px;font-size:12px">'
+    + '<div style="margin-bottom:6px;color:var(--muted)">Nur eindeutige Namen sind vorausgewählt. Vorschläge bitte prüfen. Nicht angekreuzte oder unklare Schlüssel werden als „ungeklärt“ hinterlegt. Bereits erfasste Nummern werden übersprungen.</div>';
+  schlImportDaten.forEach((e, i) => {
+    const kann = e.m && (e.art === 'eindeutig' || e.art === 'vorschlag');
+    const ziel = e.art === 'bereits erfasst' ? '<span style="color:var(--muted)">bereits erfasst – übersprungen</span>'
+      : kann ? '→ <strong>' + esc(e.m.vorname + ' ' + e.m.nachname) + '</strong>' + (e.art === 'vorschlag' ? ' <span style="color:var(--yellow,#e8b84b)">(Vorschlag, bitte prüfen)</span>' : '')
+      : '<span style="color:var(--muted)">→ ungeklärt' + (e.person ? ' (' + e.art + ')' : '') + '</span>';
+    h += '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid var(--border)">'
+      + '<input type="checkbox" class="schl-import-cb" data-i="' + i + '"' + (kann ? '' : ' disabled') + (e.art === 'eindeutig' ? ' checked' : '') + '>'
+      + '<span style="font-family:var(--mono);width:40px">' + e.nummer + '</span>'
+      + '<span style="flex:1">' + esc(e.person || e.hinweis) + '</span><span>' + ziel + '</span></label>';
+  });
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button type="button" class="btn btn-secondary btn-sm" onclick="schluesselImportVorschau()">Abbrechen</button>'
+    + '<button type="button" class="btn btn-primary btn-sm" onclick="schluesselImportAusfuehren()">Übernehmen</button></div></div>';
+  box.innerHTML = h;
+}
+async function schluesselImportAusfuehren() {
+  if (!schlImportDaten) return;
+  const gewaehlt = new Set([...document.querySelectorAll('.schl-import-cb:checked')].map(c => Number(c.dataset.i)));
+  const backupMa = JSON.stringify(state.mitarbeiter || []), backupU = JSON.stringify(state.schluesselUngeklaert || null);
+  if (!state.schluesselUngeklaert) state.schluesselUngeklaert = [];
+  const vorhanden = new Set(schluesselAlleZeilen().map(z => z.nummer));
+  let zugeordnet = 0, ungeklaert = 0;
+  schlImportDaten.forEach((e, i) => {
+    if (vorhanden.has(e.nummer)) return;            // keine Dubletten bei erneutem Import
+    if (gewaehlt.has(i) && e.m) {
+      const m = (state.mitarbeiter || []).find(x => String(x.id) === String(e.m.id)); if (!m) return;
+      m.schluessel = [...(m.schluessel || []), { nummer: e.nummer, berechtigung: e.berechtigung, ausgabedatum: '', bemerkung: 'Übernommen aus Schlüsselliste', status: 'ausgegeben', rueckgabedatum: '' }];
+      zugeordnet++;
+    } else {
+      state.schluesselUngeklaert.push({ nummer: e.nummer, berechtigung: e.berechtigung, hinweis: e.person ? 'Liste: ' + e.person + ' – Person nicht eindeutig zugeordnet' : e.hinweis, erfasstAm: maHeute() });
+      ungeklaert++;
+    }
+    vorhanden.add(e.nummer);
+  });
+  const res = await save({verify:true});
+  if (!res || !res.ok) {
+    state.mitarbeiter = JSON.parse(backupMa);
+    const u = JSON.parse(backupU); if (u === null) delete state.schluesselUngeklaert; else state.schluesselUngeklaert = u;
+    return toast('Fehler', 'Speichern nicht bestätigt – nichts übernommen', '⚠️');
+  }
+  schlImportDaten = null;
+  const box = document.getElementById('schl-import'); if (box) box.innerHTML = '';
+  renderMitarbeiterPage();
+  toast('Schlüsselliste übernommen', zugeordnet + ' zugeordnet, ' + ungeklaert + ' ungeklärt', '🔑');
+}
+
 function saveMaModal() {
   const vorname = document.getElementById('ma-vorname').value.trim();
   const nachname = document.getElementById('ma-nachname').value.trim();
@@ -5358,6 +5794,9 @@ function saveMaModal() {
     foto: tempMaFoto,
     docs: tempMaDocs
   };
+  // Schlüssel/Kreditkarte nur setzen, wenn vorhanden (ältere Datensätze bleiben unverändert schlank)
+  if (tempMaSchluessel.length || (m && m.schluessel)) data.schluessel = tempMaSchluessel.map(k => ({...k}));
+  if ((tempMaKreditkarte && tempMaKreditkarte.vorhanden) || (m && m.kreditkarte)) data.kreditkarte = {...(tempMaKreditkarte || maKkLeer())};
   const idx = state.mitarbeiter.findIndex(m => m.id === id);
   if (idx >= 0) state.mitarbeiter[idx] = data;
   else state.mitarbeiter.push(data);
