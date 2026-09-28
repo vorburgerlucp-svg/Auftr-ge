@@ -2794,7 +2794,27 @@ function finishLogin() {
 
   renderAll();
   setTimeout(updateMeldungenBadge, 100);
-  if (istAdmin || istEntwickler) setTimeout(pruefeGeburtstagsTodos, 300);
+
+  // Nach Login bestehende rote Excel-Einträge automatisch nochmals gegen die aktuell
+  // vorhandenen Baustellen/Aliase prüfen. So werden später ergänzte Informationen ohne
+  // erneuten Excel-Import sofort genutzt. Nur bei tatsächlicher Änderung wird gespeichert.
+  if (istAdmin || istEntwickler) {
+    setTimeout(async () => {
+      try {
+        const vorherPlan = JSON.stringify(state.plan || {});
+        const vorherTodos = JSON.stringify(state.todos || []);
+        const r = excelNachAbgleich();
+        const geaendert = vorherPlan !== JSON.stringify(state.plan || {}) || vorherTodos !== JSON.stringify(state.todos || []);
+        if (geaendert) {
+          const s = await save({verify:true});
+          renderWochenplan();
+          try { renderTodoPage(); } catch(_) {}
+          if (s && s.ok && r.verknuepft) toast('Excel-Abgleich', r.verknuepft + ' eindeutige Baustellen automatisch verknüpft', '🔗');
+        }
+      } catch (e) { console.warn('[Excel-Abgleich] automatischer Nachabgleich fehlgeschlagen', e); }
+    }, 250);
+    setTimeout(pruefeGeburtstagsTodos, 500);
+  }
 }
 
 // ── GEBURTSTAGE (Priorität 11) ───────────────────────────────
@@ -6654,6 +6674,7 @@ function renderWochenplan() {
             const label=bsKwEsc(e.excelText || (bs?bs.name:'?'));
             const hotelTxt = e.hotel || bs?.hotelName || '';
             const hotelIcon = hotelTxt ? '<span title="🏨 '+bsKwEsc(hotelTxt)+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
+            const matchWarn = e.matchingWarnung === 'zeitraum' ? '<span title="Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – To-do prüfen" style="position:absolute;bottom:1px;left:3px;font-size:10px">⚠</span>' : '';
             const bsInfoLink = bs ? '<span title="Baustelle: '+bsKwEsc(bs.name)+' – Infos öffnen" onclick="event.stopPropagation();showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;opacity:.8;font-size:10px;margin-right:3px">ℹ️</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
             const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
@@ -6662,7 +6683,7 @@ function renderWochenplan() {
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
               +'style="background:'+bsHex+';color:'+bsText+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
               +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
-              +bsInfoLink+label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
+              +bsInfoLink+label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon+matchWarn
               +(e.excelAbweichung?'<span title="Excel-Zelle ist leer – Einsatz prüfen" style="position:absolute;bottom:1px;right:3px;font-size:10px">⚠</span>':'')
               +'</div>';
           }).join('');
@@ -7655,12 +7676,30 @@ function excelBaustelleAbgleichen(text, datum) {
   const leer = { status: 'keiner', kandidaten: [], vorschlaege: [] };
   if (!nt) return leer;
   const aktiv = alle.filter(b => !bsIstBeendet(b));
-  const exakt = alle.filter(b => {
-    if (excelNorm(b.name) === nt) return true;
-    if (excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt) return true;
+
+  // Explizite Aliase / frühere Namen / zusammengeführte Namen und Auftragsnummern
+  // sind bewusste Identitätsmerkmale. Ist davon GENAU EINE aktive Baustelle betroffen,
+  // darf sie auch bei einem veralteten von/bis-Zeitraum verknüpft werden. Der
+  // Zeitraum-Konflikt bleibt als Warnung im Wochenplan und im Excel-Kontroll-To-do sichtbar.
+  const aliasExakt = alle.filter(b => {
     if (bsAbgleichAliase(b).some(a => excelNorm(a) === nt)) return true;
     const an = excelNorm(b.auftragsnummer);
     return !!(an && an.length >= 4 && (' ' + nt + ' ').includes(' ' + an + ' '));
+  });
+  const aliasAktiv = aliasExakt.filter(b => !bsIstBeendet(b));
+  const aliasImZeit = aliasAktiv.filter(b => bsImZeitraum(b, datum));
+  if (aliasImZeit.length === 1) return { status: 'eindeutig', bs: aliasImZeit[0], kandidaten: aliasImZeit, weg: 'alias-exakt', vorschlaege: [] };
+  if (aliasImZeit.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: aliasImZeit, vorschlaege: [] };
+  if (aliasAktiv.length === 1) return { status: 'eindeutig', bs: aliasAktiv[0], kandidaten: aliasAktiv, weg: 'alias-exakt', zeitWarnung: true, vorschlaege: [] };
+  if (aliasAktiv.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: aliasAktiv, vorschlaege: [] };
+
+  // Name/Kommission/Projekt sind nur dann sicher, wenn auch der Einsatzzeitraum passt.
+  // Damit wird z.B. ein generischer wiederkehrender Name wie "Fust Basel" nicht blind
+  // mit einem Auftrag aus einer anderen Woche verbunden.
+  const exakt = alle.filter(b => {
+    if (excelNorm(b.name) === nt) return true;
+    if (excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt) return true;
+    return false;
   });
   const exAktiv = exakt.filter(b => !bsIstBeendet(b));
   const exImZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
@@ -7802,8 +7841,9 @@ function excelEintragSetzen(ma, datum, k) {
     tag[baseKey] = { maId: ma.id, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: gleich ? (prevBase.notiz || '') : '',
       startzeit: gleich ? (prevBase.startzeit ?? null) : null, endzeit: gleich ? (prevBase.endzeit ?? null) : null,
       fahrzeugId: gleich ? (prevBase.fahrzeugId ?? null) : null, fahrzeugName: gleich ? (prevBase.fahrzeugName || '') : '',
-      excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig', ...(hotel ? { hotel } : {}) };
-    return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig' };
+      excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig',
+      ...(ab.zeitWarnung ? { matchingWarnung: 'zeitraum' } : {}), ...(hotel ? { hotel } : {}) };
+    return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig', zeitWarnung: !!ab.zeitWarnung };
   }
   tag[statusKey] = { maId: ma.id, status: 'Baustelle ungeklärt', farbeHex: statusHex('Baustelle ungeklärt'), notiz: 'Baustelle ungeklärt: ' + k.text,
     excelText: k.text, quelle: 'excel', verknuepfung: ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt',
@@ -7835,6 +7875,9 @@ function excelZelleKontrollieren(ma, datum, k) {
     if (st || hotelE) return F('alter Eintrag steht noch');
     if (excelTextVonEintrag(base) !== k.text) return F('sichtbarer Text weicht ab');
     if (ab.status === 'eindeutig' && String(base.bsId) !== String(ab.bs.id)) return F('mit falscher Baustelle verknüpft');
+    if (base.matchingWarnung === 'zeitraum' || (ab.status === 'eindeutig' && ab.zeitWarnung)) {
+      return W('Eindeutig über Alias verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – Baustellendatum prüfen');
+    }
     return null;
   }
   if (!st || excelTextVonEintrag(st) !== k.text) return F('Excel-Text nicht übernommen');
@@ -7978,7 +8021,8 @@ function excelNachAbgleich() {
       if (tag[baseKey]) return; // bereits anderer Einsatz vorhanden → nichts überschreiben
       const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, ...rest } = e;
       const restNotiz = String(notiz || '').replace(/^\s*Baustelle ungeklärt\s*[:\-–]\s*.+$/i, '').trim();
-      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel', matchingWeg: ab.weg || 'eindeutig' };
+      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel', matchingWeg: ab.weg || 'eindeutig',
+        ...(ab.zeitWarnung ? { matchingWarnung: 'zeitraum' } : {}) };
       delete tag[key];
       verknuepft++;
     });
