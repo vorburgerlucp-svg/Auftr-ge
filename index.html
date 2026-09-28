@@ -560,7 +560,9 @@
       <button class="btn btn-secondary btn-sm" onclick="wpToggleSort()">🔀 Gruppieren</button>
       <button class="btn btn-secondary btn-sm" onclick="wpPrint()">🖨️ Drucken</button>
       <button class="btn btn-primary btn-sm" onclick="wpExcelExport()">⬇ Excel Export</button>
+      <button class="btn btn-secondary btn-sm" onclick="wpExcelPanelToggle()" title="Excel-Bezeichnungen mit Baustellen abgleichen">🔗 Excel-Abgleich</button>
     </div>
+    <div id="wp-excel-panel" class="card" style="display:none;margin-top:10px;padding:10px 14px"></div>
     <!-- Baustellen dieser KW (neutrale Liste) -->
     <div id="wp-legende" style="margin-top:10px"></div>
   </div>
@@ -1543,6 +1545,13 @@
     </div>
     <div class="form-row cols-1">
       <div>
+        <label>🔗 Excel-Bezeichnungen (Aliasse, eine pro Zeile)</label>
+        <textarea id="bs-excel-aliase" rows="2" style="width:100%;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" placeholder="z.B. R+S Westfeld&#10;Fust Dietwil Platten"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">So steht die Baustelle im Excel-Wochenplan. Unverknüpfte Einträge werden beim Speichern automatisch erneut abgeglichen.</div>
+      </div>
+    </div>
+    <div class="form-row cols-1">
+      <div>
         <label>
           <span>📋 Notizen / Rapport-Verlauf</span>
         </label>
@@ -2498,7 +2507,7 @@ function initLoginScreen() {
     try {
       const u = JSON.parse(savedLogin);
       const m = state.mitarbeiter.find(x => x.id === u.id);
-      if (m && istAdminUser(m)) { currentLoginUser = m; finishLogin(); return; }
+      if (m && istAdminUser(m) && !m.abgemeldet) { currentLoginUser = m; lagertoolSitzungMaId = m.id; finishLogin(); return; }
       // Zugriff nicht (mehr) erlaubt (kein Admin/Entwickler, z.B. Rolle nachträglich
       // geändert) - alte Session verwerfen statt automatisch einzuloggen.
       if (m) { try { sessionStorage.removeItem('lagertool_login'); } catch(e2) {} }
@@ -2719,6 +2728,7 @@ function doLogin(fromBiometric) {
 
   errEl.style.display = 'none';
   currentLoginUser = m;
+  lagertoolSitzungMaId = m.id;
   try { sessionStorage.setItem('lagertool_login', JSON.stringify({id: m.id})); } catch(e) {}
   finishLogin();
   if (!fromBiometric) maybeOfferWebauthnSetup(m);
@@ -3000,7 +3010,38 @@ async function doLogout() {
 // aus Firebase neu ein und vergleicht ihn mit dem, was geschrieben wurde
 // ("Schreiben → neu lesen → kontrollieren", statt sich blind auf ein
 // aufgelöstes .set()-Promise zu verlassen).
+// ── ZENTRALE SCHREIBFREIGABE ─────────────────────────────
+// Schreiben (Firebase UND lokaler Cache) nur mit gültiger LagerTool-Anmeldung.
+// Eine (anonyme) Firebase-Verbindung allein berechtigt NICHT zum Schreiben.
+// Gültig heisst: angemeldet über doLogin()/gespeicherte Sitzung (lagertoolSitzungMaId),
+// derselbe Mitarbeiter existiert noch, ist nicht abgemeldet und hat Admin-/Entwicklerrechte
+// (index.html ist nur für diese Rollen). Hinweis: rein clientseitig – die serverseitige
+// Absicherung erfolgt über die Firebase Security Rules (separat).
+let lagertoolSitzungMaId = null;
+function lagertoolDarfSchreiben() {
+  const u = currentLoginUser;
+  if (!u || u.id == null || lagertoolSitzungMaId == null) return false;
+  if (String(lagertoolSitzungMaId) !== String(u.id)) return false;
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(u.id));
+  if (!m || m.abgemeldet) return false;
+  return istAdminUser(m) || istAdminUser(u);
+}
+let lagertoolSperreHinweisZeit = 0;
+function lagertoolSchreibsperre(quelle) {
+  const text = 'Speichern nicht möglich – bitte zuerst im LagerTool anmelden.';
+  console.warn('[LagerTool] Schreibzugriff blockiert (' + (quelle || 'save') + '): keine gültige LagerTool-Anmeldung');
+  // Sichtbarer Hinweis bei Benutzeraktionen; stille Start-Migrationen erzeugen keine Meldungsflut.
+  const benutzerAktiv = !!(typeof navigator !== 'undefined' && navigator.userActivation && navigator.userActivation.hasBeenActive);
+  if ((benutzerAktiv || currentLoginUser) && Date.now() - lagertoolSperreHinweisZeit > 3000) {
+    lagertoolSperreHinweisZeit = Date.now();
+    try { toast('Nicht gespeichert', text, '🔒'); } catch (_) { try { alert(text); } catch (__) {} }
+  }
+  return { ok: false, grund: 'nicht-angemeldet', error: new Error(text) };
+}
+
 function save(opts) {
+  // Letzte Schutzschicht: ohne gültige Anmeldung weder Firebase noch lokalen Cache schreiben.
+  if (!lagertoolDarfSchreiben()) return Promise.resolve(lagertoolSchreibsperre('save'));
   const doVerify = !!(opts && opts.verify);
   state._ts = Date.now();
   // localStorage: nur schlanke Daten (ohne base64-Docs) – localStorage hat ~5MB Limit,
@@ -3408,7 +3449,8 @@ function renderTodoPage() {
     const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
     const textEsc = (t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const istAusgewaehlt = todoAusgewaehlt.has(t.id);
-    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+(istAusgewaehlt?';border-color:var(--accent)':'')+'">'
+    const istRot = t.prioritaet === 'hoch' && !t.erledigt;
+    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+(istRot?';border:1px solid #e8574b;border-left:4px solid #e8574b;background:rgba(232,87,75,.08)':'')+(istAusgewaehlt?';border-color:var(--accent)':'')+'">'
       + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center;flex-shrink:0;margin-top:3px">'
       + '<input type="checkbox" '+(istAusgewaehlt?'checked':'')+' onchange="toggleTodoAuswahl('+todoIdAttr(t.id)+',this.checked)" title="Auswählen (für Mehrfachlöschen)" style="width:16px;height:16px;cursor:pointer">'
       + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+todoIdAttr(t.id)+')" title="Erledigt" style="width:18px;height:18px">'
@@ -6581,7 +6623,7 @@ function renderWochenplan() {
         const af = wpAbfahrtFolgetag(m);
         if(af && af.zeit){
           abfahrtHtml='<span style="color:var(--text);cursor:pointer'+(af.manuell?';text-decoration:underline dotted':'')+'" onclick="wpAbfahrtEdit('+maIdAttr(m.id)+',event)" title="'+af.tooltip.replace(/"/g,'&quot;')+'">'+af.zeit+'</span>'
-            +(af.bs.fahrtzeitStr?'<div style="font-size:9px;color:var(--muted)">🚗'+af.bs.fahrtzeitStr+'</div>':'');
+            +(af.info&&af.info.fahrtzeitText?'<div style="font-size:9px;color:var(--muted)">🚗 '+af.info.fahrtzeitText+'</div>':'');
         } else if(af && af.bs){
           abfahrtHtml='<span title="'+af.tooltip.replace(/"/g,'&quot;')+'">–</span>';
         }
@@ -6608,8 +6650,11 @@ function renderWochenplan() {
           const cellsHtml=dayEntries.map(({key,entry:e})=>{
             const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
             const bsHex=getHex(bs)||'#1a6b3a', bsText=textCol(bsHex);
-            const label=bs?bs.name:'?';
-            const hotelIcon = bs?.hotelName ? '<span title="🏨 '+bs.hotelName+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
+            // Excel-Originaltext anzeigen (Baustellenname im Tooltip); ohne Excel-Text wie bisher
+            const label=bsKwEsc(e.excelText || (bs?bs.name:'?'));
+            const hotelTxt = e.hotel || bs?.hotelName || '';
+            const hotelIcon = hotelTxt ? '<span title="🏨 '+bsKwEsc(hotelTxt)+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
+            const bsInfoLink = bs ? '<span title="Baustelle: '+bsKwEsc(bs.name)+' – Infos öffnen" onclick="event.stopPropagation();showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;opacity:.8;font-size:10px;margin-right:3px">ℹ️</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
             const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
             const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
@@ -6617,26 +6662,39 @@ function renderWochenplan() {
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
               +'style="background:'+bsHex+';color:'+bsText+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
               +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
-              +label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
+              +bsInfoLink+label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
+              +(e.excelAbweichung?'<span title="Excel-Zelle ist leer – Einsatz prüfen" style="position:absolute;bottom:1px;right:3px;font-size:10px">⚠</span>':'')
               +'</div>';
           }).join('');
           html+='<td style="'+bg+'padding:2px">'
             +'<div style="display:flex;flex-direction:column;gap:2px">'+cellsHtml+'</div>'
             +'</td>';
         } else if(statusE?.status){
-          const sHex=statusE.farbeHex||statusHex(statusE.status), sTc=textCol(sHex);
+          const exTxt = excelTextVonEintrag(statusE);
+          const eigentlichStatus = excelIstUnverknuepft(statusE) ? excelStatusAusText(exTxt) : null; // z.B. "Info folgt"
+          const unverkn = excelIstUnverknuepft(statusE) && !eigentlichStatus && !excelUngeklaertAufgeloest(ds, m.id);
+          const sHex = unverkn ? statusHex('Baustelle ungeklärt') : eigentlichStatus ? statusHex(eigentlichStatus) : (statusE.farbeHex||statusHex(statusE.status)), sTc=textCol(sHex);
+          const abwLeer = statusE.excelAbweichung ? '<span title="Excel-Zelle ist leer – Eintrag prüfen" style="margin-left:3px">⚠</span>' : '';
+          const hotelS = statusE.hotel ? '<span title="🏨 '+bsKwEsc(statusE.hotel)+'" style="font-size:10px;margin-left:3px">🏨</span>' : '';
+          // Unverknüpft: Excel-Bezeichnung statt pauschal "Baustelle ungeklärt", rot markiert
+          const inhalt = unverkn
+            ? '<span title="'+(statusE.verknuepfung==='mehrdeutig'?'Mehrere mögliche Baustellen – Zuordnung prüfen':'Keine passende Baustelle – bitte anlegen oder Alias ergänzen')+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">nicht verknüpft</span></span>'
+            : eigentlichStatus
+              ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
+              : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell" draggable="true" '
             +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
-            +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center" '
+            +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center'+(unverkn?';border:1px solid #e8574b':'')+'" '
             +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'
-            +statusE.status+'</div></td>';
+            +inhalt+hotelS+abwLeer+'</div></td>';
         } else {
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell leer" '
             +'data-key="'+planKey+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
             +'style="justify-content:center;font-size:16px;min-height:28px" '
-            +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'+'+'+'</div></td>';
+            +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'
+            +(state.plan[ds]?.['hotel_ma'+m.id]?.hotel ? '<span style="font-size:11px" title="Excel: '+bsKwEsc(state.plan[ds]['hotel_ma'+m.id].hotel)+'">🏨 '+bsKwEsc(state.plan[ds]['hotel_ma'+m.id].hotel)+'</span>' : '+')+'</div></td>';
         }
       });
       html+='</tr>';
@@ -7398,10 +7456,14 @@ function saveZelle() {
     // weiterhin das bisherige Verhalten: alten Basis-Eintrag ersetzen.
     const planKey = wpCurrentEditKey || ('ma'+wpCurrentMaId+'_'+wpCurrentDatum);
     const prev = state.plan[wpCurrentDatum][planKey]||{};
+    // Excel-Originalbezeichnung/Hotel bei manueller Zuordnung erhalten
+    const prevStatusE = state.plan[wpCurrentDatum]['status_ma'+wpCurrentMaId] || {};
+    const excelErhalt = prev.excelText || (!wpCurrentEditKey ? excelTextVonEintrag(prevStatusE) : '') || '';
+    const hotelErhalt = prev.hotel || (!wpCurrentEditKey ? prevStatusE.hotel : '') || '';
     if(!wpCurrentEditKey){
-      // Alten Eintrag löschen falls vorhanden
+      // Alten Eintrag löschen falls vorhanden (Hotel-Angaben bleiben)
       Object.keys(state.plan[wpCurrentDatum]).forEach(k=>{
-        if(state.plan[wpCurrentDatum][k]?.maId===wpCurrentMaId) delete state.plan[wpCurrentDatum][k];
+        if(k.indexOf('hotel_')!==0 && state.plan[wpCurrentDatum][k]?.maId===wpCurrentMaId) delete state.plan[wpCurrentDatum][k];
       });
     }
     // Start-/Endzeit und Fahrzeug des bearbeiteten Eintrags bleiben
@@ -7410,13 +7472,18 @@ function saveZelle() {
     state.plan[wpCurrentDatum][planKey]={maId:wpCurrentMaId,bsId:wpCurrentBsId,farbeHex:hex,
       notiz:document.getElementById('zell-notiz').value.trim(),
       startzeit:prev.startzeit??null, endzeit:prev.endzeit??null,
-      fahrzeugId:prev.fahrzeugId??null, fahrzeugName:prev.fahrzeugName||''};
+      fahrzeugId:prev.fahrzeugId??null, fahrzeugName:prev.fahrzeugName||'',
+      ...(excelErhalt ? { excelText: excelErhalt, quelle: prev.quelle || prevStatusE.quelle || 'excel' } : {}),
+      ...(hotelErhalt ? { hotel: hotelErhalt } : {})};
+    try { excelVerknuepfungsTodosAktualisieren(); } catch(_) {}
     const ma=(state.mitarbeiter||[]).find(m=>m.id===wpCurrentMaId);
     save(); toast('Gespeichert',(ma?.vorname||'')+' -> '+(bs?.name||''),'✅');
   } else if(wpSelStatus && wpCurrentMaId) {
     if(!state.plan[wpCurrentDatum]) state.plan[wpCurrentDatum]={};
+    const metaS = planExcelMeta(wpCurrentDatum, wpCurrentMaId);
     state.plan[wpCurrentDatum]['status_ma'+wpCurrentMaId]={maId:wpCurrentMaId,status:wpSelStatus,
-      farbeHex:statusHex(wpSelStatus),notiz:document.getElementById('zell-notiz').value.trim()};
+      farbeHex:statusHex(wpSelStatus),notiz:document.getElementById('zell-notiz').value.trim(), ...metaS};
+    try { excelVerknuepfungsTodosAktualisieren(); } catch(_) {}
     save(); toast('Status',wpSelStatus,'✅');
   }
   closeZellModal(); renderWochenplan();
@@ -7432,9 +7499,10 @@ function clearZelle() {
       delete state.plan[ds][wpCurrentEditKey];
     } else {
       Object.keys(state.plan[ds]).forEach(rk=>{
-        if(state.plan[ds][rk]?.maId===wpCurrentMaId) delete state.plan[ds][rk];
+        if(rk.indexOf('hotel_')!==0 && state.plan[ds][rk]?.maId===wpCurrentMaId) delete state.plan[ds][rk];
       });
     }
+    try { excelVerknuepfungsTodosAktualisieren(); } catch(_) {}
     save();
   }
   closeZellModal(); renderWochenplan();
@@ -7448,12 +7516,627 @@ function closeZellModal(){
 }
 
 function statusHex(s){
-  return {Urlaub:'#6b1a1a',Krank:'#6b1a1a',Frei:'#2a3045',NBU:'#7a3500','Info folgt':'#7a6200',BU:'#4a2060',Unentschuldigt:'#7a1a1a'}[s]||'#2a3045';
+  return {Urlaub:'#6b1a1a',Krank:'#6b1a1a',Frei:'#2a3045',NBU:'#7a3500','Info folgt':'#7a6200',BU:'#4a2060',Unentschuldigt:'#7a1a1a','Baustelle ungeklärt':'#5a1a1a','Büro':'#1a3a6b'}[s]||'#2a3045';
 }
 
 // Dummy
 function wpCellClick(){}
 function wpStartMove(){}
+
+// ════════════════════════════════════════════════════════
+// EXCEL-WOCHENPLAN: Bezeichnung erhalten + Baustellenabgleich
+// ════════════════════════════════════════════════════════
+// Grundsätze:
+//  • Excel ist führend: jede nicht-leere Zelle bleibt beim Monteur am Datum sichtbar.
+//  • Original-Zelltext wird als excelText am Planeintrag gespeichert.
+//  • Verknüpfung nur bei EINDEUTIGEM Treffer (Auftragsnr., Alias, Name, Kunde/Ort/
+//    Projekt nur wenn genau eine Baustelle passt). Keine Baustellen-Neuanlage.
+//  • Unverknüpft → bestehende Konvention: status_ma{id} mit status "Baustelle ungeklärt",
+//    notiz "Baustelle ungeklärt: <Text>" (kompatibel zu Monteur-App/externem Abgleich),
+//    zusätzlich excelText + verknuepfung ('fehlt'|'mehrdeutig').
+//  • Pro Excel-Bezeichnung und KW genau EIN rotes Verknüpfungs-To-do.
+const EXCEL_STATUS_REGELN = [
+  [/^info\s*folgt\b/, 'Info folgt'], [/^(urlaub|ferien)\b/, null /* s.u. */], [/^krank\b/, 'Krank'],
+  [/^frei\b/, 'Frei'], [/^(buro|buero)\b/, 'Büro'], [/^nbu\b/, 'NBU'], [/^bu\b/, 'BU'], [/^unentschuldigt\b/, 'Unentschuldigt']
+];
+const EXCEL_STOPWOERTER = new Set(['ag','gmbh','sa','und','der','die','das','de','la','le','the','bei','baustelle','montage','projekt','auftrag','in','im','am','fur','fuer','von','bis']);
+function excelNorm(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function excelTokens(t) { return excelNorm(t).split(' ').filter(x => x.length >= 2 && !EXCEL_STOPWOERTER.has(x)); }
+// Gleiches Wort oder Abkürzung (z.B. "Gastro" ↔ "Gastrobau"): Präfix ≥4 Zeichen UND ≥60 % des längeren
+// Worts – damit verschiedene Orte wie "Emmen" ↔ "Emmenbrücke" NICHT als gleich gelten.
+function excelTokGleich(a, b) {
+  if (a === b) return true;
+  const k = a.length <= b.length ? a : b, l = a.length <= b.length ? b : a;
+  return k.length >= 4 && l.startsWith(k) && k.length / l.length >= 0.6;
+}
+// Gespeicherte Aliasse (auch Feldnamen anderer Systeme) tolerant lesen.
+function bsExcelAliase(bs) {
+  const out = [];
+  // Führend ist das bestehende Feld excelAliases; andere Schreibweisen werden nur mitgelesen.
+  ['excelAliases','excelAliase','matchingAliases','aliase','aliases','alias','excelNamen'].forEach(f => {
+    const v = bs && bs[f];
+    if (Array.isArray(v)) v.forEach(x => { if (String(x || '').trim()) out.push(String(x).trim()); });
+    else if (typeof v === 'string') v.split(/[\n;]+/).forEach(x => { if (x.trim()) out.push(x.trim()); });
+  });
+  return [...new Set(out)];
+}
+// Zellen-Klassifikation: {typ:'leer'|'status'|'hotel'|'baustelle', status?, text, hotel?}
+function excelZelleKlassifizieren(zelle) {
+  const text = String(zelle || '').replace(/\s+/g, ' ').trim();
+  if (!text) return { typ: 'leer', text: '' };
+  const n = excelNorm(text);
+  if (/^(hotel|airbnb|angefragt airbnb|ubernachtung|uebernachtung)\b/.test(n)) return { typ: 'hotel', text, hotel: text };
+  for (const [re, st] of EXCEL_STATUS_REGELN) {
+    if (re.test(n)) {
+      // Bisherige Import-Regel beibehalten: "Urlaub" → Urlaub, "Ferien" → Frei
+      const status = st || (/^urlaub\b/.test(n) ? 'Urlaub' : 'Frei');
+      return { typ: 'status', status, text };
+    }
+  }
+  // Hotel-Zusatz separat erhalten ("Fust Dietwil + Hotel")
+  let hotel = null, rest = text;
+  const hm = text.match(/\s*(?:[+,\/]|\bund\b)\s*((?:hotel|airbnb)\b.*)$/i);
+  if (hm && hm.index > 0) { hotel = hm[1].trim(); rest = text.slice(0, hm.index).trim(); }
+  return { typ: 'baustelle', text: rest, hotel };
+}
+function bsIstBeendet(bs) { return !!(bs && (bs.beendet === true || bs.beendet === 'true')); }
+// Duplikat-Kennzeichnung: bs.hauptBaustelleId = ID des Haupteintrags. Ein so markierter
+// Eintrag ist kein eigener Kandidat mehr; sein Name/seine Aliasse zählen als Alias des Haupteintrags.
+function bsHauptVon(bs) {
+  if (!bs || bs.hauptBaustelleId == null || bs.hauptBaustelleId === '') return null;
+  return (state.baustellen || []).find(b => String(b.id) === String(bs.hauptBaustelleId)) || null;
+}
+function bsAbgleichAliase(bs) {
+  const eigene = bsExcelAliase(bs);
+  (state.baustellen || []).forEach(d => { if (String(d.hauptBaustelleId ?? '') === String(bs.id)) eigene.push(d.name, ...bsExcelAliase(d)); });
+  return [...new Set(eigene.filter(Boolean))];
+}
+function bsImZeitraum(bs, datum) {
+  if (!datum || (!bs.von && !bs.bis)) return true;
+  return (!bs.von || datum >= bs.von) && (!bs.bis || datum <= bs.bis);
+}
+function excelLev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function excelTokAehnlich(a, b) { return a.length >= 5 && b.length >= 5 && excelLev(a, b) <= 2 && 1 - excelLev(a, b) / Math.max(a.length, b.length) >= 0.75; }
+// Abgleich Excel-Bezeichnung → Baustelle (strikt, keine unsicheren Fuzzy-Treffer).
+// Rückgabe {status:'eindeutig'|'mehrdeutig'|'keiner', bs?, kandidaten:[], grund?, vorschlaege:[], weg?}
+// Automatisch verknüpft wird NUR über einen exakten (normalisierten) Treffer auf:
+//   1. Baustellenname   2. Kommission/Projektname   3. excelAliases   4. weitere Matching-Aliase
+//   (+ Auftragsnummer als ausdrückliche Kennung)
+//   5. Zusammengeführte Einträge (hauptBaustelleId) zählen nie selbst, ihr Name/ihre Aliase
+//      zeigen auf die Hauptbaustelle.
+// Zusätzlich gilt die Zeitraumregel: Hat die Baustelle von/bis, muss der Einsatztag darin liegen.
+// Wort-/Kunden-/Tippfehler-Ähnlichkeiten werden NUR als Vorschlag gemeldet, nie verknüpft.
+function excelBaustelleAbgleichen(text, datum) {
+  const alle = (state.baustellen || []).filter(b => !bsHauptVon(b));   // Duplikate nicht als eigene Kandidaten
+  const nt = excelNorm(text), tt = excelTokens(text);
+  const leer = { status: 'keiner', kandidaten: [], vorschlaege: [] };
+  if (!nt) return leer;
+  const aktiv = alle.filter(b => !bsIstBeendet(b));
+  const exakt = alle.filter(b => {
+    if (excelNorm(b.name) === nt) return true;
+    if (excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt) return true;
+    if (bsAbgleichAliase(b).some(a => excelNorm(a) === nt)) return true;
+    const an = excelNorm(b.auftragsnummer);
+    return !!(an && an.length >= 4 && (' ' + nt + ' ').includes(' ' + an + ' '));
+  });
+  const exAktiv = exakt.filter(b => !bsIstBeendet(b));
+  if (exAktiv.length === 1) {
+    if (bsImZeitraum(exAktiv[0], datum)) return { status: 'eindeutig', bs: exAktiv[0], kandidaten: exAktiv, weg: 'exakt', vorschlaege: [] };
+    return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: [exAktiv[0], ...excelAehnliche(tt, aktiv).filter(b => b !== exAktiv[0] && bsImZeitraum(b, datum))], vorschlaege: [] };
+  }
+  if (exAktiv.length > 1) {
+    const imZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
+    if (!imZeit.length) return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: exAktiv, vorschlaege: [] };
+    return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: exAktiv, vorschlaege: [] };
+  }
+  if (exakt.length) return { status: 'mehrdeutig', grund: 'beendet', kandidaten: exakt, vorschlaege: [] };
+  // Kein exakter Treffer → nicht verknüpfen; ähnliche Baustellen nur als Vorschlag
+  const vorschlaege = [...new Set([...excelAehnliche(tt, aktiv), ...excelVorschlaege(tt, aktiv)])].slice(0, 3);
+  return { ...leer, vorschlaege };
+}
+// Wort-Ähnlichkeit (Name/Kunde/Ort/Projekt/Alias) – nur zur Information, nie automatisch.
+function excelAehnliche(tt, kandidaten) {
+  if (!tt.length) return [];
+  return kandidaten.filter(b => {
+    const bt = [...new Set([...excelTokens(b.name), ...excelTokens(b.kunde), ...excelTokens(b.adresse), ...excelTokens(b.montageDetail), ...excelTokens(b.kommission), ...bsAbgleichAliase(b).flatMap(excelTokens)])];
+    const nameT = excelTokens(b.name);
+    return (tt.length >= 2 && tt.every(t => bt.some(x => excelTokGleich(t, x)))) || (nameT.length >= 2 && nameT.every(x => tt.some(t => excelTokGleich(t, x))));
+  }).slice(0, 3);
+}
+// Vorschläge bei ähnlicher Schreibweise (z.B. "Rüthihof" ↔ "Rütihof"): alle Namenswörter der
+// Baustelle kommen (mind. eines davon nur ähnlich) im Excel-Text vor. Nie automatisch zuordnen.
+function excelVorschlaege(tt, kandidaten) {
+  const out = [];
+  kandidaten.forEach(b => {
+    const nameT = excelTokens(b.name);
+    if (!nameT.length || (nameT.length < 2 && nameT[0].length < 8)) return;   // einzelne kurze Namen zu unspezifisch
+    let aehnlich = 0;
+    const ok = nameT.every(x => tt.some(t => { if (excelTokGleich(t, x)) return true; if (excelTokAehnlich(t, x)) { aehnlich++; return true; } return false; }));
+    if (ok && aehnlich > 0) out.push(b);
+  });
+  return out.slice(0, 3);
+}
+function excelBsKurz(b) {
+  const f = d => d ? d.slice(8,10) + '.' + d.slice(5,7) + '.' + d.slice(0,4) : '…';
+  const zr = (b.von || b.bis) ? 'Zeitraum ' + (b.von && b.bis && b.von === b.bis ? f(b.von) : f(b.von) + '–' + f(b.bis)) : 'kein Zeitraum hinterlegt';
+  return b.name + ' (Auftrag ' + (b.auftragsnummer || '–') + '; ' + zr + ')' + (bsIstBeendet(b) ? ' – beendet' : '');
+}
+// Original-Bezeichnung eines Planeintrags (ohne etwas zu erfinden)
+function excelTextVonEintrag(e) {
+  if (!e) return '';
+  if (e.excelText) return String(e.excelText);
+  if (e.excelRaw) return String(e.excelRaw);
+  if (e.status === 'Baustelle ungeklärt') {
+    const m = String(e.notiz || '').match(/^\s*Baustelle ungeklärt\s*[:\-–]\s*(.+)$/i);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return '';
+}
+function excelIstUnverknuepft(e) { return !!e && e.status === 'Baustelle ungeklärt'; }
+// Excel-Herkunft eines Tages (Originaltext, Quelle, Hotel) aus Basis- oder Status-Eintrag.
+// Wird von allen Schreibwegen übernommen, damit der Originaltext nie verloren geht.
+function planExcelMeta(datum, maId, key) {
+  const tag = (state.plan || {})[datum] || {};
+  const q = (key && tag[key]) || tag['ma' + maId + '_' + datum] || tag['status_ma' + maId] || null;
+  if (!q) return {};
+  const t = excelTextVonEintrag(q) || excelTextVonEintrag(tag['status_ma' + maId]);
+  const out = {};
+  if (t) { out.excelText = t; out.quelle = q.quelle || 'excel'; }
+  if (q.hotel) out.hotel = q.hotel;
+  return out;
+}
+// Abwesenheit (keine verfügbare Kapazität) – auch wenn Ferien intern als "Frei" gespeichert sind.
+const PLAN_ABWESEND = ['Urlaub','Krank','Frei','NBU','BU','Unentschuldigt'];
+function planIstAbwesend(e) { return !!e && !!e.status && PLAN_ABWESEND.includes(e.status); }
+function planStatusAnzeige(e) {
+  if (!e || !e.status) return '';
+  const t = excelNorm(e.excelText || e.notiz || '');
+  if (e.status === 'Frei' && /^ferien\b/.test(t)) return 'Ferien';
+  return e.status;
+}
+// Ungeklärter Eintrag, der bereits durch einen Einsatz am selben Tag aufgelöst ist
+function excelUngeklaertAufgeloest(datum, maId) {
+  const b = ((state.plan || {})[datum] || {})['ma' + maId + '_' + datum];
+  return !!(b && b.bsId != null && b.bsId !== '');
+}
+// Text eines ungeklärten Eintrags, der eigentlich ein Planungsstatus ist (z.B. "Info folgt")
+function excelStatusAusText(text) { const k = excelZelleKlassifizieren(text); return k.typ === 'status' ? k.status : null; }
+
+// Eintrag schreiben (nur Basis-Key/Status-Key des Tages; __2/__3 und Hotel bleiben)
+// ── Excel → LagerTool: SPIEGEL-REGEL (gilt für jede importierte KW / jeden Zeitraum) ──
+// Excel ist die verbindliche Quelle der Mitarbeitereinteilung. Für jeden Mitarbeiter und
+// jeden in der Excel-Datei enthaltenen Tag (erkannt ausschliesslich aus den Datumsüberschriften)
+// wird der Tag des LagerTools exakt auf den Excel-Inhalt gesetzt:
+//   Excel leer   → alle Planeinträge des Mitarbeiters an diesem Tag entfernen
+//   Excel Inhalt → alle bisherigen Planeinträge entfernen und genau diesen Inhalt schreiben
+// Planeinträge = ma<id>_<datum>, ma<id>_<datum>__N, status_ma<id>, hotel_ma<id> des Tages.
+// Unterstützende Angaben (Startzeit/Fahrzeug/Notiz) bleiben nur erhalten, wenn Excel für den
+// Tag dieselbe Baustelle nennt.
+function excelTagPlanKeys(tag, maId, datum) {
+  const id = String(maId), base = 'ma' + id + '_' + datum;
+  return Object.keys(tag || {}).filter(k => {
+    if (k === base || k.startsWith(base + '__') || k === 'status_ma' + id || k === 'hotel_ma' + id) return true;
+    const e = tag[k];   // weitere Schlüsselformen anderer Schreibwege mit derselben maId
+    return !!(e && e.maId != null && String(e.maId) === id);
+  });
+}
+function excelTagLeeren(ma, datum) {
+  const tag = (state.plan || {})[datum];
+  if (!tag) return [];
+  const keys = excelTagPlanKeys(tag, ma.id, datum);
+  keys.forEach(k => delete tag[k]);
+  return keys;
+}
+function excelEintragSetzen(ma, datum, k) {
+  if (!state.plan[datum]) state.plan[datum] = {};
+  const tag = state.plan[datum];
+  const baseKey = 'ma' + ma.id + '_' + datum, statusKey = 'status_ma' + ma.id;
+  const prevBase = tag[baseKey] ? { ...tag[baseKey] } : null;
+  excelTagLeeren(ma, datum);                       // alte Einteilung vollständig ersetzen
+  if (k.typ === 'hotel') {
+    // Excel nennt nur eine Übernachtung → genau das ist die Tagesplanung
+    tag['hotel_ma' + ma.id] = { maId: ma.id, hotel: k.hotel, excelText: k.text, quelle: 'excel' };
+    return { art: 'hotel' };
+  }
+  const hotel = k.hotel || null;
+  if (k.typ === 'status') {
+    tag[statusKey] = { maId: ma.id, status: k.status, farbeHex: statusHex(k.status), notiz: k.text, excelText: k.text, quelle: 'excel', ...(hotel ? { hotel } : {}) };
+    return { art: 'status' };
+  }
+  const ab = excelBaustelleAbgleichen(k.text, datum);
+  if (ab.status === 'eindeutig') {
+    const gleich = prevBase && String(prevBase.bsId) === String(ab.bs.id);
+    tag[baseKey] = { maId: ma.id, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: gleich ? (prevBase.notiz || '') : '',
+      startzeit: gleich ? (prevBase.startzeit ?? null) : null, endzeit: gleich ? (prevBase.endzeit ?? null) : null,
+      fahrzeugId: gleich ? (prevBase.fahrzeugId ?? null) : null, fahrzeugName: gleich ? (prevBase.fahrzeugName || '') : '',
+      excelText: k.text, quelle: 'excel', ...(hotel ? { hotel } : {}) };
+    return { art: 'verknuepft', bs: ab.bs };
+  }
+  tag[statusKey] = { maId: ma.id, status: 'Baustelle ungeklärt', farbeHex: statusHex('Baustelle ungeklärt'), notiz: 'Baustelle ungeklärt: ' + k.text,
+    excelText: k.text, quelle: 'excel', verknuepfung: ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt',
+    kandidatenIds: ab.kandidaten.map(b => b.id), ...(ab.grund ? { konfliktGrund: ab.grund } : {}),
+    ...(ab.vorschlaege && ab.vorschlaege.length ? { vorschlagIds: ab.vorschlaege.map(b => b.id) } : {}), ...(hotel ? { hotel } : {}) };
+  return { art: 'unverknuepft' };
+}
+// Gegenkontrolle Excel-Zelle ↔ LagerTool-Tag (auch für leere Zellen).
+// Rückgabe null (identisch) oder {art:'fehler'|'warnung', grund}.
+function excelZelleKontrollieren(ma, datum, k) {
+  const tag = (state.plan || {})[datum] || {};
+  const keys = excelTagPlanKeys(tag, ma.id, datum);
+  const base = tag['ma' + ma.id + '_' + datum], st = tag['status_ma' + ma.id], hotelE = tag['hotel_ma' + ma.id];
+  const F = grund => ({ art: 'fehler', grund }), W = grund => ({ art: 'warnung', grund });
+  if (k.typ === 'leer') return keys.length ? F('Excel leer, LagerTool hat noch einen Eintrag') : null;
+  const extra = keys.filter(x => /__\d+$/.test(x));
+  if (extra.length) return F('zusätzlicher alter Einsatz (' + extra.length + ') steht noch');
+  if (k.typ === 'hotel') {
+    if (!hotelE || keys.length !== 1) return F('Tag enthält nicht nur die Hotelangabe');
+    return excelTextVonEintrag(hotelE) === k.text || hotelE.hotel === k.hotel ? null : F('Hotelangabe weicht ab');
+  }
+  if (k.typ === 'status') {
+    if (!st || st.status !== k.status) return F('Status „' + k.status + '“ fehlt');
+    if (base || hotelE) return F('alter Eintrag steht noch');
+    return excelTextVonEintrag(st) === k.text ? null : F('sichtbarer Text weicht ab');
+  }
+  const ab = excelBaustelleAbgleichen(k.text, datum);
+  if (base) {
+    if (st || hotelE) return F('alter Eintrag steht noch');
+    if (excelTextVonEintrag(base) !== k.text) return F('sichtbarer Text weicht ab');
+    if (ab.status === 'eindeutig' && String(base.bsId) !== String(ab.bs.id)) return F('mit falscher Baustelle verknüpft');
+    return null;
+  }
+  if (!st || excelTextVonEintrag(st) !== k.text) return F('Excel-Text nicht übernommen');
+  if (hotelE) return F('alter Eintrag steht noch');
+  if (!excelIstUnverknuepft(st)) return F('als Status statt als Baustelle gespeichert');
+  if (ab.status === 'eindeutig') return W('Baustelle „' + ab.bs.name + '“ vorhanden, aber nicht verknüpft (bsId fehlt)');
+  return null;   // ausdrücklich ungeklärt mit gleichem Excel-Text = korrekt (fehlende Baustelle hat eigenes To-do)
+}
+// (Veraltet, nicht mehr verwendet – ersetzt durch excelTagLeeren) Excel-Zelle leer, im Plan steht aber noch ein Einsatz/Status: nicht löschen,
+// sondern zur Prüfung markieren. Zusatz-Einsätze (__2/__3) und Hotel bleiben unberührt.
+function excelLeerMarkieren(ma, datum) {
+  const tag = (state.plan || {})[datum]; if (!tag) return false;
+  let markiert = false;
+  ['ma' + ma.id + '_' + datum, 'status_ma' + ma.id].forEach(k => {
+    const e = tag[k]; if (!e) return;
+    if (!e.excelAbweichung) e.excelAbweichung = { art: 'leer', seit: new Date().toISOString().slice(0,10) };
+    markiert = true;
+  });
+  return markiert;
+}
+// Ergebnis als rotes To-do je KW (dedupliziert, automatisch erledigt bei 0 Abweichungen).
+function excelKontrolleTodo(abweichungen, montag) {
+  if (!state.todos) state.todos = [];
+  const mo = getMonday(new Date(montag + 'T12:00')), kw = bsGetKW(mo), sk = 'excel-kontrolle:' + mo.getFullYear() + '-' + kw;
+  const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
+  if (!abweichungen.length) {
+    if (vorhanden && !vorhanden.erledigt) { vorhanden.erledigt = true; vorhanden.erledigtDurch = 'Automatischer Abgleich'; vorhanden.erledigtAm = new Date().toISOString().slice(0,10); }
+    return null;
+  }
+  const zeilen = abweichungen.slice(0, 25).map(a => '• ' + (a.art === 'warnung' ? 'Verknüpfungswarnung' : 'Fehler') + ' ' + (a.datum ? a.datum.slice(8,10) + '.' + a.datum.slice(5,7) + '. ' : '') + a.ma + ': Excel „' + (a.excel || '(leer)') + '“ – ' + a.grund);
+  const text = 'Excel-Abgleich Abweichung KW ' + kw + ': ' + abweichungen.length + ' Zelle(n) stimmen nach dem Import nicht mit dem Wochenplan überein – bitte prüfen.\n'
+    + zeilen.join('\n') + (abweichungen.length > 25 ? '\n… und ' + (abweichungen.length - 25) + ' weitere' : '');
+  if (vorhanden) { vorhanden.text = text; if (vorhanden.erledigtDurch === 'Automatischer Abgleich') { vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; } return vorhanden; }
+  return todoErstellen({ text, quelle: 'Excel-Abgleich', kind: 'excel-kontrolle', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk }).todo;
+}
+// Verknüpfungs-To-dos: genau eines je Excel-Bezeichnung und KW; automatisch erledigt,
+// sobald keine unverknüpften Einträge dieser Gruppe mehr bestehen.
+function excelVerknuepfungsTodosAktualisieren() {
+  if (!state.todos) state.todos = [];
+  const abDatum = fmtDate(getMonday(new Date()));   // To-dos nur ab aktueller Woche
+  const gruppen = new Map();
+  Object.entries(state.plan || {}).forEach(([ds, tag]) => {
+    Object.entries(tag || {}).forEach(([key, e]) => {
+      if (!excelIstUnverknuepft(e) || String(key).indexOf('status_ma') !== 0) return;
+      const maId = e.maId ?? bsPlanMaId(key, e);
+      if (excelUngeklaertAufgeloest(ds, maId)) return;          // durch Einsatz am selben Tag aufgelöst
+      const text = excelTextVonEintrag(e); if (!text) return;
+      if (excelStatusAusText(text)) return;                     // eigentlich Planungsstatus, keine Baustelle
+      const d = new Date(ds + 'T12:00'), kw = bsGetKW(d), jahr = getMonday(d).getFullYear();
+      const sk = 'excel-verknuepfung:' + excelNorm(text) + ':' + jahr + '-' + kw;
+      if (!gruppen.has(sk)) gruppen.set(sk, { text, kw, tage: new Set(), mas: new Set(), kand: new Set(), vorschl: new Set(), zeitraum: false, mehrdeutig: false, aktuell: false, anzahl: 0 });
+      const g = gruppen.get(sk);
+      g.tage.add(ds); g.mas.add(String(maId)); g.anzahl++;
+      // Kandidaten/Vorschläge immer aktuell berechnen (auch für Einträge anderer Schreibwege ohne gespeicherte Angaben)
+      const ab = excelBaustelleAbgleichen(text, ds);
+      (ab.kandidaten || []).forEach(b => g.kand.add(String(b.id)));
+      (ab.vorschlaege || []).forEach(b => g.vorschl.add(String(b.id)));
+      if (ab.grund === 'zeitraum') g.zeitraum = true;
+      if (ab.status === 'mehrdeutig') g.mehrdeutig = true;
+      if (ds >= abDatum) g.aktuell = true;
+    });
+  });
+  const TAGE = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : 'Mitarbeiter ' + id; };
+  let neu = 0, erledigt = 0, wiedereroeffnet = 0;
+  gruppen.forEach((g, sk) => {
+    if (!g.aktuell) return;
+    const tage = [...g.tage].sort().map(ds => { const d = new Date(ds + 'T12:00'); return TAGE[d.getDay()] + ' ' + String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.'; });
+    const bsL = ids => [...ids].map(id => (state.baustellen || []).find(b => String(b.id) === id)).filter(Boolean).map(excelBsKurz);
+    const kand = bsL(g.kand), vorschl = bsL(g.vorschl);
+    const text = 'Baustelle fehlt / nicht verknüpft: ' + g.text + '. Keine eindeutig passende Baustelle gefunden. Bitte Baustelle anlegen, Alias ergänzen oder Zuordnung prüfen.'
+      + '\nKW ' + g.kw + ' · Tage: ' + tage.join(', ') + ' · Monteure: ' + [...g.mas].map(maName).sort((a,b)=>a.localeCompare(b,'de')).join(', ')
+      + ' · ' + g.anzahl + (g.anzahl === 1 ? ' Eintrag offen' : ' Einträge offen')
+      + (g.mehrdeutig && kand.length ? (g.zeitraum ? '\nZeitraum-Konflikt – bitte prüfen: ' : '\nMögliche Baustellen (mehrdeutig): ') + kand.join('; ') : '')
+      + (vorschl.length ? '\nMögliche Baustelle (ähnlich, NICHT automatisch zugeordnet – ggf. als Alias ergänzen): ' + vorschl.join('; ') : '');
+    const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
+    if (vorhanden) {
+      // Automatisch erledigt, aber wieder offene Einträge → wieder eröffnen (nichts verdecken)
+      if (vorhanden.erledigt && vorhanden.erledigtDurch === 'Automatischer Abgleich') {
+        vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; wiedereroeffnet++;
+      }
+      if (!vorhanden.erledigt && vorhanden.text !== text) vorhanden.text = text; // Tage/Monteure/Anzahl aktuell halten
+      return; // manuell erledigte nicht erneut anlegen (keine Dubletten)
+    }
+    const r = todoErstellen({ text, quelle: 'Excel-Abgleich', kind: 'excel-verknuepfung', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk });
+    if (r.status === 'neu') neu++;
+  });
+  // Erst erledigen, wenn KEIN Eintrag der Gruppe (Bezeichnung + KW) mehr offen ist
+  state.todos.forEach(t => {
+    if (t.kind !== 'excel-verknuepfung' || t.erledigt || t.bereinigt || !t.schluessel) return;
+    if (!gruppen.has(t.schluessel)) {
+      t.erledigt = true; t.erledigtDurch = 'Automatischer Abgleich'; t.erledigtAm = new Date().toISOString().slice(0,10);
+      erledigt++;
+    }
+  });
+  return { neu, erledigt, wiedereroeffnet };
+}
+
+// Nachträglicher Abgleich aller unverknüpften Einträge (z.B. nach neuer Baustelle/Alias).
+function excelNachAbgleich() {
+  let verknuepft = 0;
+  Object.entries(state.plan || {}).forEach(([ds, tag]) => {
+    Object.keys(tag || {}).forEach(key => {
+      const e = tag[key];
+      // Einsatz auf einem zusammengeführten Eintrag (hauptBaustelleId) → Hauptbaustelle
+      if (e && e.bsId != null && key.indexOf('status_ma') !== 0) {
+        const bsE = (state.baustellen || []).find(b => String(b.id) === String(e.bsId));
+        const haupt = bsHauptVon(bsE);
+        if (haupt) { e.bsId = haupt.id; e.farbeHex = getHex(haupt); verknuepft++; }
+        return;
+      }
+      if (!excelIstUnverknuepft(e) || key.indexOf('status_ma') !== 0) return;
+      const text = excelTextVonEintrag(e); if (!text) return;
+      const maIdX = e.maId ?? bsPlanMaId(key, e);
+      // Bereits durch Einsatz am selben Tag aufgelöst: Excel-Text dort ergänzen, nichts löschen
+      if (excelUngeklaertAufgeloest(ds, maIdX)) {
+        const b = tag['ma' + maIdX + '_' + ds]; if (!b.excelText) b.excelText = text;
+        return;
+      }
+      // Text ist eigentlich ein Planungsstatus (z.B. "Info folgt") → gleiche Regel wie Import
+      const stTxt = excelStatusAusText(text);
+      if (stTxt) {
+        const { verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, ...restS } = e;
+        tag[key] = { ...restS, status: stTxt, farbeHex: statusHex(stTxt), notiz: text, excelText: text };
+        return;
+      }
+      const ab = excelBaustelleAbgleichen(text, ds);
+      if (ab.status !== 'eindeutig') {
+        e.verknuepfung = ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt';
+        e.kandidatenIds = ab.kandidaten.map(b => b.id);
+        if (ab.grund) e.konfliktGrund = ab.grund; else delete e.konfliktGrund;
+        if (ab.vorschlaege && ab.vorschlaege.length) e.vorschlagIds = ab.vorschlaege.map(b => b.id); else delete e.vorschlagIds;
+        if (!e.excelText) e.excelText = text;
+        return;
+      }
+      const maId = e.maId ?? bsPlanMaId(key, e);
+      const baseKey = 'ma' + maId + '_' + ds;
+      if (tag[baseKey]) return; // bereits anderer Einsatz vorhanden → nichts überschreiben
+      const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, ...rest } = e;
+      const restNotiz = String(notiz || '').replace(/^\s*Baustelle ungeklärt\s*[:\-–]\s*.+$/i, '').trim();
+      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel' };
+      delete tag[key];
+      verknuepft++;
+    });
+  });
+  const t = excelVerknuepfungsTodosAktualisieren();
+  return { verknuepft, ...t };
+}
+
+// Reparatur bereits importierter Einträge: Bezeichnung aus notiz wiederherstellen
+// ("Baustelle ungeklärt: Fust Basel" → excelText "Fust Basel"). Nichts erfinden.
+function excelReparatur() {
+  let repariert = 0, ohneText = 0;
+  Object.values(state.plan || {}).forEach(tag => Object.entries(tag || {}).forEach(([key, e]) => {
+    if (!excelIstUnverknuepft(e) || e.excelText) return;
+    const t = excelTextVonEintrag(e);
+    if (t) { e.excelText = t; repariert++; } else ohneText++;
+  }));
+  return { repariert, ohneText };
+}
+
+// Vorschau des Abgleichs für eine Woche – verändert NICHTS.
+function excelAbgleichVorschau(montag) {
+  const mo = montag ? new Date(montag) : getMonday(new Date()); mo.setHours(12,0,0,0);
+  const erg = { kw: bsGetKW(mo), verknuepft: [], wuerdeVerknuepft: [], fehlend: [], mehrdeutig: [], abweichend: [] };
+  const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : String(id); };
+  for (let i = 0; i < 7; i++) {
+    const ds = fmtDate(addDays(mo, i)), tag = (state.plan || {})[ds] || {};
+    Object.entries(tag).forEach(([key, e]) => {
+      if (!e) return;
+      const maId = e.maId ?? bsPlanMaId(key, e), z = { datum: ds, ma: maName(maId), key };
+      if (e.excelAbweichung) erg.abweichend.push({ ...z, grund: 'Excel-Zelle leer, Eintrag steht noch' });
+      if (key.indexOf('status_ma') === 0) {
+        if (!excelIstUnverknuepft(e)) return;
+        const text = excelTextVonEintrag(e);
+        if (!text) { erg.abweichend.push({ ...z, grund: 'Ungeklärt ohne Originaltext' }); return; }
+        if (excelUngeklaertAufgeloest(ds, maId)) { erg.abweichend.push({ ...z, text, grund: 'Veralteter „ungeklärt“-Eintrag neben bestehendem Einsatz' }); return; }
+        const st = excelStatusAusText(text);
+        if (st) { erg.abweichend.push({ ...z, text, grund: 'Als Baustelle erfasst, ist aber Status „' + st + '“' }); return; }
+        const ab = excelBaustelleAbgleichen(text, ds);
+        if (ab.status === 'eindeutig') erg.wuerdeVerknuepft.push({ ...z, text, bs: ab.bs.name, bsId: ab.bs.id });
+        else if (ab.status === 'mehrdeutig') erg.mehrdeutig.push({ ...z, text, grund: ab.grund, kandidaten: ab.kandidaten.map(excelBsKurz) });
+        else erg.fehlend.push({ ...z, text, vorschlaege: (ab.vorschlaege || []).map(excelBsKurz) });
+      } else if (e.bsId != null && e.bsId !== '') {
+        const bs = (state.baustellen || []).find(b => String(b.id) === String(e.bsId));
+        if (!bs) erg.abweichend.push({ ...z, grund: 'Baustelle ' + e.bsId + ' existiert nicht' });
+        else if (bsIstBeendet(bs)) erg.abweichend.push({ ...z, text: bs.name, grund: 'Einsatz auf beendeter Baustelle' });
+        else erg.verknuepft.push({ ...z, bs: bs.name, text: e.excelText || '' });
+      }
+    });
+  }
+  return erg;
+}
+// Vorschau: was müsste von einem Duplikat in den Haupteintrag übernommen werden? Verändert NICHTS.
+function bsZusammenfuehrenVorschau(dupId, hauptId) {
+  const d = (state.baustellen || []).find(b => String(b.id) === String(dupId));
+  const h = (state.baustellen || []).find(b => String(b.id) === String(hauptId));
+  if (!d || !h) return { fehler: 'Baustelle nicht gefunden' };
+  const plan = [], konflikte = [];
+  Object.entries(state.plan || {}).forEach(([ds, tag]) => Object.entries(tag || {}).forEach(([k, e]) => {
+    if (!e || String(e.bsId) !== String(d.id)) return;
+    plan.push({ datum: ds, key: k, maId: e.maId });
+    const hk = Object.values(tag).find(x => x && x !== e && String(x.maId) === String(e.maId) && String(x.bsId) === String(h.id));
+    if (hk) konflikte.push({ datum: ds, maId: e.maId, grund: 'Mitarbeiter am selben Tag auf beiden Einträgen' });
+  }));
+  const todos = (state.todos || []).filter(t => String(t.bsId ?? '') === String(d.id)).map(t => ({ id: t.id, text: t.text, erledigt: !!t.erledigt }));
+  const hText = excelNorm([h.notiz, h.material, h.montageDetail].join(' '));
+  const notizZeilen = String(d.notiz || '').split('\n').map(z => z.trim()).filter(Boolean)
+    .map(z => ({ zeile: z, bereitsImHaupteintrag: excelTokens(z).filter(t => t.length >= 4).every(t => hText.includes(t)) }));
+  const felder = Object.keys(d).filter(f => !['id','name','farbeHex','history','docs','beendet','notiz'].includes(f) && d[f] !== '' && d[f] != null && (h[f] === '' || h[f] == null));
+  return { duplikat: excelBsKurz(d), haupteintrag: excelBsKurz(h), planEintraege: plan.length, planVon: plan.map(p => p.datum).sort()[0] || null, planBis: plan.map(p => p.datum).sort().slice(-1)[0] || null,
+    konflikte, todos, notizZeilen, fehlendeFelderImHaupteintrag: felder, dokumente: (d.docs || []).length, verlauf: (d.history || []).length,
+    aliasNachher: bsExcelAliase(h).includes(d.name) ? bsExcelAliase(h) : [...bsExcelAliase(h), d.name] };
+}
+// Führt ein Duplikat in den Haupteintrag über – ohne etwas zu löschen.
+// Prüft vorher erneut; bei Mitarbeiter-Kollision wird komplett abgebrochen.
+// opts.speichern (Standard true): save({verify:true}), bei Fehler vollständige Rücknahme.
+// opts.notizUebernehmen (Standard true = sicher): Notizzeilen des Duplikats, die im Haupteintrag
+//   nicht vollständig vorkommen, werden angehängt. false nur nach Bestätigung durch den Benutzer,
+//   dass der Inhalt bereits im Haupteintrag steht – die Zeilen bleiben beim Duplikat erhalten
+//   und werden im Protokoll aufgeführt (nichts wird still verworfen).
+async function bsZusammenfuehren(dupId, hauptId, opts) {
+  opts = opts || {};
+  const speichern = opts.speichern !== false;
+  const notizUebernehmen = opts.notizUebernehmen !== false;
+  if (speichern && !lagertoolDarfSchreiben()) {
+    lagertoolSchreibsperre('zusammenfuehren');
+    return { ok: false, abgebrochen: true, grund: 'nicht-angemeldet', einsaetze: [], todos: [], dokumente: [], felder: [], notizErgaenzt: [], notizNichtUebernommen: [], notizHinweis: '', alias: [], konflikte: [], gespeichert: false };
+  }
+  const d = (state.baustellen || []).find(b => String(b.id) === String(dupId));
+  const h = (state.baustellen || []).find(b => String(b.id) === String(hauptId));
+  const prot = { ok: false, duplikat: d ? d.name : dupId, haupteintrag: h ? h.name : hauptId, einsaetze: [], todos: [], dokumente: [], felder: [], notizErgaenzt: [], notizNichtUebernommen: [], notizHinweis: '', alias: [], konflikte: [], gespeichert: false };
+  const abbruch = grund => ({ ...prot, abgebrochen: true, grund });
+  // 1. Erneute interne Prüfung
+  if (!d || !h) return abbruch('Baustelle nicht gefunden');
+  if (String(d.id) === String(h.id)) return abbruch('Duplikat und Haupteintrag sind identisch');
+  if (bsHauptVon(h)) return abbruch('Haupteintrag ist selbst als Duplikat markiert');
+  if (d.hauptBaustelleId != null && d.hauptBaustelleId !== '' && String(d.hauptBaustelleId) !== String(h.id)) return abbruch('Duplikat ist bereits einem anderen Haupteintrag zugeordnet');
+  const verschieben = [];
+  Object.entries(state.plan || {}).forEach(([ds, tag]) => Object.entries(tag || {}).forEach(([k, e]) => {
+    if (!e || String(e.bsId) !== String(d.id)) return;
+    verschieben.push({ ds, k, e });
+    const kollision = Object.entries(tag).find(([k2, x]) => k2 !== k && x && String(x.maId) === String(e.maId) && String(x.bsId) === String(h.id));
+    if (kollision) prot.konflikte.push({ datum: ds, maId: e.maId, keyDuplikat: k, keyHaupt: kollision[0] });
+  }));
+  // Zwei Duplikat-Einträge desselben Mitarbeiters am selben Tag würden ebenfalls doppelt landen
+  const gesehen = new Set();
+  verschieben.forEach(v => { const x = v.ds + '|' + v.e.maId; if (gesehen.has(x)) prot.konflikte.push({ datum: v.ds, maId: v.e.maId, keyDuplikat: v.k, grund: 'mehrfach am Duplikat' }); gesehen.add(x); });
+  if (prot.konflikte.length) return abbruch('Mitarbeiter wäre am selben Tag doppelt auf dem Haupteintrag – nichts geändert');
+  // 2. Ausführen (mit Sicherung für Rücknahme)
+  const sicherung = JSON.stringify({ plan: state.plan, todos: state.todos, baustellen: state.baustellen });
+  verschieben.forEach(({ ds, k, e }) => {
+    e.bsId = h.id; e.farbeHex = getHex(h);
+    prot.einsaetze.push({ datum: ds, key: k, maId: e.maId });
+  });
+  (state.todos || []).forEach(t => {
+    if (String(t.bsId ?? '') !== String(d.id)) return;
+    t.bsId = h.id;
+    prot.todos.push({ id: t.id, text: String(t.text || '').slice(0, 120), erledigt: !!t.erledigt });
+  });
+  if ((d.docs || []).length) {
+    if (!Array.isArray(h.docs)) h.docs = [];
+    const schluessel = x => String(x && (x.id || x.url || x.name) || JSON.stringify(x));
+    const vorhanden = new Set(h.docs.map(schluessel));
+    d.docs.forEach(doc => { if (!vorhanden.has(schluessel(doc))) { h.docs.push(doc); prot.dokumente.push(doc.name || schluessel(doc)); } });
+  }
+  const ausnahmen = ['id','name','farbeHex','history','docs','beendet','hauptBaustelleId','excelAliases','excelAliase','aliases','aliase','alias','notiz','zusammengefuehrtAm'];
+  const leerWert = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
+  Object.keys(d).forEach(f => {
+    if (ausnahmen.includes(f) || leerWert(d[f]) || !leerWert(h[f])) return;
+    h[f] = JSON.parse(JSON.stringify(d[f])); prot.felder.push(f);
+  });
+  const hText = excelNorm([h.notiz, h.material, h.montageDetail, h.apName, h.apTel, h.apEmail].join(' '));
+  const neueZeilen = String(d.notiz || '').split('\n').map(z => z.trim()).filter(Boolean)
+    .filter(z => !excelTokens(z).filter(t => t.length >= 4).every(t => hText.includes(t)));
+  if (neueZeilen.length && notizUebernehmen) {
+    h.notiz = (h.notiz ? h.notiz + '\n' : '') + 'Übernommen aus ' + d.name + ':\n' + neueZeilen.join('\n');
+    prot.notizErgaenzt = neueZeilen;
+  } else if (neueZeilen.length) {
+    prot.notizNichtUebernommen = neueZeilen;   // bleiben unverändert in der Notiz des Duplikats
+    prot.notizHinweis = 'Notiz nicht übernommen: vom Benutzer bestätigt, Inhalt bereits im Haupteintrag vorhanden.';
+  }
+  const aliasNeu = [d.name, ...bsExcelAliase(d)].filter(a => a && !bsExcelAliase(h).some(x => excelNorm(x) === excelNorm(a)));
+  if (aliasNeu.length) { h.excelAliases = [...(Array.isArray(h.excelAliases) ? h.excelAliases : bsExcelAliase(h)), ...new Set(aliasNeu)]; }
+  prot.alias = bsExcelAliase(h);
+  d.hauptBaustelleId = h.id; d.zusammengefuehrtAm = new Date().toISOString().slice(0,10);
+  prot.ok = true;
+  if (speichern) {
+    const res = await save({verify:true});
+    if (!res || !res.ok) {
+      const alt = JSON.parse(sicherung); state.plan = alt.plan; state.todos = alt.todos; state.baustellen = alt.baustellen;
+      return { ...prot, ok: false, abgebrochen: true, grund: 'Speichern nicht bestätigt – alles zurückgenommen' };
+    }
+    prot.gespeichert = true;
+  }
+  return prot;
+}
+// Gemeinsame Schnittstelle für ALLE Browser-basierten Import-Läufe (manuell, geplant):
+// dieselben Regeln wie die Oberfläche. Beispiel: LagerToolExcel.importRows(rows)
+window.LagerToolExcel = {
+  klassifizieren: excelZelleKlassifizieren, abgleichen: excelBaustelleAbgleichen,
+  importRows: rows => parseWochenplanExcel(rows), nachAbgleich: excelNachAbgleich,
+  reparatur: excelReparatur, vorschau: excelAbgleichVorschau, aliase: bsExcelAliase,
+  zusammenfuehrenVorschau: bsZusammenfuehrenVorschau, zusammenfuehren: bsZusammenfuehren,
+  kontrolle: () => window._letzteExcelKontrolle || []
+};
+
+// UI: Abgleich-Panel im Wochenplan
+function wpExcelPanelToggle() {
+  const p = document.getElementById('wp-excel-panel'); if (!p) return;
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+  if (p.style.display === '') wpExcelPanelRender();
+}
+function wpExcelPanelRender() {
+  const p = document.getElementById('wp-excel-panel'); if (!p) return;
+  let offen = 0, ohneText = 0;
+  Object.values(state.plan || {}).forEach(tag => Object.entries(tag || {}).forEach(([k, e]) => {
+    if (!excelIstUnverknuepft(e)) return; if (excelTextVonEintrag(e)) offen++; else ohneText++;
+  }));
+  const v = excelAbgleichVorschau(wpBaseMonday || getMonday(new Date()));
+  p.innerHTML = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<strong style="font-size:13px">🔗 Excel-Abgleich</strong>'
+    + '<span style="font-size:12px;color:var(--muted)">' + offen + ' unverknüpfte Einträge' + (ohneText ? ' · ' + ohneText + ' ohne Originaltext' : '') + '</span>'
+    + '<span style="font-size:12px;color:var(--muted)">· KW ' + v.kw + ': ' + v.verknuepft.length + ' verknüpft, ' + v.wuerdeVerknuepft.length + ' eindeutig verknüpfbar, ' + v.fehlend.length + ' fehlend, ' + v.mehrdeutig.length + ' mehrdeutig, ' + v.abweichend.length + ' abweichend</span>'
+    + '<div class="spacer"></div>'
+    + '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelAktion(\'reparatur\')">🛠 Bezeichnungen wiederherstellen + abgleichen</button>'
+    + '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelAktion(\'abgleich\')">🔄 Erneut abgleichen</button>'
+    + '<button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById(\'wp-excel-reimport\').click()">⬆ Excel erneut importieren</button>'
+    + '<input type="file" id="wp-excel-reimport" accept=".xlsx,.xls,.csv" style="display:none" onchange="wpFileImport(event)">'
+    + '</div>'
+    + (v.abweichend.length ? '<div style="font-size:11px;margin-top:6px;max-height:140px;overflow:auto">' + v.abweichend.map(a => '⚠ ' + a.datum.slice(8,10) + '.' + a.datum.slice(5,7) + '. ' + bsKwEsc(a.ma) + (a.text ? ' – ' + bsKwEsc(a.text) : '') + ': ' + bsKwEsc(a.grund)).join('<br>') + '</div>' : '')
+    + (ohneText ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">Einträge ohne Originaltext können nicht rekonstruiert werden – dafür die Excel-Datei erneut importieren.</div>' : '');
+}
+async function wpExcelAktion(art) {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('excel-abgleich');
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return toast('Zugriff verweigert', 'Nur für Admin/Entwickler', '🔒');
+  const backupPlan = JSON.stringify(state.plan || {}), backupTodos = JSON.stringify(state.todos || []);
+  const rep = art === 'reparatur' ? excelReparatur() : { repariert: 0 };
+  const r = excelNachAbgleich();
+  const res = await save({verify:true});
+  if (!res || !res.ok) {
+    state.plan = JSON.parse(backupPlan); state.todos = JSON.parse(backupTodos);
+    renderWochenplan(); return toast('Fehler', 'Speichern nicht bestätigt – nichts geändert', '⚠️');
+  }
+  renderWochenplan(); try { renderTodoPage(); } catch(_) {}
+  wpExcelPanelRender();
+  toast('Excel-Abgleich', (rep.repariert ? rep.repariert + ' Bezeichnungen wiederhergestellt, ' : '') + r.verknuepft + ' verknüpft, ' + r.neu + ' neue To-dos, ' + r.erledigt + ' To-dos erledigt', '🔗');
+}
 
 // ── Excel/PDF-Import für Wochenplan ──
 function wpFileImport(event) {
@@ -7575,12 +8258,13 @@ Gib für jede Zeile der Tabelle die Werte an. Leere Zellen als leeren String "".
 }
 
 function parseWochenplanExcel(rows) {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('excel-import');
   // 1. Header-Zeile finden (enthält "Montag", "Dienstag" etc.)
   let headerIdx = -1;
   let tagSpalten = []; // [{col, datum}]
   const tageNamen = ['montag','dienstag','mittwoch','donnerstag','freitag','samstag','sonntag'];
 
-  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+  for (let r = 0; r < Math.min(rows.length, 25); r++) {
     const row = rows[r].map(c => String(c||'').toLowerCase().trim());
     const montagCol = row.findIndex(c => c.includes('montag'));
     if (montagCol >= 0) { headerIdx = r; break; }
@@ -7616,83 +8300,96 @@ function parseWochenplanExcel(rows) {
   const monteurCol = headerRow.findIndex(c => c.toLowerCase().includes('monteur'));
   if (monteurCol < 0) return toast('Fehler', 'Spalte "Monteur" nicht gefunden', '⚠️');
 
-  // 4. Daten parsen
-  const statusWerte = ['urlaub','krank','frei','nbu','info folgt','bu','unentschuldigt','büro','ferien','urlaub termin'];
-  let eingetragen = 0;
-  let nichtGefunden = [];
-  const neueBaustellen = new Set();
-
+  // 4. Daten übernehmen – Excel ist führend, Zelltext bleibt immer erhalten.
+  //    Keine Baustellen-Neuanlage; Verknüpfung nur bei eindeutigem Treffer.
+  const maTok = t => excelTokens(t).sort().join(' ');
+  const findeMa = name => {
+    const z = maTok(name);
+    const exakt = (state.mitarbeiter||[]).filter(m => maTok((m.vorname||'')+' '+(m.nachname||'')) === z);
+    if (exakt.length === 1) return exakt[0];
+    if (exakt.length > 1) return null;
+    const n = excelNorm(name);
+    const teil = (state.mitarbeiter||[]).filter(m => { const v = excelNorm(m.vorname), nn = excelNorm(m.nachname);
+      return v && nn && (' '+n+' ').includes(' '+v+' ') && (' '+n+' ').includes(' '+nn+' '); });
+    if (teil.length === 1) return teil[0];
+    if (teil.length > 1) return null;
+    // Tippfehler-Toleranz: sehr ähnlicher Name (Ratio ≥ 0.85), nur wenn eindeutig bester Treffer
+    const lev = (a, b) => { const d = Array.from({length: a.length + 1}, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+      for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+      return d[a.length][b.length]; };
+    const ratio = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length, 1);
+    const bewertet = (state.mitarbeiter||[]).filter(m => !m.abgemeldet).map(m => ({ m, r: ratio(z, maTok((m.vorname||'')+' '+(m.nachname||''))) })).sort((a, b) => b.r - a.r);
+    if (bewertet.length && bewertet[0].r >= 0.85 && (bewertet.length === 1 || bewertet[0].r - bewertet[1].r >= 0.1)) return bewertet[0].m;
+    return null;
+  };
+  let eingetragen = 0, verknuepft = 0, unverknuepft = 0, hotels = 0, abweichungen = 0;
+  let fehlendeMaGeloescht = 0, fehlendeMaTageGeloescht = 0;
+  const importiert = [];   // für die Gegenkontrolle Excel ↔ Wochenplan
+  const nichtGefunden = [];
+  const excelMaIds = new Set(); // aktive LagerTool-Mitarbeiter, die in dieser Excel-Datei eine erkannte Zeile haben
+  if (!state.plan) state.plan = {};
   for (let r = headerIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     const monteurName = String(row[monteurCol]||'').trim();
     if (!monteurName) continue;
-
-    // Monteur im System finden (Fuzzy: Vorname Nachname oder Nachname Vorname)
-    const nameLC = monteurName.toLowerCase();
-    const ma = (state.mitarbeiter||[]).find(m => {
-      const vn = ((m.vorname||'')+' '+(m.nachname||'')).trim().toLowerCase();
-      const nv = ((m.nachname||'')+' '+(m.vorname||'')).trim().toLowerCase();
-      return vn === nameLC || nv === nameLC ||
-        nameLC.includes((m.nachname||'').toLowerCase()) && nameLC.includes((m.vorname||'').toLowerCase());
-    });
+    const ma = findeMa(monteurName);
     if (!ma) { if (!nichtGefunden.includes(monteurName)) nichtGefunden.push(monteurName); continue; }
-
-    // Für jeden Wochentag (Sa/So überspringen)
+    excelMaIds.add(String(ma.id));
     tagSpalten.forEach(({ col, datum }) => {
-      const d = new Date(datum + 'T12:00');
-      if (d.getDay() === 0 || d.getDay() === 6) return; // Samstag + Sonntag frei
-      const zelle = String(row[col]||'').trim();
-      if (!zelle) return;
-      const zelleLC = zelle.toLowerCase();
-
-      if (!state.plan[datum]) state.plan[datum] = {};
-      // Bestehenden Eintrag für diesen Monteur an diesem Tag löschen
-      Object.keys(state.plan[datum]).forEach(k => {
-        if (state.plan[datum][k]?.maId === ma.id) delete state.plan[datum][k];
-      });
-
-      // Status-Wert? (Urlaub, krank, etc.)
-      const istStatus = statusWerte.find(s => zelleLC.includes(s));
-      if (istStatus || zelleLC === 'büro') {
-        const statusName = zelleLC.includes('urlaub') ? 'Urlaub'
-          : zelleLC.includes('krank') ? 'Krank'
-          : zelleLC.includes('frei') || zelleLC.includes('ferien') ? 'Frei'
-          : zelleLC.includes('info folgt') ? 'Info folgt'
-          : zelleLC.includes('nbu') ? 'NBU'
-          : zelleLC.includes('bu') ? 'BU'
-          : zelleLC.includes('büro') ? 'Frei'
-          : 'Info folgt';
-        state.plan[datum]['status_ma' + ma.id] = {
-          maId: ma.id, status: statusName, farbeHex: statusHex(statusName), notiz: zelle
-        };
-        eingetragen++;
-      } else {
-        // Baustelle suchen oder anlegen
-        let bs = (state.baustellen||[]).find(b =>
-          b.name.toLowerCase() === zelleLC ||
-          b.name.toLowerCase().includes(zelleLC) ||
-          zelleLC.includes(b.name.toLowerCase())
-        );
-        if (!bs) {
-          bs = { id: Date.now() + Math.floor(Math.random()*10000), name: zelle, farbe: randomColor() };
-          if (!state.baustellen) state.baustellen = [];
-          state.baustellen.push(bs);
-          neueBaustellen.add(zelle);
-        }
-        state.plan[datum]['ma' + ma.id + '_' + datum] = {
-          maId: ma.id, bsId: bs.id, farbeHex: getHex(bs), notiz: ''
-        };
-        eingetragen++;
+      const k = excelZelleKlassifizieren(row[col]);
+      if (k.typ === 'leer') {                     // Excel leer → LagerTool-Tag ebenfalls leer
+        if (excelTagLeeren(ma, datum).length) abweichungen++;
+        importiert.push({ ma, datum, k });
+        return;
       }
+      const res = excelEintragSetzen(ma, datum, k);
+      importiert.push({ ma, datum, k });
+      if (res.art === 'hotel') hotels++;
+      else { eingetragen++; if (res.art === 'verknuepft') verknuepft++; if (res.art === 'unverknuepft') unverknuepft++; }
     });
   }
 
-  save();
-  renderWochenplan();
+  // Excel ist die vollständige Planungsquelle für den importierten Zeitraum:
+  // Aktive LagerTool-Mitarbeiter ohne Excel-Zeile müssen in allen importierten Tagen leer sein.
+  // Abgemeldete Mitarbeiter werden bewusst ignoriert.
+  (state.mitarbeiter || []).filter(m => !m.abgemeldet).forEach(ma => {
+    if (excelMaIds.has(String(ma.id))) return;
+    let maHatteEintrag = false;
+    tagSpalten.forEach(({ datum }) => {
+      const entfernt = excelTagLeeren(ma, datum);
+      if (entfernt.length) { maHatteEintrag = true; fehlendeMaTageGeloescht++; }
+      // Auch fehlende Mitarbeiterzeilen werden als leere Excel-Zellen gegengeprüft.
+      importiert.push({ ma, datum, k: { typ: 'leer', text: '' }, quelle: 'excel-mitarbeiter-fehlt' });
+    });
+    if (maHatteEintrag) fehlendeMaGeloescht++;
+  });
 
-  let msg = eingetragen + ' Einträge importiert';
-  if (neueBaustellen.size) msg += ', ' + neueBaustellen.size + ' neue Baustellen angelegt';
-  if (nichtGefunden.length) msg += '. Nicht gefunden: ' + nichtGefunden.join(', ');
+  const todoRes = excelVerknuepfungsTodosAktualisieren();
+  // Gegenkontrolle: jede importierte Zelle gegen den resultierenden Planeintrag prüfen
+  const kontrollAbw = [];
+  importiert.forEach(({ ma, datum, k }) => {
+    const r = excelZelleKontrollieren(ma, datum, k);
+    if (r) kontrollAbw.push({ ma: ((ma.vorname || '') + ' ' + (ma.nachname || '')).trim(), datum, excel: k.text, grund: r.grund, art: r.art });
+  });
+  // Excel-Zeilen, deren Mitarbeiter im LagerTool nicht gefunden wurde, können nicht gespiegelt werden
+  const ersteWoche = tagSpalten[0] && tagSpalten[0].datum;
+  nichtGefunden.forEach(n => kontrollAbw.push({ ma: n, datum: ersteWoche, excel: '', grund: 'Mitarbeiter im LagerTool nicht gefunden – Zeile nicht übernommen', art: 'fehler' }));
+  const wochen = [...new Set(importiert.map(x => fmtDate(getMonday(new Date(x.datum + 'T12:00')))))];
+  wochen.forEach(mo => excelKontrolleTodo(kontrollAbw.filter(a => fmtDate(getMonday(new Date(a.datum + 'T12:00'))) === mo), mo));
+  window._letzteExcelKontrolle = kontrollAbw;
+  save({verify:true}).then(res => {
+    if (!res || !res.ok) toast('Achtung', 'Speichern nicht bestätigt – bitte Import wiederholen', '⚠️');
+  });
+  renderWochenplan();
+  try { wpExcelPanelRender(); } catch(_) {}
+
+  let msg = eingetragen + ' Einträge übernommen (' + verknuepft + ' verknüpft, ' + unverknuepft + ' ohne eindeutige Baustelle)';
+  if (hotels) msg += ', ' + hotels + ' Hotelangaben';
+  if (abweichungen) msg += ', ' + abweichungen + ' Tage geleert (Excel-Zelle leer)';
+  if (fehlendeMaTageGeloescht) msg += ', ' + fehlendeMaTageGeloescht + ' Tage bei ' + fehlendeMaGeloescht + ' Mitarbeiter(n) ohne Excel-Zeile geleert';
+  if (todoRes.neu) msg += ', ' + todoRes.neu + ' Verknüpfungs-To-dos';
+  msg += kontrollAbw.length ? ', ⚠ ' + kontrollAbw.length + ' Abweichungen bei der Gegenkontrolle (rotes To-do)' : ', Gegenkontrolle: 0 Abweichungen';
+  if (nichtGefunden.length) msg += '. Monteur nicht gefunden: ' + nichtGefunden.join(', ');
   toast('Excel Import', msg, eingetragen > 0 ? '✅' : '⚠️');
 }
 
@@ -7826,44 +8523,137 @@ function selectBsFarbe(hex) {
 
 // ── ABFAHRT FOLGETAG ───────────────────────────────────
 // Bezugstag: liegt heute in der angezeigten Woche → morgen, sonst Montag der Woche.
-function wpFolgetagDatum() {
-  wpInit();
-  const heute=new Date(); heute.setHours(12,0,0,0);
-  const mo=new Date(wpBaseMonday); mo.setHours(12,0,0,0);
-  const so=addDays(mo,6);
-  return (heute>=mo && heute<=so) ? addDays(heute,1) : mo;
+// ── ABFAHRT (Wochenplan-Spalte) ─────────────────────────────
+// Datenquellen (nur vorhandene Daten, nichts schätzen):
+//  • Fahrzeit: bs.fahrtzeitMin (Minuten, Zahl) – ermittelt von der bestehenden
+//    Routenfunktion bsGeocodeUndRoute() (Nominatim + OSRM ab HEIMATORT Allschwil).
+//    Fallback: bs.fahrtzeitStr ("1h 11min" / "50 min") wird nur GELESEN, falls
+//    fahrtzeitMin fehlt. Ist bs.fahrtzeitAdresse gesetzt und ≠ bs.adresse, gilt
+//    die Fahrzeit als veraltet und wird nicht verwendet.
+//  • Startzeit: Startzeit des Tageseintrags (state.plan) hat Vorrang, sonst bs.startzeit.
+//  • Berechnung: bestehende calcAbfahrt() = Start − Fahrzeit − 15 min Puffer,
+//    auf vorherige Viertelstunde abgerundet, mit Tagesüberlauf.
+//  • Vorrang: manuelle Abfahrt je Mitarbeiter (bs.abfahrtManuell) > explizit
+//    gesetzte Baustellen-Abfahrt (bs.abfahrtAllschwil) > Berechnung.
+function wpFahrtzeitMinVon(bs) {
+  if (!bs) return null;
+  if (bs.fahrtzeitAdresse && String(bs.fahrtzeitAdresse).trim() !== String(bs.adresse || '').trim()) return null; // veraltet
+  const n = Number(bs.fahrtzeitMin);
+  if (bs.fahrtzeitMin != null && bs.fahrtzeitMin !== '' && isFinite(n) && n > 0) return Math.round(n);
+  const s = String(bs.fahrtzeitStr || '');
+  const h = s.match(/(\d+)\s*h/i), mi = s.match(/(\d+)\s*min/i);
+  const tot = (h ? parseInt(h[1]) * 60 : 0) + (mi ? parseInt(mi[1]) : 0);
+  return tot > 0 ? tot : null;
 }
-// Abfahrt = Startzeit − Fahrzeit (exakt, ohne Puffer). Nur vorhandene Daten, nichts schätzen.
-// Rückgabe: null (kein Einsatz / Status) oder {bs, date, zeit|null, manuell, tooltip}
-function wpAbfahrtFolgetag(m) {
-  const d=wpFolgetagDatum(), ds=fmtDate(d);
-  const dayPlan=(state.plan||{})[ds]||{};
-  if(dayPlan['status_ma'+m.id]) return null; // Urlaub/Krank/Frei/Info folgt usw.
-  const eintraege=gptEmployeeDayEntries(m.id,ds).slice().sort((x,y)=>{
-    const xs=x.entry.startzeit, ys=y.entry.startzeit;
-    if(xs&&ys) return xs<ys?-1:xs>ys?1:0;
-    if(xs&&!ys) return -1; if(!xs&&ys) return 1; return 0;
-  });
-  const e=eintraege[0]?.entry;
-  if(!e || e.bsId==null) return null; // kein Planeintrag
-  const bs=(state.baustellen||[]).find(b=>String(b.id)===String(e.bsId));
-  if(!bs) return null;
-  const TAGE=['So','Mo','Di','Mi','Do','Fr','Sa'];
-  const tagTxt=TAGE[d.getDay()]+' '+fmtDE(d).replace(/\.?$/,'.');
-  let zeit=null;
-  const manuell=bs.abfahrtManuell?.[m.id] || bs.abfahrtManuell?.[String(m.id)] || null;
-  if(manuell) zeit=manuell;
-  else if(bs.abfahrtAllschwil && /\d{1,2}[:\.]\d{2}/.test(bs.abfahrtAllschwil)) zeit=bs.abfahrtAllschwil.replace('.',':');
-  else {
-    const stm=(bs.startzeit||'').match(/(\d{1,2})[:\.](\d{2})/);
-    const fz=Number(bs.fahrtzeitMin);
-    if(stm && bs.fahrtzeitMin!=null && bs.fahrtzeitMin!=='' && isFinite(fz) && fz>0){
-      const min=((parseInt(stm[1])*60+parseInt(stm[2])-Math.round(fz))%1440+1440)%1440;
-      zeit=String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0');
-    }
+function wpFahrtzeitText(min) {
+  if (!(min > 0)) return '';
+  const h = Math.floor(min / 60), m = min % 60;
+  return h > 0 ? h + 'h ' + m + 'min' : m + ' min';
+}
+function wpUhrzeit(t) {
+  const m = String(t || '').match(/^\s*(\d{1,2})[:\.](\d{2})\b/);
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  return String(+m[1]).padStart(2, '0') + ':' + m[2];
+}
+// Zentrale Hilfsfunktion: Abfahrt eines Mitarbeiters an einem Datum.
+function getAbfahrtsInfo(m, datum) {
+  const ds = typeof datum === 'string' ? datum : fmtDate(datum);
+  const leer = (status, bs, extra) => Object.assign({ abfahrt: null, fahrtzeitMin: null, fahrtzeitText: '', status, bs: bs || null, datum: ds, manuell: false }, extra || {});
+  if (!m) return leer('kein-einsatz');
+  const dayPlan = (state.plan || {})[ds] || {};
+  if (dayPlan['status_ma' + m.id]) return leer('status');           // Urlaub/Krank/Frei/Info …
+  const eintraege = gptEmployeeDayEntries(m.id, ds)
+    .filter(x => x.entry && x.entry.bsId != null && x.entry.bsId !== '' && !x.entry.status)
+    .sort((x, y) => { const xs = wpUhrzeit(x.entry.startzeit), ys = wpUhrzeit(y.entry.startzeit);
+      if (xs && ys) return xs < ys ? -1 : xs > ys ? 1 : 0; if (xs) return -1; if (ys) return 1; return 0; });
+  const e = eintraege[0]?.entry;
+  if (!e) return leer('kein-einsatz');
+  const bs = (state.baustellen || []).find(b => String(b.id) === String(e.bsId));
+  if (!bs) return leer('kein-einsatz');
+  const fz = wpFahrtzeitMinVon(bs);
+  const fzInfo = { fahrtzeitMin: fz, fahrtzeitText: wpFahrtzeitText(fz) };
+  const manuell = bs.abfahrtManuell?.[m.id] || bs.abfahrtManuell?.[String(m.id)] || null;
+  if (wpUhrzeit(manuell)) return leer('ok', bs, { ...fzInfo, abfahrt: wpUhrzeit(manuell), manuell: true });
+  if (wpUhrzeit(bs.abfahrtAllschwil)) return leer('ok', bs, { ...fzInfo, abfahrt: wpUhrzeit(bs.abfahrtAllschwil) });
+  const start = wpUhrzeit(e.startzeit) || wpUhrzeit(bs.startzeit);
+  if (!start) return leer('keine-startzeit', bs, fzInfo);
+  if (!fz) return leer('keine-fahrzeit', bs);
+  return leer('ok', bs, { ...fzInfo, abfahrt: calcAbfahrt(start, fz), startzeit: start });
+}
+// Tag, für den die Spalte gilt: nächster Einsatztag. Liegt heute in der angezeigten
+// Woche → ab morgen, sonst ab Montag der Woche. Wochenendtage ohne jeden Eintrag
+// werden übersprungen (z.B. Freitag → Montag), Werktage nie.
+function wpAbfahrtZieltag(m) {
+  wpInit();
+  const heute = new Date(); heute.setHours(12,0,0,0);
+  const mo = new Date(wpBaseMonday); mo.setHours(12,0,0,0);
+  let d = (heute >= mo && heute <= addDays(mo, 6)) ? addDays(heute, 1) : mo;
+  for (let i = 0; i < 3; i++) {
+    const wd = d.getDay(), ds = fmtDate(d);
+    const hatEintrag = !!((state.plan || {})[ds] || {})['status_ma' + m.id] || gptEmployeeDayEntries(m.id, ds).length > 0;
+    if (hatEintrag || (wd !== 0 && wd !== 6)) return d;
+    d = addDays(d, 1);
   }
-  const tooltip=tagTxt+' · '+bs.name+(zeit?' · Abfahrt '+zeit:' · keine Fahrzeit vorhanden');
-  return {bs, date:ds, zeit, manuell:!!manuell, tooltip};
+  return d;
+}
+// Kompatibel zur bisherigen Schnittstelle (Anzeige + Abfahrt-Popup).
+function wpAbfahrtFolgetag(m) {
+  const d = wpAbfahrtZieltag(m);
+  const info = getAbfahrtsInfo(m, d);
+  if (!info.bs) return null;
+  wpFahrtzeitAutoVormerken(info.bs, info.status);
+  const TAGE = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const tagTxt = TAGE[d.getDay()] + ' ' + fmtDE(d).replace(/\.?$/, '.');
+  const grund = info.status === 'keine-startzeit' ? ' · keine Startzeit' : info.status === 'keine-fahrzeit' ? ' · keine Fahrzeit vorhanden' : '';
+  const tooltip = tagTxt + ' · ' + info.bs.name + (info.abfahrt ? ' · Abfahrt ' + info.abfahrt : grund)
+    + (info.fahrtzeitText ? ' · Fahrt ' + info.fahrtzeitText : '') + (info.startzeit ? ' · Start ' + info.startzeit : '');
+  return { bs: info.bs, date: info.datum, zeit: info.abfahrt, manuell: info.manuell, tooltip, info };
+}
+
+// ── Automatische Fahrzeit-Ermittlung für Baustellen ohne Fahrzeit ──
+// Nutzt ausschliesslich die bestehende bsGeocodeUndRoute(). Schutz vor Schleifen
+// und Mehrfachabfragen:
+//  • nur wenn Fahrzeit fehlt, Adresse UND Startzeit vorhanden sind
+//  • je Baustelle+Adresse höchstens EIN Versuch pro Sitzung (auch bei Fehlschlag)
+//  • eine Warteschlange, nacheinander mit ≥1.1 s Abstand (Nominatim-Nutzungsregel)
+//  • nur für Admin/Entwickler (verhindert parallele Abfragen/Schreibvorgänge vieler Geräte)
+//  • gespeichert wird nur bei Erfolg; danach einmal neu rendern (Render ruft nicht erneut ab)
+const wpFahrtzeitVersucht = new Set();
+const wpFahrtzeitQueue = [];
+let wpFahrtzeitLaeuft = false;
+function wpFahrtzeitAutoVormerken(bs, status) {
+  if (!bs || status !== 'keine-fahrzeit') return;
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return;
+  const adr = String(bs.adresse || '').trim();
+  if (!adr) return; // Status 'keine-fahrzeit' setzt bereits eine gültige Startzeit voraus
+  const key = String(bs.id) + '|' + adr;
+  if (wpFahrtzeitVersucht.has(key)) return;
+  wpFahrtzeitVersucht.add(key);
+  wpFahrtzeitQueue.push({ id: bs.id, adresse: adr });
+  if (!wpFahrtzeitLaeuft) setTimeout(wpFahrtzeitQueueAbarbeiten, 0);
+}
+async function wpFahrtzeitQueueAbarbeiten() {
+  if (wpFahrtzeitLaeuft) return;
+  wpFahrtzeitLaeuft = true;
+  let geaendert = false;
+  try {
+    while (wpFahrtzeitQueue.length) {
+      const job = wpFahrtzeitQueue.shift();
+      const bs = (state.baustellen || []).find(b => String(b.id) === String(job.id));
+      if (!bs || String(bs.adresse || '').trim() !== job.adresse || wpFahrtzeitMinVon(bs)) continue; // inzwischen erledigt/geändert
+      try {
+        const res = await bsGeocodeUndRoute(job.adresse);
+        const aktuell = (state.baustellen || []).find(b => String(b.id) === String(job.id));
+        if (res && aktuell && String(aktuell.adresse || '').trim() === job.adresse && !wpFahrtzeitMinVon(aktuell)) {
+          aktuell.fahrtzeitMin = res.minTotal; aktuell.fahrtzeitStr = res.fahrtzeitStr; aktuell.fahrtzeitKm = res.km;
+          aktuell.fahrtzeitAdresse = job.adresse;
+          geaendert = true;
+        }
+      } catch (_) { /* Route nicht ermittelbar → bleibt "–" (kein Schätzwert) */ }
+      if (wpFahrtzeitQueue.length) await new Promise(r => setTimeout(r, 1100));
+    }
+    if (geaendert) { await save({verify:true}); try { renderWochenplan(); } catch(_) {} }
+  } finally { wpFahrtzeitLaeuft = false; }
 }
 
 // Abfahrtszeit: immer auf Viertelstunde abrunden (zurückrechnen, nie vorwärts)
@@ -8383,6 +9173,8 @@ function showBsModal(id) {
   document.getElementById('bs-hotel-adresse').value = bs?.hotelAdresse||'';
   document.getElementById('bs-hotel-daten').value = bs?.hotelDaten||'';
   document.getElementById('bs-notiz').value = bs?.notiz||'';
+  const aliasEl = document.getElementById('bs-excel-aliase');
+  if (aliasEl) aliasEl.value = bs ? bsExcelAliase(bs).join('\n') : '';
   // Farbe setzen
   const hex = bs?.farbeHex || (bs?.farbe ? FARB_HEX[bs.farbe]||'#1a6b3a' : '#1a6b3a');
   selectedBsHex = hex;
@@ -8532,6 +9324,7 @@ async function lagertoolOAuthEnsureToken() {
 }
 
 async function bsUploadDocumentToServer(file) {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('dokument-upload');
   const statusEl = document.getElementById('bs-doc-upload-status');
   const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
 
@@ -8732,7 +9525,7 @@ function bsUmdisponierePlan(bsId, farbeHex, altVon, altBis, altTeamIds, neuVon, 
           rohKonflikte.push({maId, datum, fremdBsId: bestehend.bsId});
           return;
         }
-        state.plan[datum][key] = { maId, bsId, farbeHex, notiz: bestehend?.notiz||'', startzeit: bestehend?.startzeit||null, endzeit: bestehend?.endzeit||null };
+        state.plan[datum][key] = { maId, bsId, farbeHex, notiz: bestehend?.notiz||'', startzeit: bestehend?.startzeit||null, endzeit: bestehend?.endzeit||null, ...planExcelMeta(datum, maId) };
       });
     });
   }
@@ -9162,18 +9955,22 @@ async function bsPruefeHotelBedarf(data, oldBs) {
     if (window._aktFahrtzeit?.adresse === data.adresse && window._aktFahrtzeit?.km != null) {
       // Admin hat bereits per 🚗-Button berechnet - keine zweite Abfrage nötig.
       data.fahrtzeitKm = window._aktFahrtzeit.km;
+      data.fahrtzeitAdresse = data.adresse;
     } else if (oldBs && oldBs.adresse === data.adresse && oldBs.fahrtzeitKm != null) {
       // Adresse unverändert - bereits bekannten Wert übernehmen statt erneut abzufragen.
       data.fahrtzeitKm = oldBs.fahrtzeitKm;
       if (!data.fahrtzeitMin) data.fahrtzeitMin = oldBs.fahrtzeitMin;
       if (!data.fahrtzeitStr) data.fahrtzeitStr = oldBs.fahrtzeitStr;
+      if (!data.fahrtzeitAdresse && oldBs.fahrtzeitAdresse) data.fahrtzeitAdresse = oldBs.fahrtzeitAdresse;
     } else {
       try {
         const res = await bsGeocodeUndRoute(data.adresse);
         if (res) {
+          // Route gilt für die AKTUELLE Adresse -> Werte übernehmen und Adresse stempeln
           data.fahrtzeitKm = res.km;
-          if (!data.fahrtzeitMin) data.fahrtzeitMin = res.minTotal;
-          if (!data.fahrtzeitStr) data.fahrtzeitStr = res.fahrtzeitStr;
+          data.fahrtzeitMin = res.minTotal;
+          data.fahrtzeitStr = res.fahrtzeitStr;
+          data.fahrtzeitAdresse = data.adresse;
         }
       } catch(_) { /* Distanz bleibt unbekannt - kein Blocker fürs Speichern */ }
     }
@@ -9238,6 +10035,14 @@ async function saveBsModal() {
       fertig: !!t.fertig
     }))
   };
+  // Excel-Aliasse: gespeichert im bestehenden Feld excelAliases (führend). Das Formular
+  // zeigt alle bisher gespeicherten Aliasse; Einträge aus anderen Feldnamen werden dorthin
+  // übernommen, damit keiner verloren geht. Kein zweites Feld wird neu angelegt.
+  const aliasFeld = document.getElementById('bs-excel-aliase');
+  const aliasListe = aliasFeld ? [...new Set(aliasFeld.value.split(/[\n;]+/).map(x => x.trim()).filter(Boolean))] : (oldBs ? bsExcelAliase(oldBs) : []);
+  if (aliasListe.length || (oldBs && oldBs.excelAliases !== undefined)) data.excelAliases = aliasListe;
+  if (oldBs) ['aliase','aliases','alias','excelNamen'].forEach(f => { if (oldBs[f] !== undefined) data[f] = oldBs[f]; });
+  if (oldBs && oldBs.excelAliase !== undefined) data.excelAliase = oldBs.excelAliase;
   const idx=state.baustellen.findIndex(b=>b.id===id);
   if(idx>=0) state.baustellen[idx]=data; else state.baustellen.push(data);
 
@@ -9254,6 +10059,11 @@ async function saveBsModal() {
   const neueTeamIds = [...new Set([...(data.teamMonteurIds||[]), data.chefMonteurId].filter(Boolean))];
   const altTeamIds = oldBs ? [...new Set([...(oldBs.teamMonteurIds||[]), oldBs.chefMonteurId].filter(Boolean))] : [];
   const konflikte = bsUmdisponierePlan(id, data.farbeHex, oldBs?.von, oldBs?.bis, altTeamIds, data.von, data.bis, neueTeamIds);
+
+  // Neue Baustelle / geänderte Aliasse: unverknüpfte Excel-Einträge erneut abgleichen
+  // (verknüpft nur eindeutige Treffer, erledigt gelöste Verknüpfungs-To-dos).
+  let excelNach = { verknuepft: 0 };
+  try { excelNach = excelNachAbgleich(); } catch(err) { console.warn('Excel-Nachabgleich', err); }
 
   // Planänderungen erzeugen keine automatischen To-dos.
   // KRITISCH: erst nach bestätigtem, verifiziertem Speichern gilt die
@@ -9277,7 +10087,7 @@ async function saveBsModal() {
     renderWochenplan();
   }
   try{renderTodoPage();}catch(_){ }
-  if (!konflikte.length) toast('Baustelle gespeichert',name,'✅');
+  if (!konflikte.length) toast('Baustelle gespeichert',name + (excelNach.verknuepft ? ' – ' + excelNach.verknuepft + ' Excel-Einträge verknüpft' : ''),'✅');
 }
 
 function deleteBs() {
@@ -9563,7 +10373,7 @@ function saveBlock() {
         const konflikt=Object.values(state.plan[ds]).some(e=>e.maId===maId && e.bsId && e.bsId!==blockSelBsId);
         if(konflikt) return;
         const planKey='ma'+maId+'_'+ds;
-        state.plan[ds][planKey]={ maId, bsId:blockSelBsId, farbeHex:hex, notiz };
+        state.plan[ds][planKey]={ maId, bsId:blockSelBsId, farbeHex:hex, notiz, ...planExcelMeta(ds, maId) };
       });
     });
 
@@ -9670,7 +10480,7 @@ function autoAssign() {
         // Nur eintragen wenn Monteur an diesem Tag noch frei
         const schonBelegt=Object.values(state.plan[ds]).some(e=>e.maId===gewaehlterMaId&&e.bsId!==bs.id);
         if(!schonBelegt && !state.plan[ds][planKey]?.bsId){
-          state.plan[ds][planKey]={maId:gewaehlterMaId, bsId:bs.id, farbeHex:hex, notiz:''};
+          state.plan[ds][planKey]={maId:gewaehlterMaId, bsId:bs.id, farbeHex:hex, notiz:'', ...planExcelMeta(ds, gewaehlterMaId)};
           assigned++;
         }
       });
@@ -9962,7 +10772,7 @@ function startFirebaseListener() {
           if (!currentLoginUser && typeof renderLoginBiometricUI === 'function') renderLoginBiometricUI();
           showSyncIndicator('↓ Firebase → Lokal');
           // Falls Baustellen wiederhergestellt wurden, sofort zurück nach Firebase schreiben
-          if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl && dbRef) {
+          if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl && dbRef && lagertoolDarfSchreiben()) {
             state._ts = Date.now();
             suppressListener = true;
             const slimJson = JSON.stringify(stripLargeData(state));
@@ -10312,6 +11122,7 @@ function exportData() {
   a.download = 'lagertool-backup.json'; a.click();
 }
 function importData(e) {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('importData');
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   const file = e.target.files[0]; if (!file) return;
   const r = new FileReader();
@@ -11707,6 +12518,7 @@ function printBaustatus(bauId) {
 </button>
 <script>
 function forceSave() {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('forceSave');
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
   state._ts = Date.now();
   const slimState = stripLargeData(state);
@@ -11919,7 +12731,7 @@ function gptPlanWindow(){
     for(const key in dayObj){
       const e=dayObj[key]; if(!e) continue;
       if(key.indexOf('status_ma')===0){
-        out.push({kind:'status',maId:String(e.maId),date:ds,status:e.status||''});
+        out.push({kind:'status',maId:String(e.maId),date:ds,status:e.status||'',anzeige:planStatusAnzeige(e),abwesend:planIstAbwesend(e),excelText:excelTextVonEintrag(e)||undefined});
       } else if(key.indexOf('ma')===0 && e.bsId!=null){
         out.push({kind:'assign',maId:String(e.maId),date:ds,bsId:String(e.bsId),start:e.startzeit||null,end:e.endzeit||null,fahrzeugId:e.fahrzeugId!=null?String(e.fahrzeugId):null});
       }
@@ -11981,8 +12793,11 @@ function gptFindVehicle(a){
 }
 function gptFindSite(a){
   if(a.site_id){const x=(state.baustellen||[]).find(b=>String(b.id)===String(a.site_id)); if(x)return x;}
-  const n=gptNorm(a.site_name||a.target_name); if(!n)return null;
-  return (state.baustellen||[]).find(b=>gptNorm(b.name)===n) || (state.baustellen||[]).find(b=>gptNorm(b.name).includes(n)||n.includes(gptNorm(b.name))) || null;
+  const name=a.site_name||a.target_name; if(!gptNorm(name))return null;
+  // Gleiche Regeln wie Excel-Import: Auftragsnr., excelAliases, Name, Kunde/Ort/Projekt –
+  // nur eindeutige Treffer, sonst null ("nicht eindeutig gefunden").
+  const r=excelBaustelleAbgleichen(name, a.date||null);
+  return r.status==='eindeutig' ? r.bs : null;
 }
 // dueDate/dueTime optional (Fälligkeit), kind unterscheidet 'arbeit' (vom
 // Benutzer verlangte Aufgabe) von 'audit' (automatisches Änderungsprotokoll).
@@ -12183,7 +12998,9 @@ function gptPlanAssign(emp,site,date,note,startzeit,endzeit,fahrzeugId,fahrzeugN
   if(!state.plan) state.plan={}; if(!state.plan[date]) state.plan[date]={};
   const k=key||('ma'+emp.id+'_'+date);
   const prev=state.plan[date][k]||{};
+  const meta=planExcelMeta(date, emp.id, k);
   state.plan[date][k]={
+    ...meta,
     maId:emp.id,bsId:site.id,farbeHex:site.farbeHex||prev.farbeHex||'#1a6b3a',
     notiz: note!==undefined ? note : (prev.notiz||''),
     startzeit: startzeit!==undefined ? startzeit : (prev.startzeit||null),
@@ -12222,6 +13039,7 @@ function gptApplySiteFields(site, a) {
 
 async function gptExecuteActions(actions,originalMessage){
   const applied=[],errors=[];
+  if(!lagertoolDarfSchreiben()){ lagertoolSchreibsperre('gpt'); return {applied:[],errors:['Speichern nicht möglich – bitte zuerst im LagerTool anmelden.'],saved:false}; }
   const mutations=actions.filter(a=>a&&a.type!=='create_todo');
   const standaloneTodos=actions.filter(a=>a&&a.type==='create_todo');
   // Texte der in diesem Durchlauf automatisch erzeugten Audit-To-dos, um
@@ -12466,7 +13284,10 @@ async function gptExecuteActions(actions,originalMessage){
         }
         const vorherAdresse=site.adresse;
         gptApplySiteFields(site, a);
-        if(site.adresse!==vorherAdresse) site.fahrtzeitKm=null; // Adresse geändert -> Distanz neu ermitteln
+        if(site.adresse!==vorherAdresse){ // Adresse geändert -> Distanz UND Fahrzeit neu ermitteln (alte Werte nicht weiterverwenden)
+          site.fahrtzeitKm=null; site.fahrtzeitMin=null; site.fahrtzeitStr=null; site.fahrtzeitAdresse=null;
+          vorherSnapshot.adresse=null; // verhindert Übernahme der alten Werte in bsPruefeHotelBedarf
+        }
         await bsPruefeHotelBedarf(site, vorherSnapshot);
         if(note) site.notiz=(site.notiz?site.notiz+'\n':'')+note;
         site.notiz = bsNotizMitAufgebot(site.notiz, site);
