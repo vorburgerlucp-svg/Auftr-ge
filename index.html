@@ -6678,7 +6678,7 @@ function renderWochenplan() {
           const hotelS = statusE.hotel ? '<span title="🏨 '+bsKwEsc(statusE.hotel)+'" style="font-size:10px;margin-left:3px">🏨</span>' : '';
           // Unverknüpft: Excel-Bezeichnung statt pauschal "Baustelle ungeklärt", rot markiert
           const inhalt = unverkn
-            ? '<span title="'+(statusE.verknuepfung==='mehrdeutig'?'Mehrere mögliche Baustellen – Zuordnung prüfen':'Keine passende Baustelle – bitte anlegen oder Alias ergänzen')+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">nicht verknüpft</span></span>'
+            ? '<span title="'+(statusE.verknuepfung==='mehrdeutig'?'Mehrere mögliche Baustellen – automatisch nicht entschieden; To-do prüfen':'Keine eindeutige Baustelle gefunden – To-do prüfen')+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">'+(statusE.verknuepfung==='mehrdeutig'?'mehrdeutig – To-do':'nicht gefunden – To-do')+'</span></span>'
             : eigentlichStatus
               ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
               : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
@@ -7589,10 +7589,46 @@ function bsHauptVon(bs) {
   if (!bs || bs.hauptBaustelleId == null || bs.hauptBaustelleId === '') return null;
   return (state.baustellen || []).find(b => String(b.id) === String(bs.hauptBaustelleId)) || null;
 }
+function bsHistorischeAliase(bs) {
+  const out = [];
+  (bs?.history || []).forEach(h => {
+    const ch = h?.changes || {};
+    ['name','kommission','projekt'].forEach(f => {
+      const c = ch[f];
+      if (!c || typeof c !== 'object') return;
+      [c.before, c.after].forEach(v => { if (typeof v === 'string' && v.trim()) out.push(v.trim()); });
+    });
+  });
+  return [...new Set(out)];
+}
 function bsAbgleichAliase(bs) {
-  const eigene = bsExcelAliase(bs);
-  (state.baustellen || []).forEach(d => { if (String(d.hauptBaustelleId ?? '') === String(bs.id)) eigene.push(d.name, ...bsExcelAliase(d)); });
+  const eigene = [...bsExcelAliase(bs), ...bsHistorischeAliase(bs)];
+  (state.baustellen || []).forEach(d => {
+    if (String(d.hauptBaustelleId ?? '') === String(bs.id)) {
+      eigene.push(d.name, ...bsExcelAliase(d), ...bsHistorischeAliase(d));
+    }
+  });
   return [...new Set(eigene.filter(Boolean))];
+}
+// Deterministischer starker Treffer: keine freie Fuzzy-Entscheidung, sondern ein eindeutiger
+// Teilmengen-Treffer zwischen Excel-Bezeichnung und Name/Kommission/Projekt/Alias.
+// Beispiel: "Fust Rütihof Platten" darf eindeutig auf "Fust Rütihof" zeigen, wenn im
+// Einsatztag genau eine aktive Baustelle diese Identität erfüllt. Abweichende Orts-/Projektwörter
+// verhindern den Treffer (z.B. "Fust Service Diverses" ≠ "Fust Service Nebikon").
+function excelStarkeKandidaten(text, datum, kandidaten) {
+  const tt = excelTokens(text);
+  if (tt.length < 2) return [];
+  const passt = bt => {
+    if (bt.length < 2) return false;
+    const alleAInB = tt.every(t => bt.some(x => excelTokGleich(t, x)));
+    const alleBInA = bt.every(x => tt.some(t => excelTokGleich(t, x)));
+    return alleAInB || alleBInA;
+  };
+  return (kandidaten || []).filter(b => {
+    if (!bsImZeitraum(b, datum)) return false;
+    const texte = [b.name, b.kommission, b.projekt, ...bsAbgleichAliase(b)].filter(Boolean);
+    return texte.some(x => passt(excelTokens(x)));
+  });
 }
 function bsImZeitraum(bs, datum) {
   if (!datum || (!bs.von && !bs.bis)) return true;
@@ -7627,18 +7663,28 @@ function excelBaustelleAbgleichen(text, datum) {
     return !!(an && an.length >= 4 && (' ' + nt + ' ').includes(' ' + an + ' '));
   });
   const exAktiv = exakt.filter(b => !bsIstBeendet(b));
-  if (exAktiv.length === 1) {
-    if (bsImZeitraum(exAktiv[0], datum)) return { status: 'eindeutig', bs: exAktiv[0], kandidaten: exAktiv, weg: 'exakt', vorschlaege: [] };
-    return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: [exAktiv[0], ...excelAehnliche(tt, aktiv).filter(b => b !== exAktiv[0] && bsImZeitraum(b, datum))], vorschlaege: [] };
-  }
-  if (exAktiv.length > 1) {
-    const imZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
-    if (!imZeit.length) return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: exAktiv, vorschlaege: [] };
-    return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: exAktiv, vorschlaege: [] };
+  const exImZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
+
+  // Priorität 1: genau ein exakter Treffer im gültigen Zeitraum.
+  if (exImZeit.length === 1) return { status: 'eindeutig', bs: exImZeit[0], kandidaten: exImZeit, weg: 'exakt', vorschlaege: [] };
+  if (exImZeit.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: exImZeit, vorschlaege: [] };
+
+  // Priorität 2: eindeutiger deterministischer Teilmengen-Treffer im Zeitraum.
+  // Damit werden bekannte Varianten wie "... Platten" oder historische Projektnamen automatisch
+  // verbunden, aber nur wenn genau EINE Baustelle übrig bleibt.
+  const stark = excelStarkeKandidaten(text, datum, aktiv);
+  if (stark.length === 1) return { status: 'eindeutig', bs: stark[0], kandidaten: stark, weg: 'eindeutig-stark', vorschlaege: [] };
+  if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
+
+  // Ein exakter Treffer existiert, passt aber nicht zum Einsatztag: niemals still zuordnen.
+  if (exAktiv.length) {
+    const zeitKand = [...new Map([...exAktiv, ...excelAehnliche(tt, aktiv).filter(b => bsImZeitraum(b, datum))].map(b => [String(b.id), b])).values()];
+    return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: zeitKand, vorschlaege: [] };
   }
   if (exakt.length) return { status: 'mehrdeutig', grund: 'beendet', kandidaten: exakt, vorschlaege: [] };
-  // Kein exakter Treffer → nicht verknüpfen; ähnliche Baustellen nur als Vorschlag
-  const vorschlaege = [...new Set([...excelAehnliche(tt, aktiv), ...excelVorschlaege(tt, aktiv)])].slice(0, 3);
+
+  // Kein sicherer Treffer: nur Vorschläge anzeigen und To-do erzeugen; nie raten.
+  const vorschlaege = [...new Map([...excelAehnliche(tt, aktiv), ...excelVorschlaege(tt, aktiv)].map(b => [String(b.id), b])).values()].slice(0, 3);
   return { ...leer, vorschlaege };
 }
 // Wort-Ähnlichkeit (Name/Kunde/Ort/Projekt/Alias) – nur zur Information, nie automatisch.
@@ -7756,8 +7802,8 @@ function excelEintragSetzen(ma, datum, k) {
     tag[baseKey] = { maId: ma.id, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: gleich ? (prevBase.notiz || '') : '',
       startzeit: gleich ? (prevBase.startzeit ?? null) : null, endzeit: gleich ? (prevBase.endzeit ?? null) : null,
       fahrzeugId: gleich ? (prevBase.fahrzeugId ?? null) : null, fahrzeugName: gleich ? (prevBase.fahrzeugName || '') : '',
-      excelText: k.text, quelle: 'excel', ...(hotel ? { hotel } : {}) };
-    return { art: 'verknuepft', bs: ab.bs };
+      excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig', ...(hotel ? { hotel } : {}) };
+    return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig' };
   }
   tag[statusKey] = { maId: ma.id, status: 'Baustelle ungeklärt', farbeHex: statusHex('Baustelle ungeklärt'), notiz: 'Baustelle ungeklärt: ' + k.text,
     excelText: k.text, quelle: 'excel', verknuepfung: ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt',
@@ -7859,7 +7905,10 @@ function excelVerknuepfungsTodosAktualisieren() {
     const tage = [...g.tage].sort().map(ds => { const d = new Date(ds + 'T12:00'); return TAGE[d.getDay()] + ' ' + String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.'; });
     const bsL = ids => [...ids].map(id => (state.baustellen || []).find(b => String(b.id) === id)).filter(Boolean).map(excelBsKurz);
     const kand = bsL(g.kand), vorschl = bsL(g.vorschl);
-    const text = 'Baustelle fehlt / nicht verknüpft: ' + g.text + '. Keine eindeutig passende Baustelle gefunden. Bitte Baustelle anlegen, Alias ergänzen oder Zuordnung prüfen.'
+    const problem = g.mehrdeutig
+      ? 'Baustelle mehrdeutig / nicht automatisch verknüpft: ' + g.text + '. Mehr als eine plausible Baustelle ist möglich; bitte eindeutige Zuordnung/Alias festlegen.'
+      : 'Baustelle fehlt / nicht verknüpft: ' + g.text + '. Keine eindeutig passende Baustelle gefunden. Bitte Baustelle anlegen oder Alias ergänzen.';
+    const text = problem
       + '\nKW ' + g.kw + ' · Tage: ' + tage.join(', ') + ' · Monteure: ' + [...g.mas].map(maName).sort((a,b)=>a.localeCompare(b,'de')).join(', ')
       + ' · ' + g.anzahl + (g.anzahl === 1 ? ' Eintrag offen' : ' Einträge offen')
       + (g.mehrdeutig && kand.length ? (g.zeitraum ? '\nZeitraum-Konflikt – bitte prüfen: ' : '\nMögliche Baustellen (mehrdeutig): ') + kand.join('; ') : '')
@@ -7929,7 +7978,7 @@ function excelNachAbgleich() {
       if (tag[baseKey]) return; // bereits anderer Einsatz vorhanden → nichts überschreiben
       const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, ...rest } = e;
       const restNotiz = String(notiz || '').replace(/^\s*Baustelle ungeklärt\s*[:\-–]\s*.+$/i, '').trim();
-      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel' };
+      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel', matchingWeg: ab.weg || 'eindeutig' };
       delete tag[key];
       verknuepft++;
     });
