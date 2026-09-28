@@ -6674,7 +6674,7 @@ function renderWochenplan() {
             const label=bsKwEsc(e.excelText || (bs?bs.name:'?'));
             const hotelTxt = e.hotel || bs?.hotelName || '';
             const hotelIcon = hotelTxt ? '<span title="🏨 '+bsKwEsc(hotelTxt)+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
-            const matchWarn = e.matchingWarnung === 'zeitraum' ? '<span title="Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – To-do prüfen" style="position:absolute;bottom:1px;left:3px;font-size:10px">⚠</span>' : '';
+            const matchWarn = e.matchingWarnung ? '<span title="'+(e.matchingWarnung==='historisch'?'Eindeutig mit einer früher/beendet geführten Baustelle verknüpft – To-do prüfen':'Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – To-do prüfen')+'" style="position:absolute;bottom:1px;left:3px;font-size:10px">⚠</span>' : '';
             const bsInfoLink = bs ? '<span title="Baustelle: '+bsKwEsc(bs.name)+' – Infos öffnen" onclick="event.stopPropagation();showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;opacity:.8;font-size:10px;margin-right:3px">ℹ️</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
             const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
@@ -7631,11 +7631,11 @@ function bsAbgleichAliase(bs) {
   });
   return [...new Set(eigene.filter(Boolean))];
 }
-// Deterministischer starker Treffer: keine freie Fuzzy-Entscheidung, sondern ein eindeutiger
-// Teilmengen-Treffer zwischen Excel-Bezeichnung und Name/Kommission/Projekt/Alias.
-// Beispiel: "Fust Rütihof Platten" darf eindeutig auf "Fust Rütihof" zeigen, wenn im
-// Einsatztag genau eine aktive Baustelle diese Identität erfüllt. Abweichende Orts-/Projektwörter
-// verhindern den Treffer (z.B. "Fust Service Diverses" ≠ "Fust Service Nebikon").
+// Deterministischer starker Treffer über den GESAMTEN Baustellenbestand.
+// Der Zeitraum wird hier bewusst NICHT vorab gefiltert: Excel darf eine Baustelle nennen,
+// die früher angelegt, beendet oder mit einem inzwischen veralteten von/bis-Datum gespeichert
+// wurde. Erst nach der Kandidatensuche wird entschieden, ob der Treffer eindeutig ist und
+// ob zusätzlich eine Zeitraum-/Historienwarnung nötig ist.
 function excelStarkeKandidaten(text, datum, kandidaten) {
   const tt = excelTokens(text);
   if (tt.length < 2) return [];
@@ -7646,7 +7646,6 @@ function excelStarkeKandidaten(text, datum, kandidaten) {
     return alleAInB || alleBInA;
   };
   return (kandidaten || []).filter(b => {
-    if (!bsImZeitraum(b, datum)) return false;
     const texte = [b.name, b.kommission, b.projekt, ...bsAbgleichAliase(b)].filter(Boolean);
     return texte.some(x => passt(excelTokens(x)));
   });
@@ -7671,59 +7670,70 @@ function excelTokAehnlich(a, b) { return a.length >= 5 && b.length >= 5 && excel
 // Zusätzlich gilt die Zeitraumregel: Hat die Baustelle von/bis, muss der Einsatztag darin liegen.
 // Wort-/Kunden-/Tippfehler-Ähnlichkeiten werden NUR als Vorschlag gemeldet, nie verknüpft.
 function excelBaustelleAbgleichen(text, datum) {
-  const alle = (state.baustellen || []).filter(b => !bsHauptVon(b));   // Duplikate nicht als eigene Kandidaten
+  // WICHTIG: immer ALLE jemals angelegten Baustellen durchsuchen – auch beendete
+  // und Baustellen ausserhalb der aktuellen KW. Excel ist die Planungsquelle;
+  // die Baustellendatenbank liefert nur die Informations-Verknüpfung.
+  const alle = (state.baustellen || []).filter(b => !bsHauptVon(b));   // zusammengeführte Duplikate nicht doppelt zählen
   const nt = excelNorm(text), tt = excelTokens(text);
   const leer = { status: 'keiner', kandidaten: [], vorschlaege: [] };
   if (!nt) return leer;
-  const aktiv = alle.filter(b => !bsIstBeendet(b));
 
-  // Explizite Aliase / frühere Namen / zusammengeführte Namen und Auftragsnummern
-  // sind bewusste Identitätsmerkmale. Ist davon GENAU EINE aktive Baustelle betroffen,
-  // darf sie auch bei einem veralteten von/bis-Zeitraum verknüpft werden. Der
-  // Zeitraum-Konflikt bleibt als Warnung im Wochenplan und im Excel-Kontroll-To-do sichtbar.
-  const aliasExakt = alle.filter(b => {
+  const warnGrund = b => bsIstBeendet(b) ? 'historisch' : (!bsImZeitraum(b, datum) ? 'zeitraum' : null);
+  const eindeutig = (b, weg) => {
+    const wg = warnGrund(b);
+    return { status: 'eindeutig', bs: b, kandidaten: [b], weg, zeitWarnung: !!wg, warnGrund: wg, vorschlaege: [] };
+  };
+  const nachIdEindeutig = arr => [...new Map((arr || []).map(b => [String(b.id), b])).values()];
+
+  // 1. Bewusste Identität: Excel-Alias, Matching-Alias, historischer Name,
+  //    Name eines zusammengeführten Datensatzes oder Auftragsnummer.
+  //    Diese Merkmale werden über den kompletten historischen Bestand geprüft.
+  const aliasExakt = nachIdEindeutig(alle.filter(b => {
     if (bsAbgleichAliase(b).some(a => excelNorm(a) === nt)) return true;
     const an = excelNorm(b.auftragsnummer);
     return !!(an && an.length >= 4 && (' ' + nt + ' ').includes(' ' + an + ' '));
-  });
-  const aliasAktiv = aliasExakt.filter(b => !bsIstBeendet(b));
-  const aliasImZeit = aliasAktiv.filter(b => bsImZeitraum(b, datum));
-  if (aliasImZeit.length === 1) return { status: 'eindeutig', bs: aliasImZeit[0], kandidaten: aliasImZeit, weg: 'alias-exakt', vorschlaege: [] };
-  if (aliasImZeit.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: aliasImZeit, vorschlaege: [] };
-  if (aliasAktiv.length === 1) return { status: 'eindeutig', bs: aliasAktiv[0], kandidaten: aliasAktiv, weg: 'alias-exakt', zeitWarnung: true, vorschlaege: [] };
-  if (aliasAktiv.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: aliasAktiv, vorschlaege: [] };
-
-  // Name/Kommission/Projekt sind nur dann sicher, wenn auch der Einsatzzeitraum passt.
-  // Damit wird z.B. ein generischer wiederkehrender Name wie "Fust Basel" nicht blind
-  // mit einem Auftrag aus einer anderen Woche verbunden.
-  const exakt = alle.filter(b => {
-    if (excelNorm(b.name) === nt) return true;
-    if (excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt) return true;
-    return false;
-  });
-  const exAktiv = exakt.filter(b => !bsIstBeendet(b));
-  const exImZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
-
-  // Priorität 1: genau ein exakter Treffer im gültigen Zeitraum.
-  if (exImZeit.length === 1) return { status: 'eindeutig', bs: exImZeit[0], kandidaten: exImZeit, weg: 'exakt', vorschlaege: [] };
-  if (exImZeit.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: exImZeit, vorschlaege: [] };
-
-  // Priorität 2: eindeutiger deterministischer Teilmengen-Treffer im Zeitraum.
-  // Damit werden bekannte Varianten wie "... Platten" oder historische Projektnamen automatisch
-  // verbunden, aber nur wenn genau EINE Baustelle übrig bleibt.
-  const stark = excelStarkeKandidaten(text, datum, aktiv);
-  if (stark.length === 1) return { status: 'eindeutig', bs: stark[0], kandidaten: stark, weg: 'eindeutig-stark', vorschlaege: [] };
-  if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
-
-  // Ein exakter Treffer existiert, passt aber nicht zum Einsatztag: niemals still zuordnen.
-  if (exAktiv.length) {
-    const zeitKand = [...new Map([...exAktiv, ...excelAehnliche(tt, aktiv).filter(b => bsImZeitraum(b, datum))].map(b => [String(b.id), b])).values()];
-    return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: zeitKand, vorschlaege: [] };
+  }));
+  if (aliasExakt.length === 1) return eindeutig(aliasExakt[0], 'alias-exakt-alle');
+  if (aliasExakt.length > 1) {
+    const imZeit = aliasExakt.filter(b => bsImZeitraum(b, datum));
+    if (imZeit.length === 1) return eindeutig(imZeit[0], 'alias-exakt-zeit');
+    const aktiv = aliasExakt.filter(b => !bsIstBeendet(b));
+    if (aktiv.length === 1) return eindeutig(aktiv[0], 'alias-exakt-aktiv');
+    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: aliasExakt, vorschlaege: [] };
   }
-  if (exakt.length) return { status: 'mehrdeutig', grund: 'beendet', kandidaten: exakt, vorschlaege: [] };
 
-  // Kein sicherer Treffer: nur Vorschläge anzeigen und To-do erzeugen; nie raten.
-  const vorschlaege = [...new Map([...excelAehnliche(tt, aktiv), ...excelVorschlaege(tt, aktiv)].map(b => [String(b.id), b])).values()].slice(0, 3);
+  // 2. Exakter Name / Kommission / Projekt über ALLE jemals angelegten Baustellen.
+  const exakt = nachIdEindeutig(alle.filter(b =>
+    excelNorm(b.name) === nt || excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt
+  ));
+  if (exakt.length === 1) return eindeutig(exakt[0], 'exakt-alle');
+  if (exakt.length > 1) {
+    const imZeit = exakt.filter(b => bsImZeitraum(b, datum));
+    if (imZeit.length === 1) return eindeutig(imZeit[0], 'exakt-zeit');
+    const aktiv = exakt.filter(b => !bsIstBeendet(b));
+    if (aktiv.length === 1) return eindeutig(aktiv[0], 'exakt-aktiv');
+    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: exakt, vorschlaege: [] };
+  }
+
+  // 3. Starker deterministischer Teilmengen-Treffer ebenfalls über den GESAMTEN Bestand.
+  //    Beispiel: "Fust Rütihof Platten" ↔ "Fust Rütihof".
+  const stark = nachIdEindeutig(excelStarkeKandidaten(text, datum, alle));
+  if (stark.length === 1) return eindeutig(stark[0], 'eindeutig-stark-alle');
+  if (stark.length > 1) {
+    const imZeit = stark.filter(b => bsImZeitraum(b, datum));
+    if (imZeit.length === 1) return eindeutig(imZeit[0], 'eindeutig-stark-zeit');
+    const aktiv = stark.filter(b => !bsIstBeendet(b));
+    if (aktiv.length === 1) return eindeutig(aktiv[0], 'eindeutig-stark-aktiv');
+    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: stark, vorschlaege: [] };
+  }
+
+  // 4. Kein sicherer Treffer: auch Vorschläge aus dem gesamten historischen Bestand
+  //    anzeigen. Niemals raten; bei mehreren/unsicheren Kandidaten bleibt der Eintrag rot
+  //    und das To-do nennt die Kandidaten.
+  const vorschlaege = nachIdEindeutig([
+    ...excelAehnliche(tt, alle),
+    ...excelVorschlaege(tt, alle)
+  ]).slice(0, 5);
   return { ...leer, vorschlaege };
 }
 // Wort-Ähnlichkeit (Name/Kunde/Ort/Projekt/Alias) – nur zur Information, nie automatisch.
@@ -7842,7 +7852,7 @@ function excelEintragSetzen(ma, datum, k) {
       startzeit: gleich ? (prevBase.startzeit ?? null) : null, endzeit: gleich ? (prevBase.endzeit ?? null) : null,
       fahrzeugId: gleich ? (prevBase.fahrzeugId ?? null) : null, fahrzeugName: gleich ? (prevBase.fahrzeugName || '') : '',
       excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig',
-      ...(ab.zeitWarnung ? { matchingWarnung: 'zeitraum' } : {}), ...(hotel ? { hotel } : {}) };
+      ...(ab.zeitWarnung ? { matchingWarnung: ab.warnGrund || 'zeitraum' } : {}), ...(hotel ? { hotel } : {}) };
     return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig', zeitWarnung: !!ab.zeitWarnung };
   }
   tag[statusKey] = { maId: ma.id, status: 'Baustelle ungeklärt', farbeHex: statusHex('Baustelle ungeklärt'), notiz: 'Baustelle ungeklärt: ' + k.text,
@@ -7875,8 +7885,11 @@ function excelZelleKontrollieren(ma, datum, k) {
     if (st || hotelE) return F('alter Eintrag steht noch');
     if (excelTextVonEintrag(base) !== k.text) return F('sichtbarer Text weicht ab');
     if (ab.status === 'eindeutig' && String(base.bsId) !== String(ab.bs.id)) return F('mit falscher Baustelle verknüpft');
-    if (base.matchingWarnung === 'zeitraum' || (ab.status === 'eindeutig' && ab.zeitWarnung)) {
-      return W('Eindeutig über Alias verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – Baustellendatum prüfen');
+    if (base.matchingWarnung || (ab.status === 'eindeutig' && ab.zeitWarnung)) {
+      const wg = base.matchingWarnung || ab.warnGrund;
+      return W(wg === 'historisch'
+        ? 'Eindeutig mit einer früher/beendet geführten Baustelle verknüpft – Status/Zeitraum der Baustelle prüfen'
+        : 'Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – Baustellendatum prüfen');
     }
     return null;
   }
@@ -8022,7 +8035,7 @@ function excelNachAbgleich() {
       const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, ...rest } = e;
       const restNotiz = String(notiz || '').replace(/^\s*Baustelle ungeklärt\s*[:\-–]\s*.+$/i, '').trim();
       tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel', matchingWeg: ab.weg || 'eindeutig',
-        ...(ab.zeitWarnung ? { matchingWarnung: 'zeitraum' } : {}) };
+        ...(ab.zeitWarnung ? { matchingWarnung: ab.warnGrund || 'zeitraum' } : {}) };
       delete tag[key];
       verknuepft++;
     });
