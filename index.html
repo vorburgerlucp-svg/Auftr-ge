@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fahrzeug-Inventar &amp; Lagerverwaltung</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#181c26">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LagerTool">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -409,6 +416,29 @@
   .gpt-foot{font-size:10px;color:var(--muted);margin-top:7px;display:flex;justify-content:space-between;gap:10px}
   @media(max-width:600px){#gpt-assistant-toggle{right:14px;bottom:14px}#gpt-assistant-panel{right:14px;bottom:82px;width:calc(100vw - 28px);height:calc(100vh - 100px)}}
 </style>
+<style id="todo-priority-push-style">
+  .todo-prio-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+  .todo-prio-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center}
+  .todo-prio-num{font-family:var(--mono);font-size:24px;font-weight:700}.todo-prio-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-top:3px}
+  .todo-card-prio1{border:1px solid rgba(232,87,75,.75)!important;border-left:5px solid var(--red)!important;background:rgba(232,87,75,.08)!important}
+  .todo-card-prio2{border:1px solid rgba(232,184,75,.60)!important;border-left:5px solid var(--accent)!important;background:rgba(232,184,75,.07)!important}
+  .todo-card-completed{opacity:.82;border-left:4px solid var(--green)!important}
+  .todo-prio-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:14px;font-size:11px;font-weight:700}
+  .todo-prio-badge.p1{background:rgba(232,87,75,.14);color:#ff8b81;border:1px solid rgba(232,87,75,.45)}
+  .todo-prio-badge.p2{background:rgba(232,184,75,.12);color:#f1cb6b;border:1px solid rgba(232,184,75,.38)}
+  .todo-prio-badge.normal{background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+  .todo-wf-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .todo-meta-line{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}
+  #todo-alert-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:12000;align-items:center;justify-content:center;padding:16px}
+  #todo-alert-overlay.open{display:flex}
+  #todo-alert-box{width:min(520px,100%);background:var(--surface);border-radius:16px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+  #todo-alert-overlay.p1 #todo-alert-box{border:2px solid var(--red);box-shadow:0 0 45px rgba(232,87,75,.25)}
+  #todo-alert-overlay.p2 #todo-alert-box{border:2px solid var(--accent);box-shadow:0 0 45px rgba(232,184,75,.18)}
+  .todo-alert-title{font-size:20px;font-weight:800;margin-bottom:8px}.todo-alert-text{white-space:pre-wrap;font-size:15px;line-height:1.45;margin:12px 0}.todo-alert-meta{font-size:11px;color:var(--muted)}
+  .todo-push-card{border-left:3px solid var(--accent2)}
+  .todo-push-status{font-size:12px;color:var(--muted);margin-top:8px}
+  @media(max-width:700px){.todo-prio-summary{grid-template-columns:repeat(2,1fr)}.todo-wf-actions .btn{flex:1;justify-content:center;min-height:42px}#todo-alert-box{max-height:90vh;overflow:auto}}
+</style>
 </head>
 <body>
 
@@ -792,30 +822,55 @@
 
 <div id="page-todo" class="page">
   <h2>✅ To-Do</h2>
-  <p class="subtitle">Offene Punkte aus Mails, Rapporten und Baustellen – mit Zuständigkeit und Erledigt-Status</p>
+  <p class="subtitle">Gemeinsame To-dos für Luc und Tobias – Prio 1 rot, Prio 2 gelb, normale Punkte nur in der Liste.</p>
 
-  <div class="stats" style="grid-template-columns:repeat(2,1fr)">
-    <div class="stat"><div class="stat-val yellow" id="todo-stat-offen">0</div><div class="stat-label">Offen</div></div>
-    <div class="stat"><div class="stat-val green" id="todo-stat-erledigt">0</div><div class="stat-label">Erledigt</div></div>
+  <div class="todo-prio-summary">
+    <div class="todo-prio-box"><div class="todo-prio-num" id="todo-stat-p1" style="color:var(--red)">0</div><div class="todo-prio-label">🔴 Dringend</div></div>
+    <div class="todo-prio-box"><div class="todo-prio-num" id="todo-stat-p2" style="color:var(--accent)">0</div><div class="todo-prio-label">🟡 Wichtig</div></div>
+    <div class="todo-prio-box"><div class="todo-prio-num" id="todo-stat-normal">0</div><div class="todo-prio-label">Normal aktiv</div></div>
+    <div class="todo-prio-box"><div class="todo-prio-num" id="todo-stat-erledigt" style="color:var(--green)">0</div><div class="todo-prio-label">Erledigt / offen</div></div>
+  </div>
+  <div id="todo-stat-offen" style="display:none">0</div>
+
+  <div class="card todo-push-card" style="padding:14px;margin-bottom:16px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <b style="font-size:13px">🔔 Push auf Handy &amp; Desktop</b>
+      <span class="spacer"></span>
+      <button class="btn btn-secondary btn-sm" onclick="todoWorkerVerbinden()">1 · Verbinden</button>
+      <button class="btn btn-primary btn-sm" onclick="todoPushAktivieren()">2 · Push aktivieren</button>
+      <button class="btn btn-secondary btn-sm" onclick="todoPushDeaktivieren()">Push deaktivieren</button>
+    </div>
+    <div id="todo-push-status" class="todo-push-status">Push-Status wird geprüft…</div>
   </div>
 
   <div class="card" style="padding:14px;margin-bottom:16px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input type="text" id="todo-neu-text" placeholder="Neuer Punkt..." style="flex:2;min-width:200px">
+      <input type="text" id="todo-neu-text" placeholder="z.B. Fust Bellikon anrufen dringend / Prio 2" style="flex:2;min-width:200px">
       <input type="text" id="todo-neu-zustaendig" placeholder="Zuständig (z.B. Luc oder Tobias)" style="flex:1;min-width:160px">
       <button class="btn btn-primary" onclick="addTodoItem()">+ Hinzufügen</button>
     </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Erkennung: <b>dringend / Prio 1 / P1</b> = rot + Push · <b>Prio 2 / P2</b> = gelb + Push · ohne Angabe = nur Liste.</div>
   </div>
 
-  <div class="tabs" style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="nav-btn active" id="todo-filter-offen" onclick="setTodoFilter('offen')">Offen</button>
-    <button class="nav-btn" id="todo-filter-alle" onclick="setTodoFilter('alle')">Alle</button>
+  <div class="tabs" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="nav-btn active" id="todo-filter-offen" onclick="setTodoFilter('offen')">Aktiv</button>
+    <button class="nav-btn" id="todo-filter-alle" onclick="setTodoFilter('alle')">Alle aktiv</button>
     <button class="nav-btn" id="todo-filter-erledigt" onclick="setTodoFilter('erledigt')">Erledigt</button>
+    <button class="nav-btn" id="todo-filter-archiv" onclick="setTodoFilter('archiv')">Archiv</button>
     <button class="nav-btn" id="todo-filter-bereinigt" onclick="setTodoFilter('bereinigt')" title="Aus der offenen Liste genommene reine Meldungen (wiederherstellbar)">Bereinigt</button>
   </div>
   <div id="todo-bereinigung"></div>
 
   <div id="todo-list"></div>
+</div>
+
+<div id="todo-alert-overlay" aria-live="assertive" role="dialog" aria-modal="true">
+  <div id="todo-alert-box">
+    <div class="todo-alert-title" id="todo-alert-title">Dringendes To-do</div>
+    <div class="todo-alert-text" id="todo-alert-text"></div>
+    <div class="todo-alert-meta" id="todo-alert-meta"></div>
+    <div class="todo-wf-actions" id="todo-alert-actions"></div>
+  </div>
 </div>
 
 <div id="page-meldungen" class="page">
@@ -3474,7 +3529,7 @@ let todoFilter = 'offen';
 
 function setTodoFilter(f) {
   todoFilter = f;
-  ['offen','alle','erledigt','bereinigt'].forEach(k => {
+  ['offen','alle','erledigt','archiv','bereinigt'].forEach(k => {
     const b = document.getElementById('todo-filter-'+k);
     if (b) b.classList.toggle('active', k===f);
   });
@@ -3494,89 +3549,271 @@ let todoAusgewaehlt = new Set();
 // Erzeugt eine für Inline-HTML-Attribute (onclick/onchange, doppelt gequotet) sichere
 // JS-Literal-Darstellung einer To-do-ID – funktioniert für numerische und String-IDs
 // (z.B. "gpt_todo-test-fixed-002"), ohne die ID selbst zu verändern.
+// ── Gemeinsamer To-do-Workflow / Prioritäten / Push ─────────────────────────────
+const TODO_PRIO1_RE = /(?:\bdringend\b|\bprio(?:rit[aä]t|rity)?\s*[:#-]?\s*1\b|\bp\s*1\b)/i;
+const TODO_PRIO2_RE = /(?:\bprio(?:rit[aä]t|rity)?\s*[:#-]?\s*2\b|\bp\s*2\b)/i;
+let todoPushImFlug = new Set();
+let todoAlertAktuelleId = null;
+
+function todoPrioritaetAusText(text) {
+  const s = String(text||'');
+  if (TODO_PRIO1_RE.test(s)) return 1;
+  if (TODO_PRIO2_RE.test(s)) return 2;
+  return 0;
+}
+function todoPrioritaet(t) {
+  const p = Number(t && (t.priority ?? t.prio));
+  return p === 1 || p === 2 ? p : 0; // altes prioritaet:'hoch' bleibt bewusst KEIN Push-Prio
+}
+function todoNameKorrigieren(name) {
+  return String(name||'').replace(/Tobias\s+Draäyer/gi,'Tobias Dräyer').replace(/^Tobi$/i,'Tobias Dräyer').trim();
+}
+function todoActor() {
+  const u = currentLoginUser || {};
+  const raw = ((u.vorname||'')+' '+(u.nachname||'')).trim() || u.name || 'Unbekannt';
+  return { id: String(u.id ?? lagertoolSitzungMaId ?? 'unknown'), name: todoNameKorrigieren(raw) };
+}
+function todoWorkflowEnsure(t) {
+  if (!t || typeof t !== 'object') return null;
+  if (!t.wf || typeof t.wf !== 'object') t.wf = {};
+  const wf=t.wf;
+  if (!wf.seenBy || typeof wf.seenBy !== 'object' || Array.isArray(wf.seenBy)) wf.seenBy={};
+  if (!wf.status) wf.status = t.geschlossen ? 'closed' : (t.erledigt ? 'completed' : 'open');
+  if (t.erledigt && !wf.completedBy && t.erledigtDurch) wf.completedBy=todoNameKorrigieren(t.erledigtDurch);
+  if (t.erledigt && !wf.completedAt && t.erledigtAm) wf.completedAt=t.erledigtAm;
+  if (!wf.push || typeof wf.push !== 'object') wf.push={};
+  return wf;
+}
+function todoIstGeschlossen(t){ return !!t && todoWorkflowEnsure(t)?.status === 'closed'; }
+function todoIstErledigtWorkflow(t){ return !!t && (todoWorkflowEnsure(t)?.status === 'completed' || t.erledigt === true) && !todoIstGeschlossen(t); }
+function todoIstAktivWorkflow(t){ return !!t && !t.bereinigt && !todoIstGeschlossen(t); }
+function todoIstHandlungsOffen(t){ return todoIstAktivWorkflow(t) && !todoIstErledigtWorkflow(t); }
+function todoDatumZeit(v){
+  if(!v) return '–';
+  const d=new Date(v); if(Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function todoEsc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function todoSort(a,b){
+  const pa=todoPrioritaet(a), pb=todoPrioritaet(b);
+  if(pa!==pb) return (pa===0?3:pa)-(pb===0?3:pb);
+  const ad=a.dueDate||'', bd=b.dueDate||'';
+  if(ad||bd){ if(!ad) return 1; if(!bd) return -1; if(ad!==bd) return ad.localeCompare(bd); }
+  const aa=String(a.erstelltAm||''), bb=String(b.erstelltAm||'');
+  return pa ? aa.localeCompare(bb) : bb.localeCompare(aa);
+}
+
+async function todoPersistMutation(mutator, opts={}) {
+  if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('todo');
+  const apply = (target) => {
+    if (!Array.isArray(target.todos)) target.todos=[];
+    mutator(target);
+    target._ts=Math.max(Date.now(),(Number(target._ts)||0)+1);
+    return target;
+  };
+  if (dbRef && hasReceivedFirebaseSync && typeof dbRef.transaction === 'function') {
+    try {
+      const tx = await dbRef.transaction(raw => {
+        let remote=null;
+        try { remote = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch(_) { remote=null; }
+        if (!remote || typeof remote !== 'object') remote=JSON.parse(JSON.stringify(stripLargeData(state)));
+        apply(remote);
+        return JSON.stringify(stripLargeData(remote));
+      }, undefined, false);
+      if (!tx.committed) return {ok:false,error:new Error('Firebase-Transaktion nicht bestätigt')};
+      let persisted=tx.snapshot?.val();
+      try { if(typeof persisted==='string') persisted=JSON.parse(persisted); } catch(_){ persisted=null; }
+      if(persisted && Array.isArray(persisted.todos)) {
+        state.todos=persisted.todos; state._ts=persisted._ts||state._ts;
+        safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+      }
+      renderTodoPage();
+      todoPopupPruefen();
+      if(opts.pushTodoId) todoPushSenden(opts.pushTodoId);
+      return {ok:true,verified:true};
+    } catch(e) { console.warn('[Todo] Transaktion fehlgeschlagen',e); return {ok:false,error:e}; }
+  }
+  try { apply(state); } catch(e) { return {ok:false,error:e}; }
+  const r=await save({verify:true});
+  renderTodoPage(); todoPopupPruefen();
+  if(r?.ok && opts.pushTodoId) todoPushSenden(opts.pushTodoId);
+  return r;
+}
+
+async function todoAktion(id, aktion) {
+  const actor=todoActor(), now=new Date().toISOString();
+  const res=await todoPersistMutation(s=>{
+    const t=(s.todos||[]).find(x=>String(x.id)===String(id)); if(!t) throw new Error('To-do nicht gefunden');
+    const wf=todoWorkflowEnsure(t);
+    if(aktion==='seen') { wf.seenBy[actor.id]={name:actor.name,at:now}; }
+    else if(aktion==='processing') { wf.seenBy[actor.id]={name:actor.name,at:now}; wf.status='processing'; wf.processingBy=actor.name; wf.processingAt=now; }
+    else if(aktion==='complete') { wf.seenBy[actor.id]={name:actor.name,at:now}; wf.status='completed'; wf.completedBy=actor.name; wf.completedAt=now; t.erledigt=true; t.erledigtDurch=actor.name; t.erledigtAm=now; }
+    else if(aktion==='close') { if(!(wf.status==='completed'||t.erledigt)) throw new Error('Nur erledigte To-dos können geschlossen werden'); wf.status='closed'; wf.closedBy=actor.name; wf.closedAt=now; t.geschlossen=true; }
+    else if(aktion==='reopen') { wf.status='open'; wf.completedBy=null; wf.completedAt=null; wf.closedBy=null; wf.closedAt=null; t.erledigt=false; t.erledigtDurch=null; t.erledigtAm=null; t.geschlossen=false; }
+    t.letzteAenderung={at:now,actor};
+  });
+  if(!res?.ok) toast('Nicht gespeichert',res?.error?.message||'To-do konnte nicht geändert werden','⚠️');
+  else {
+    const msg={seen:'Als gesehen markiert',processing:'In Bearbeitung',complete:'Als erledigt markiert',close:'To-do geschlossen',reopen:'To-do wieder geöffnet'}[aktion]||'Aktualisiert';
+    toast('To-do',msg,'✅');
+  }
+}
+
+function todoGesehenVonAktuellem(t){ const a=todoActor(); return !!todoWorkflowEnsure(t)?.seenBy?.[a.id]; }
+function todoSeenText(t){
+  const seen=todoWorkflowEnsure(t)?.seenBy||{};
+  const entries=Object.values(seen).filter(Boolean);
+  if(!entries.length) return '';
+  return entries.map(x=>typeof x==='string'?todoDatumZeit(x):(todoNameKorrigieren(x.name||'?')+' '+todoDatumZeit(x.at))).join(' · ');
+}
+
+function todoPopupSchliessenNurUI(){ const o=document.getElementById('todo-alert-overlay'); if(o)o.classList.remove('open','p1','p2'); todoAlertAktuelleId=null; }
+function todoPopupPruefen(){
+  if(!currentLoginUser || !state.todos) return todoPopupSchliessenNurUI();
+  const kandidaten=(state.todos||[]).filter(t=>todoIstHandlungsOffen(t)&&todoPrioritaet(t)>0&&!todoGesehenVonAktuellem(t)).sort(todoSort);
+  if(!kandidaten.length) return todoPopupSchliessenNurUI();
+  const t=kandidaten[0], p=todoPrioritaet(t), wf=todoWorkflowEnsure(t);
+  const ov=document.getElementById('todo-alert-overlay'); if(!ov) return;
+  todoAlertAktuelleId=t.id; ov.classList.remove('p1','p2'); ov.classList.add('open','p'+p);
+  document.getElementById('todo-alert-title').textContent=p===1?'🔴 DRINGEND – PRIO 1':'🟡 WICHTIG – PRIO 2';
+  document.getElementById('todo-alert-text').textContent=t.text||'';
+  document.getElementById('todo-alert-meta').textContent='Erstellt von '+todoNameKorrigieren(t.erstelltVon||t.erstelltDurch||'–')+' · '+todoDatumZeit(t.erstelltAm);
+  document.getElementById('todo-alert-actions').innerHTML=
+    '<button class="btn btn-secondary" onclick="todoDeepLink('+todoIdAttr(t.id)+')">Öffnen</button>'+
+    '<button class="btn btn-secondary" onclick="todoAktion('+todoIdAttr(t.id)+',\'seen\')">Gesehen</button>'+
+    '<button class="btn btn-primary" onclick="todoAktion('+todoIdAttr(t.id)+',\'processing\')">In Bearbeitung</button>'+
+    '<button class="btn btn-primary" onclick="todoAktion('+todoIdAttr(t.id)+',\'complete\')">Erledigt</button>';
+}
+function todoDeepLink(id){ showPage('todo'); setTodoFilter('alle'); setTimeout(()=>{const el=document.getElementById('todo-card-'+encodeURIComponent(String(id))); if(el){el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.outline='2px solid var(--accent2)'; setTimeout(()=>el.style.outline='',3000);}},80); }
+function todoHandleDeepLink(){ const id=new URLSearchParams(location.search).get('todo'); if(id) setTimeout(()=>todoDeepLink(id),300); }
+
+async function todoWorkerVerbinden(){
+  try { await lagertoolOAuthLogin(); todoPushStatusAktualisieren('Anmeldefenster geöffnet – bitte anmelden.'); }
+  catch(e){ toast('Verbindung',e.message||String(e),'⚠️'); }
+}
+function todoUrlBase64ToUint8Array(base64String){ const padding='='.repeat((4-base64String.length%4)%4); const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/'); const raw=atob(base64); return Uint8Array.from([...raw].map(c=>c.charCodeAt(0))); }
+async function todoServiceWorker(){ if(!('serviceWorker' in navigator)) throw new Error('Service Worker wird von diesem Browser nicht unterstützt.'); return navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(()=>navigator.serviceWorker.ready); }
+async function todoPushStatusAktualisieren(extra){
+  const el=document.getElementById('todo-push-status'); if(!el)return;
+  try{
+    if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window)){el.textContent='Push wird auf diesem Browser nicht unterstützt.';return;}
+    const reg=await todoServiceWorker(); const sub=await reg.pushManager.getSubscription();
+    const pieces=[lagertoolOAuthToken?'Worker verbunden':'Worker noch nicht verbunden', sub?'Push auf diesem Gerät aktiv':'Push auf diesem Gerät nicht aktiv', 'Berechtigung: '+Notification.permission];
+    if(extra) pieces.push(extra); el.textContent=pieces.join(' · ');
+  }catch(e){el.textContent='Push-Status: '+(e.message||e);}
+}
+async function todoPushAktivieren(){
+  try{
+    if(!lagertoolOAuthToken){ await lagertoolOAuthLogin(); todoPushStatusAktualisieren('Nach der Anmeldung bitte nochmals auf „Push aktivieren“ tippen.'); return; }
+    if(!('Notification' in window)) throw new Error('Benachrichtigungen werden nicht unterstützt.');
+    const permission=await Notification.requestPermission(); if(permission!=='granted') throw new Error('Benachrichtigungen wurden nicht erlaubt.');
+    const reg=await todoServiceWorker();
+    const pkRes=await fetch(new URL('api/v1/push/public-key',GPT_ASSISTANT_URL)); const pk=await pkRes.json();
+    if(!pkRes.ok||!pk.publicKey) throw new Error(pk.message||pk.error||'VAPID Public Key fehlt.');
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:todoUrlBase64ToUint8Array(pk.publicKey)});
+    const r=await fetch(new URL('api/v1/push/subscriptions',GPT_ASSISTANT_URL),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+lagertoolOAuthToken},body:JSON.stringify({subscription:sub.toJSON(),device:{ua:navigator.userAgent,platform:navigator.platform||'',label:(currentLoginUser?todoActor().name:'Gerät')}})});
+    const data=await r.json(); if(!r.ok) throw new Error(data.message||data.error||'Push-Registrierung fehlgeschlagen');
+    toast('Push aktiv','Dieses Gerät erhält Prio-1- und Prio-2-Meldungen.','🔔'); todoPushStatusAktualisieren();
+  }catch(e){ console.warn('[Push] aktivieren',e); toast('Push nicht aktiv',e.message||String(e),'⚠️'); todoPushStatusAktualisieren(); }
+}
+async function todoPushDeaktivieren(){
+  try{
+    const reg=await todoServiceWorker(); const sub=await reg.pushManager.getSubscription(); if(!sub){todoPushStatusAktualisieren();return;}
+    if(lagertoolOAuthToken){ await fetch(new URL('api/v1/push/subscriptions',GPT_ASSISTANT_URL),{method:'DELETE',headers:{'Content-Type':'application/json','Authorization':'Bearer '+lagertoolOAuthToken},body:JSON.stringify({endpoint:sub.endpoint})}); }
+    await sub.unsubscribe(); toast('Push deaktiviert','Dieses Gerät erhält keine LagerTool-Pushs mehr.','🔕'); todoPushStatusAktualisieren();
+  }catch(e){toast('Push',e.message||String(e),'⚠️');}
+}
+async function todoPushSenden(id){
+  const t=(state.todos||[]).find(x=>String(x.id)===String(id)); if(!t||todoPrioritaet(t)===0||!todoIstHandlungsOffen(t)) return;
+  if(todoPushImFlug.has(String(id))) return;
+  if(!lagertoolOAuthToken){ try{localStorage.setItem('lagertool_pending_push_todo',String(id));}catch(_){} return; }
+  todoPushImFlug.add(String(id));
+  const ctrl=new AbortController(); const timeout=setTimeout(()=>ctrl.abort(),8000);
+  try{
+    const r=await fetch(new URL('api/v1/push/notify/'+encodeURIComponent(String(id)),GPT_ASSISTANT_URL),{method:'POST',headers:{'Authorization':'Bearer '+lagertoolOAuthToken,'Content-Type':'application/json'},body:'{}',signal:ctrl.signal});
+    const data=await r.json().catch(()=>({}));
+    if(r.status===401){lagertoolOAuthToken=null; try{localStorage.setItem('lagertool_pending_push_todo',String(id));}catch(_){}; return;}
+    if(!r.ok) throw new Error(data.message||data.error||'Push-Versand fehlgeschlagen');
+    try{localStorage.removeItem('lagertool_pending_push_todo');}catch(_){}
+  }catch(e){ console.warn('[Push] Versand',e); try{localStorage.setItem('lagertool_pending_push_todo',String(id));}catch(_){} }
+  finally{clearTimeout(timeout); todoPushImFlug.delete(String(id));}
+}
+async function todoPushNachLogin(){
+  let id=null; try{id=localStorage.getItem('lagertool_pending_push_todo');}catch(_){} if(id) todoPushSenden(id);
+  todoPushStatusAktualisieren('Verbunden – jetzt bei Bedarf „Push aktivieren“ wählen.');
+}
+
+function todoNachRemoteSync(){ try{renderTodoPage();todoPopupPruefen();todoPushStatusAktualisieren();}catch(_){} }
+
 function todoIdAttr(id) {
   return JSON.stringify(id).replace(/"/g, '&quot;');
 }
 function renderTodoPage() {
   if (!state.todos) state.todos = [];
-  // Auswahl von zwischenzeitlich gelöschten To-dos bereinigen.
   const gueltigeIds = new Set(state.todos.map(t=>t.id));
   [...todoAusgewaehlt].forEach(id=>{ if(!gueltigeIds.has(id)) todoAusgewaehlt.delete(id); });
 
-  const offen = state.todos.filter(t => todoIstOffen(t)).length;
-  const erledigt = state.todos.filter(t => t.erledigt && !t.bereinigt).length;
-  document.getElementById('todo-stat-offen').textContent = offen;
-  document.getElementById('todo-stat-erledigt').textContent = erledigt;
+  const aktiv=state.todos.filter(todoIstAktivWorkflow);
+  const handlung=aktiv.filter(todoIstHandlungsOffen);
+  const p1=handlung.filter(t=>todoPrioritaet(t)===1).length, p2=handlung.filter(t=>todoPrioritaet(t)===2).length, normal=handlung.filter(t=>todoPrioritaet(t)===0).length;
+  const erledigt=aktiv.filter(todoIstErledigtWorkflow).length;
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  set('todo-stat-p1',p1); set('todo-stat-p2',p2); set('todo-stat-normal',normal); set('todo-stat-offen',handlung.length); set('todo-stat-erledigt',erledigt);
 
-  let liste = state.todos.slice().sort((a,b) => (b.erstelltAm||'').localeCompare(a.erstelltAm||''));
-  if (todoFilter === 'offen') liste = liste.filter(t => todoIstOffen(t));
-  if (todoFilter === 'erledigt') liste = liste.filter(t => t.erledigt && !t.bereinigt);
-  if (todoFilter === 'alle') liste = liste.filter(t => !t.bereinigt);
-  if (todoFilter === 'bereinigt') liste = liste.filter(t => t.bereinigt);
+  let liste=state.todos.slice();
+  if(todoFilter==='offen') liste=liste.filter(todoIstAktivWorkflow);
+  else if(todoFilter==='erledigt') liste=liste.filter(t=>todoIstErledigtWorkflow(t));
+  else if(todoFilter==='alle') liste=liste.filter(todoIstAktivWorkflow);
+  else if(todoFilter==='archiv') liste=liste.filter(t=>todoIstGeschlossen(t));
+  else if(todoFilter==='bereinigt') liste=liste.filter(t=>t.bereinigt);
+  if(todoFilter!=='archiv'&&todoFilter!=='bereinigt') liste.sort(todoSort); else liste.sort((a,b)=>String(todoWorkflowEnsure(b)?.closedAt||b.erstelltAm||'').localeCompare(String(todoWorkflowEnsure(a)?.closedAt||a.erstelltAm||'')));
 
-  // Bereinigungs-Hinweis + Vorschau (nichts wird ohne Bestätigung verändert)
-  const bereinWrap = document.getElementById('todo-bereinigung');
-  if (bereinWrap) {
-    const kand = todoBereinigungKandidaten();
-    if (!kand.length) bereinWrap.innerHTML = '';
-    else {
-      let h = '<div class="card" style="padding:10px 14px;margin-bottom:12px;border-left:3px solid var(--muted)">'
-        + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
-        + '<span style="font-size:13px">🧹 '+kand.length+' reine Änderungs-/Updatemeldung(en) in der offenen Liste erkannt</span>'
-        + '<button class="btn btn-secondary btn-sm" onclick="todoBereinigungToggle()">'+(todoBereinigungVorschau?'Vorschau schliessen':'Vorschau')+'</button></div>';
-      if (todoBereinigungVorschau) {
-        h += '<div style="font-size:12px;color:var(--muted);margin:8px 0">Diese Einträge werden nicht als erledigt markiert, sondern nur aus der offenen Liste genommen (wiederherstellbar im Tab „Bereinigt“). GPT-Protokolleinträge sind vorausgewählt; andere erkannte Meldungen nur nach eigener Prüfung ankreuzen.</div>';
-        kand.forEach(t => {
-          const tx = String(t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          h += '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">'
-            + '<input type="checkbox" class="todo-bereinigen-cb" data-id="'+String(t.id).replace(/"/g,'&quot;')+'"'+(todoIstEindeutigerAudit(t)?' checked':'')+' style="margin-top:2px">'
-            + '<span style="white-space:pre-wrap">'+tx+'</span>'
-            + '<span style="margin-left:auto;font-size:10px;color:var(--muted);white-space:nowrap">'+(todoIstEindeutigerAudit(t)?'GPT-Protokoll':'bitte prüfen')+'</span></label>';
-        });
-        h += '<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="todoBereinigungAusfuehren()">Ausgewählte aus offener Liste nehmen</button>';
+  const bereinWrap=document.getElementById('todo-bereinigung');
+  if(bereinWrap){
+    const kand=todoBereinigungKandidaten();
+    if(!kand.length||todoFilter==='archiv') bereinWrap.innerHTML='';
+    else{
+      let h='<div class="card" style="padding:10px 14px;margin-bottom:12px;border-left:3px solid var(--muted)"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:13px">🧹 '+kand.length+' reine Änderungs-/Updatemeldung(en) erkannt</span><button class="btn btn-secondary btn-sm" onclick="todoBereinigungToggle()">'+(todoBereinigungVorschau?'Vorschau schliessen':'Vorschau')+'</button></div>';
+      if(todoBereinigungVorschau){
+        h+='<div style="font-size:12px;color:var(--muted);margin:8px 0">Keine erledigte Aufgabe: nur Meldungen aus der aktiven Liste nehmen.</div>';
+        kand.forEach(t=>{h+='<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><input type="checkbox" class="todo-bereinigen-cb" data-id="'+todoEsc(t.id)+'"'+(todoIstEindeutigerAudit(t)?' checked':'')+' style="margin-top:2px"><span style="white-space:pre-wrap">'+todoEsc(t.text)+'</span></label>';});
+        h+='<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="todoBereinigungAusfuehren()">Ausgewählte bereinigen</button>';
       }
-      bereinWrap.innerHTML = h + '</div>';
+      bereinWrap.innerHTML=h+'</div>';
     }
   }
 
-  const wrap = document.getElementById('todo-list');
-  const auswahlBar = todoAusgewaehlt.size
-    ? '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px;flex-wrap:wrap">'
-      + '<span style="font-size:13px;font-weight:600">'+todoAusgewaehlt.size+' ausgewählt</span>'
-      + '<button class="btn btn-danger btn-sm" onclick="todoAusgewaehlteLoeschen()">🗑 '+todoAusgewaehlt.size+' ausgewählte löschen</button>'
-      + '<button class="btn btn-secondary btn-sm" onclick="todoAuswahlAufheben()">Auswahl aufheben</button>'
-      + '</div>'
-    : '';
+  const wrap=document.getElementById('todo-list'); if(!wrap)return;
+  const auswahlBar=todoAusgewaehlt.size?'<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:600">'+todoAusgewaehlt.size+' ausgewählt</span><button class="btn btn-danger btn-sm" onclick="todoAusgewaehlteLoeschen()">🗑 '+todoAusgewaehlt.size+' ausgewählte löschen</button><button class="btn btn-secondary btn-sm" onclick="todoAuswahlAufheben()">Auswahl aufheben</button></div>':'';
+  if(!liste.length){wrap.innerHTML=auswahlBar+'<div class="empty">Keine Einträge</div>';todoPopupPruefen();return;}
 
-  if (!liste.length) {
-    wrap.innerHTML = auswahlBar + '<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Keine Eintr\u00e4ge</div>';
-    return;
-  }
-  wrap.innerHTML = auswahlBar + liste.map(t => {
-    const bs = t.bsId ? (state.baustellen||[]).find(b => String(b.id) === String(t.bsId)) : null;
-    const bsHtml = bs ? '<span onclick="showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+bs.name+'</span>' : '';
-    const erledigtInfo = t.bereinigt
-      ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">🧹 Bereinigt – reine Meldung, keine ausgeführte Aufgabe ('+String(t.bereinigt.am||'').slice(0,10)+') '
-        + '<button class="btn btn-secondary btn-sm" style="margin-left:6px" onclick="todoWiederherstellen('+todoIdAttr(t.id)+')">↩ Wiederherstellen</button></div>'
-      : t.erledigt ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">\u2713 erledigt durch '+(t.erledigtDurch||'?')+' am '+(t.erledigtAm||'')+'</div>' : '';
-    const dueHtml = t.dueDate ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">\ud83d\udcc5 '+t.dueDate+(t.dueTime?' '+t.dueTime:'')+'</span>' : '';
-    const textEsc = (t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const istAusgewaehlt = todoAusgewaehlt.has(t.id);
-    const istRot = t.prioritaet === 'hoch' && !t.erledigt;
-    return '<div class="card" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(t.erledigt?';opacity:.6':'')+(istRot?';border:1px solid #e8574b;border-left:4px solid #e8574b;background:rgba(232,87,75,.08)':'')+(istAusgewaehlt?';border-color:var(--accent)':'')+'">'
-      + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center;flex-shrink:0;margin-top:3px">'
-      + '<input type="checkbox" '+(istAusgewaehlt?'checked':'')+' onchange="toggleTodoAuswahl('+todoIdAttr(t.id)+',this.checked)" title="Auswählen (für Mehrfachlöschen)" style="width:16px;height:16px;cursor:pointer">'
-      + '<input type="checkbox" '+(t.erledigt?'checked':'')+' onchange="toggleTodo('+todoIdAttr(t.id)+')" title="Erledigt" style="width:18px;height:18px">'
-      + '</div>'
-      + '<div style="flex:1">'
-      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'+bsHtml+dueHtml+'</div>'
-      + '<textarea onchange="setTodoText('+todoIdAttr(t.id)+',this.value)" rows="2" style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;resize:vertical'+(t.erledigt?';text-decoration:line-through':'')+'">'+textEsc+'</textarea>'
-      + '<div style="font-size:12px;color:var(--muted);margin-top:4px">\ud83d\udc64 '+(t.zustaendig||'\u2013')+'</div>'
-      + erledigtInfo
-      + '</div>'
-      + '<button onclick="deleteTodoItem('+todoIdAttr(t.id)+')" class="btn btn-secondary btn-sm" style="flex-shrink:0">\ud83d\uddd1</button>'
-      + '</div>';
+  wrap.innerHTML=auswahlBar+liste.map(t=>{
+    const wf=todoWorkflowEnsure(t), p=todoPrioritaet(t), completed=todoIstErledigtWorkflow(t), closed=todoIstGeschlossen(t), active=todoIstAktivWorkflow(t);
+    const bs=t.bsId?(state.baustellen||[]).find(b=>String(b.id)===String(t.bsId)):null;
+    const bsHtml=bs?'<span onclick="showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:10px;background:'+(bs.farbeHex||'#1a6b3a')+';color:#fff;margin-right:6px">'+todoEsc(bs.name)+'</span>':'';
+    const dueHtml=t.dueDate?'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--text);margin-right:6px">📅 '+todoEsc(t.dueDate)+(t.dueTime?' '+todoEsc(t.dueTime):'')+'</span>':'';
+    const prioHtml=p===1?'<span class="todo-prio-badge p1">🔴 PRIO 1</span>':p===2?'<span class="todo-prio-badge p2">🟡 PRIO 2</span>':'<span class="todo-prio-badge normal">Normal</span>';
+    const created='<div class="todo-meta-line">Erstellt von <b>'+todoEsc(todoNameKorrigieren(t.erstelltVon||t.erstelltDurch||'–'))+'</b> · '+todoEsc(todoDatumZeit(t.erstelltAm))+'</div>';
+    const seen=todoSeenText(t); const seenHtml=seen?'<div class="todo-meta-line">👁 Gesehen: '+todoEsc(seen)+'</div>':'';
+    let wfHtml='';
+    if(wf.status==='processing') wfHtml='<div class="todo-meta-line" style="color:var(--accent2)">🛠 In Bearbeitung durch <b>'+todoEsc(todoNameKorrigieren(wf.processingBy||'?'))+'</b> · '+todoEsc(todoDatumZeit(wf.processingAt))+'</div>';
+    if(completed) wfHtml='<div class="todo-meta-line" style="color:var(--green)">✅ Erledigt durch <b>'+todoEsc(todoNameKorrigieren(wf.completedBy||t.erledigtDurch||'?'))+'</b> · '+todoEsc(todoDatumZeit(wf.completedAt||t.erledigtAm))+'</div>';
+    if(closed) wfHtml+='<div class="todo-meta-line">📦 Geschlossen durch <b>'+todoEsc(todoNameKorrigieren(wf.closedBy||'?'))+'</b> · '+todoEsc(todoDatumZeit(wf.closedAt))+'</div>';
+    if(t.bereinigt) wfHtml='<div class="todo-meta-line">🧹 Bereinigt – keine ausgeführte Aufgabe <button class="btn btn-secondary btn-sm" onclick="todoWiederherstellen('+todoIdAttr(t.id)+')">↩ Wiederherstellen</button></div>';
+    let actions='';
+    if(active&&!completed){
+      actions='<div class="todo-wf-actions">'+(!todoGesehenVonAktuellem(t)?'<button class="btn btn-secondary btn-sm" onclick="todoAktion('+todoIdAttr(t.id)+',\'seen\')">👁 Gesehen</button>':'')+'<button class="btn btn-secondary btn-sm" onclick="todoAktion('+todoIdAttr(t.id)+',\'processing\')">🛠 In Bearbeitung</button><button class="btn btn-primary btn-sm" onclick="todoAktion('+todoIdAttr(t.id)+',\'complete\')">✅ Erledigt</button></div>';
+    } else if(active&&completed){ actions='<div class="todo-wf-actions"><button class="btn btn-primary btn-sm" onclick="todoAktion('+todoIdAttr(t.id)+',\'close\')">📦 SCHLIESSEN</button><button class="btn btn-secondary btn-sm" onclick="todoAktion('+todoIdAttr(t.id)+',\'reopen\')">↩ Wieder öffnen</button></div>'; }
+    const cls=p===1&&!completed?' todo-card-prio1':p===2&&!completed?' todo-card-prio2':completed?' todo-card-completed':'';
+    return '<div id="todo-card-'+encodeURIComponent(String(t.id))+'" class="card'+cls+'" style="padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start'+(closed?';opacity:.68':'')+'">'+
+      '<div style="display:flex;flex-direction:column;gap:8px;align-items:center;flex-shrink:0;margin-top:3px"><input type="checkbox" '+(todoAusgewaehlt.has(t.id)?'checked':'')+' onchange="toggleTodoAuswahl('+todoIdAttr(t.id)+',this.checked)" title="Auswählen" style="width:16px;height:16px;cursor:pointer"></div>'+
+      '<div style="flex:1;min-width:0"><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'+prioHtml+bsHtml+dueHtml+'</div>'+
+      '<textarea onchange="setTodoText('+todoIdAttr(t.id)+',this.value)" rows="2" '+(closed?'disabled ':'')+'style="width:100%;font-weight:700;font-size:14px;font-family:inherit;color:inherit;background:transparent;border:1px solid var(--border);border-radius:6px;padding:6px 8px;resize:vertical'+(completed?';text-decoration:line-through':'')+'">'+todoEsc(t.text)+'</textarea>'+
+      '<div class="todo-meta-line">👤 Zuständig: '+todoEsc(t.zustaendig||'–')+'</div>'+created+seenHtml+wfHtml+actions+'</div>'+
+      (!closed?'<button onclick="deleteTodoItem('+todoIdAttr(t.id)+')" class="btn btn-secondary btn-sm" title="Endgültig löschen" style="flex-shrink:0">🗑</button>':'')+'</div>';
   }).join('');
+  todoPopupPruefen();
 }
 
 function toggleTodoAuswahl(id, checked) {
@@ -3608,47 +3845,27 @@ async function todoAusgewaehlteLoeschen() {
 }
 
 function toggleTodo(id) {
-  const t = (state.todos||[]).find(x => x.id === id);
-  if (!t) return;
-  t.erledigt = !t.erledigt;
-  if (t.erledigt) {
-    const name = currentLoginUser ? (currentLoginUser.vorname||'')+' '+(currentLoginUser.nachname||'') : '';
-    t.erledigtDurch = initialenVon(name) || 'LV';
-    t.erledigtAm = new Date().toLocaleDateString('de-CH');
-  } else {
-    t.erledigtDurch = null;
-    t.erledigtAm = null;
-  }
-  save();
-  renderTodoPage();
+  const t=(state.todos||[]).find(x=>String(x.id)===String(id)); if(!t)return;
+  return todoAktion(id,todoIstErledigtWorkflow(t)?'reopen':'complete');
 }
 
 function setTodoText(id, val) {
-  const t = (state.todos||[]).find(x => x.id === id);
-  if (!t) return;
-  const trimmed = val.trim();
-  if (!trimmed) { toast('Fehler','Haupttext darf nicht leer sein','\u26a0\ufe0f'); renderTodoPage(); return; }
-  t.text = trimmed;
-  save();
+  const trimmed=String(val||'').trim();
+  if(!trimmed){toast('Fehler','Haupttext darf nicht leer sein','⚠️');renderTodoPage();return;}
+  const p=todoPrioritaetAusText(trimmed), now=new Date().toISOString();
+  todoPersistMutation(s=>{const t=(s.todos||[]).find(x=>String(x.id)===String(id));if(!t)throw new Error('To-do nicht gefunden');t.text=trimmed;if(p>0&&todoPrioritaet(t)===0){t.priority=p;const wf=todoWorkflowEnsure(t);wf.push.requestedAt=now;wf.push.sentAt=null;}t.letzteAenderung={at:now,actor:todoActor()};},{pushTodoId:p>0?id:null});
 }
 
-function addTodoItem() {
-  const textEl = document.getElementById('todo-neu-text');
-  const zustEl = document.getElementById('todo-neu-zustaendig');
-  const text = textEl.value.trim();
-  if (!text) return toast('Fehler','Text erforderlich','\u26a0\ufe0f');
-  if (!state.todos) state.todos = [];
-  state.todos.push({
-    id: Date.now(), text, bsId: null,
-    zustaendig: zustEl.value.trim() || '\u2013',
-    erledigt: false, erledigtDurch: null, erledigtAm: null,
-    notiz: '', erstelltAm: new Date().toISOString().slice(0,10),
-    quelle: 'Manuell'
-  });
-  textEl.value = ''; zustEl.value = '';
-  save();
-  renderTodoPage();
-  toast('To-Do hinzugef\u00fcgt', text, '\u2705');
+async function addTodoItem() {
+  const textEl=document.getElementById('todo-neu-text'), zustEl=document.getElementById('todo-neu-zustaendig');
+  const text=String(textEl?.value||'').trim(); if(!text)return toast('Fehler','Text erforderlich','⚠️');
+  const actor=todoActor(), now=new Date().toISOString(), priority=todoPrioritaetAusText(text), id=Date.now()+Math.floor(Math.random()*10000);
+  const todo={id,text,bsId:null,zustaendig:String(zustEl?.value||'').trim()||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:now,erstelltVon:actor.name,quelle:'Manuell',priority,
+    wf:{status:'open',seenBy:{},processingBy:null,processingAt:null,completedBy:null,completedAt:null,closedBy:null,closedAt:null,push:priority?{requestedAt:now,sentAt:null}:{}}};
+  const res=await todoPersistMutation(s=>{if(!(s.todos||[]).some(x=>String(x.id)===String(id)))s.todos.push(JSON.parse(JSON.stringify(todo)));},{pushTodoId:priority?id:null});
+  if(!res?.ok)return toast('Nicht gespeichert',res?.error?.message||'Firebase-Fehler','⚠️');
+  if(textEl)textEl.value=''; if(zustEl)zustEl.value='';
+  toast(priority===1?'🔴 Prio 1 erstellt':priority===2?'🟡 Prio 2 erstellt':'To-do hinzugefügt',text,'✅');
 }
 
 async function deleteTodoItem(id) {
@@ -11433,6 +11650,7 @@ function startFirebaseListener() {
           markFirebaseSynced();
           safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
           renderAll();
+          try { todoNachRemoteSync(); } catch (_) {}
           setTimeout(updateMeldungenBadge, 100);
           // state.mitarbeiter ist jetzt geladen - Login-Screen ggf. neu rendern,
           // damit ein auf diesem Gerät eingerichteter Gesichtserkennungs-Login
@@ -13350,6 +13568,7 @@ window.addEventListener('message', async (event) => {
   try {
     await lagertoolOAuthExchangeCode(event.data.code, event.data.state);
     console.log('[OAuth] LagerTool erfolgreich verbunden');
+    try { await todoPushNachLogin(); todoPushStatusAktualisieren(); } catch (_) {}
   } catch (err) {
     console.error('[OAuth] Anmeldung fehlgeschlagen', err);
     toast('LagerTool Anmeldung fehlgeschlagen', err.message || '', '⚠️');
@@ -13473,7 +13692,12 @@ function gptFindSite(a){
 // dueDate/dueTime optional (Fälligkeit), kind unterscheidet 'arbeit' (vom
 // Benutzer verlangte Aufgabe) von 'audit' (automatisches Änderungsprotokoll).
 function gptTodo(text,responsible,bsId,source='GPT',dueDate,dueTime,kind,opts){
-  return todoErstellen({text,bsId:bsId||null,zustaendig:responsible||'–',quelle:source,erstelltDurch:gptActor().name,dueDate:dueDate||null,dueTime:dueTime||null,kind:kind||'arbeit'}, opts);
+  const r=todoErstellen({text,bsId:bsId||null,zustaendig:responsible||'–',quelle:source,erstelltDurch:gptActor().name,erstelltVon:gptActor().name,dueDate:dueDate||null,dueTime:dueTime||null,kind:kind||'arbeit'}, opts);
+  if(r && r.status==='neu' && r.todo){
+    const p=todoPrioritaetAusText(text), now=new Date().toISOString(); r.todo.priority=p;
+    r.todo.wf={status:'open',seenBy:{},processingBy:null,processingAt:null,completedBy:null,completedAt:null,closedBy:null,closedAt:null,push:p?{requestedAt:now,sentAt:null}:{}};
+  }
+  return r;
 }
 // Änderungsprotokoll wird NICHT mehr als To-do gespeichert (reine Meldung).
 // Die ausgeführte Änderung erscheint weiterhin in der Chat-Antwort (applied).
@@ -14108,6 +14332,10 @@ function gptToggleSpeech(){
   r.onend=()=>{gptListening=false;btn?.classList.remove('listening');};
   r.start();
 }
+
+
+// PWA/Push-Grundregistrierung: keine Berechtigungsabfrage ohne Benutzeraktion.
+window.addEventListener('load',()=>{ todoServiceWorker().then(()=>todoPushStatusAktualisieren()).catch(()=>{}); todoHandleDeepLink(); setTimeout(todoPopupPruefen,500); });
 </script>
 
 
