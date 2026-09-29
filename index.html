@@ -2413,7 +2413,7 @@ function migrationMitarbeiterPins() {
 
   // Fehlende Monteure aus altem Baustellen-Manager ergänzen (nur falls Name noch nicht existiert)
   if (!state._monteureNachimportiert) {
-    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter","pin":"2001"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur","pin":"2002"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur","pin":"2003"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter","pin":"2004"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur","pin":"2005"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur","pin":"2006"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur","pin":"2007"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur","pin":"2008"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur","pin":"2009"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter","pin":"2010"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur","pin":"2011"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur","pin":"2012"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur","pin":"2013"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur","pin":"2014"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur","pin":"2015"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur","pin":"2016"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur","pin":"2017"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur","pin":"2018"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter","pin":"2019"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur","pin":"2020"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur","pin":"2021"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur","pin":"2022"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur","pin":"2023"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur","pin":"2024"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter","pin":"2025"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur","pin":"2026"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter","pin":"2027"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur","pin":"2028"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur","pin":"2029"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur","pin":"2030"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur","pin":"2031"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur","pin":"2032"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur","pin":"2033"},{"vorname":"Tobias","nachname":"Draäyer","funktion":"leiter","rolle":"leiter","pin":"1234","admin":true}];
+    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter","pin":"2001"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur","pin":"2002"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur","pin":"2003"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter","pin":"2004"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur","pin":"2005"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur","pin":"2006"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur","pin":"2007"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur","pin":"2008"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur","pin":"2009"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter","pin":"2010"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur","pin":"2011"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur","pin":"2012"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur","pin":"2013"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur","pin":"2014"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur","pin":"2015"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur","pin":"2016"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur","pin":"2017"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur","pin":"2018"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter","pin":"2019"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur","pin":"2020"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur","pin":"2021"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur","pin":"2022"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur","pin":"2023"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur","pin":"2024"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter","pin":"2025"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur","pin":"2026"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter","pin":"2027"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur","pin":"2028"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur","pin":"2029"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur","pin":"2030"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur","pin":"2031"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur","pin":"2032"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur","pin":"2033"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","pin":"1234","admin":true}];
     fehlendeListe.forEach(f => {
       const exists = state.mitarbeiter.some(m =>
         (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
@@ -2443,11 +2443,13 @@ function migrationMitarbeiterPins() {
   }
 
   // Tobias Draäyer als zusätzlichen Admin markieren (immer prüfen, unabhängig von obiger Migration)
-  const tobias = state.mitarbeiter.find(m =>
+  // Tobias Dräyer: korrekte Schreibweise + alte historische Tippvariante unterstützen.
+  // So bleibt sein Admin-Zugriff stabil, ohne einen zweiten Mitarbeiter anzulegen.
+  const tobiasAdmins = state.mitarbeiter.filter(m =>
     (m.vorname||'').trim().toLowerCase() === 'tobias' &&
-    (m.nachname||'').trim().toLowerCase() === 'draäyer'
+    ['dräyer','draäyer'].includes((m.nachname||'').trim().toLowerCase())
   );
-  if (tobias && !tobias.admin) tobias.admin = true;
+  tobiasAdmins.forEach(tobias => { if (!tobias.admin) tobias.admin = true; });
 
   // Admin "Luc Vorburger" explizit sicherstellen (per Name, nicht per admin-Flag,
   // damit andere Admins wie Tobias diese Prüfung nicht blockieren)
@@ -7770,6 +7772,35 @@ function excelStarkeKandidaten(text, datum, kandidaten) {
     return texte.some(x => passt(excelTokens(x)));
   });
 }
+// Eindeutiger Tippfehler-Treffer: erlaubt genau dort eine automatische Zuordnung,
+// wo die Identität trotz kleiner Schreibabweichung klar ist (z.B. Rüthihof ↔ Rütihof).
+// Sicherheitsregeln:
+//  • nur aktive Baustellen im gültigen Zeitraum
+//  • mindestens zwei relevante Identitätswörter
+//  • jedes Wort des Baustellen-Namens/Projekts/Alias muss im Excel-Text vorkommen
+//  • mindestens ein exakter UND mindestens ein echter Tippfehler-Treffer
+//  • automatische Zuordnung nur, wenn danach genau EIN Kandidat übrig bleibt
+function excelStarkeFuzzyKandidaten(text, datum, kandidaten) {
+  const tt = excelTokens(text);
+  if (tt.length < 2) return [];
+  const passt = bt => {
+    if (bt.length < 2) return false;
+    const treffer = bt.map(x => {
+      let best = 0;
+      tt.forEach(t => {
+        if (excelTokGleich(t, x)) best = Math.max(best, 2);
+        else if (excelTokAehnlich(t, x)) best = Math.max(best, 1);
+      });
+      return best;
+    });
+    return treffer.every(Boolean) && treffer.some(v => v === 2) && treffer.some(v => v === 1);
+  };
+  return (kandidaten || []).filter(b => {
+    if (!bsImZeitraum(b, datum)) return false;
+    const texte = [b.name, b.kommission, b.projekt, ...bsAbgleichAliase(b)].filter(Boolean);
+    return texte.some(x => passt(excelTokens(x)));
+  });
+}
 function bsImZeitraum(bs, datum) {
   if (!datum || (!bs.von && !bs.bis)) return true;
   return (!bs.von || datum >= bs.von) && (!bs.bis || datum <= bs.bis);
@@ -7817,6 +7848,13 @@ function excelBaustelleAbgleichen(text, datum) {
   const stark = excelStarkeKandidaten(text, datum, aktiv);
   if (stark.length === 1) return { status: 'eindeutig', bs: stark[0], kandidaten: stark, weg: 'eindeutig-stark', vorschlaege: [] };
   if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
+
+  // Priorität 3: kleiner, eindeutiger Tippfehler in der Identität.
+  // Beispiel: "Fust Rüthihof Platten" → "Fust Rütihof", sofern am Einsatztag
+  // genau diese eine aktive Baustelle passt. Niemals bei mehreren Kandidaten raten.
+  const fuzzyStark = excelStarkeFuzzyKandidaten(text, datum, aktiv);
+  if (fuzzyStark.length === 1) return { status: 'eindeutig', bs: fuzzyStark[0], kandidaten: fuzzyStark, weg: 'eindeutig-tippfehler', vorschlaege: [] };
+  if (fuzzyStark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere-tippfehler', kandidaten: fuzzyStark, vorschlaege: [] };
 
   // Identität EINDEUTIG (genau eine aktive Baustelle passt nach Name/Alias/Auftragsnr./Teilmenge),
   // aber der Einsatztag liegt ausserhalb von von/bis: Verknüpfung auf die bestehende ID, der
@@ -9899,8 +9937,10 @@ function readBsFile(file) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// NEU: physischer Server-Upload über den Cloudflare Worker
-// (POST /api/v1/site-documents → Bridge → OneDrive-Auftragsordner).
+// GEMEINSAME DATEIABLAGE: physischer Server-Upload über den Cloudflare Worker.
+// Der Server-/R2-Dokumentbestand ist für Luc, Tobias und ChatGPT die führende Ablage.
+// Lokale IndexedDB-Dateien sind nur Altbestand und müssen bei Bedarf mit
+// "Gemeinsam speichern" in die gemeinsame Ablage übernommen werden.
 // Ersetzt für NEUE Dateien den bisherigen reinen Base64/IndexedDB-Weg.
 // Bestehende IndexedDB-Dokumente (readBsFile-Altbestand) bleiben unberührt.
 // ══════════════════════════════════════════════════════════════
