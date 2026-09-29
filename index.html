@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="de"><head>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
@@ -2794,27 +2794,7 @@ function finishLogin() {
 
   renderAll();
   setTimeout(updateMeldungenBadge, 100);
-
-  // Nach Login bestehende rote Excel-Einträge automatisch nochmals gegen die aktuell
-  // vorhandenen Baustellen/Aliase prüfen. So werden später ergänzte Informationen ohne
-  // erneuten Excel-Import sofort genutzt. Nur bei tatsächlicher Änderung wird gespeichert.
-  if (istAdmin || istEntwickler) {
-    setTimeout(async () => {
-      try {
-        const vorherPlan = JSON.stringify(state.plan || {});
-        const vorherTodos = JSON.stringify(state.todos || []);
-        const r = excelNachAbgleich();
-        const geaendert = vorherPlan !== JSON.stringify(state.plan || {}) || vorherTodos !== JSON.stringify(state.todos || []);
-        if (geaendert) {
-          const s = await save({verify:true});
-          renderWochenplan();
-          try { renderTodoPage(); } catch(_) {}
-          if (s && s.ok && r.verknuepft) toast('Excel-Abgleich', r.verknuepft + ' eindeutige Baustellen automatisch verknüpft', '🔗');
-        }
-      } catch (e) { console.warn('[Excel-Abgleich] automatischer Nachabgleich fehlgeschlagen', e); }
-    }, 250);
-    setTimeout(pruefeGeburtstagsTodos, 500);
-  }
+  if (istAdmin || istEntwickler) setTimeout(pruefeGeburtstagsTodos, 300);
 }
 
 // ── GEBURTSTAGE (Priorität 11) ───────────────────────────────
@@ -3059,6 +3039,132 @@ function lagertoolSchreibsperre(quelle) {
   return { ok: false, grund: 'nicht-angemeldet', error: new Error(text) };
 }
 
+// ═══ SYNCHRONISATION: Basisstand + 3-Wege-Merge (kein Überschreiben paralleler Änderungen) ═══
+// Der Datenspeicher ist EIN Firebase-Knoten 'lagertool' (JSON-String des schlanken Gesamtstands).
+// Früher schrieb save() den lokalen Gesamtstand unbedingt (dbRef.set) – parallele Änderungen von Tobias,
+// einer Reparatur oder dem MCP-Worker gingen dabei verloren. Jetzt: Firebase-Transaktion (Compare-and-Set)
+// mit 3-Wege-Merge Basis(letzter bekannter Serverstand) / Lokal / Server(frisch):
+//   • nur lokal geändert → lokal   • nur Server geändert → Server   • beide gleich → gleich
+//   • beide geändert: Objekte je Schlüssel, Listen mit eindeutiger id je Element weiter mergen
+//   • gleiche Stelle unterschiedlich geändert = Konflikt: der SERVER-Wert bleibt, die lokale Änderung wird
+//     ausdrücklich gemeldet (nie still verworfen, nie fremde Änderung überschrieben).
+let syncBase = null;                     // schlanker Serverstand, auf dem der lokale Stand zuletzt aufbaute
+const syncKopie = o => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
+function syncKanon(o, memo) {
+  if (o === undefined) return 'u';
+  if (o === null || typeof o !== 'object') return JSON.stringify(o);
+  let c = memo.get(o); if (c !== undefined) return c;
+  c = Array.isArray(o) ? '[' + o.map(x => syncKanon(x, memo)).join(',') + ']'
+    : '{' + Object.keys(o).sort().map(k => JSON.stringify(k) + ':' + syncKanon(o[k], memo)).join(',') + '}';
+  memo.set(o, c); return c;
+}
+const syncIstObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
+function syncIstIdListe(a) {
+  if (!Array.isArray(a)) return false;
+  const ids = new Set();
+  for (const x of a) { if (!syncIstObj(x) || x.id === undefined || x.id === null || x.id === '') return false; const k = String(x.id); if (ids.has(k)) return false; ids.add(k); }
+  return true;
+}
+function syncKurz(v) { const t = v === undefined ? '(gelöscht)' : JSON.stringify(v); return t.length > 90 ? t.slice(0, 87) + '…' : t; }
+function syncMerge3(b, l, r, pfad, ctx) {
+  const K = x => syncKanon(x, ctx.memo);
+  const kl = K(l), kr = K(r);
+  if (kl === kr) return l;                                   // gleich (auch beide gelöscht)
+  if (kl === K(b)) return r;                                 // lokal unverändert → Server (auch Server-Löschung)
+  if (kr === K(b)) return l;                                 // nur lokal geändert → lokal (auch lokale Löschung)
+  if (syncIstObj(l) && syncIstObj(r) && (b === undefined || syncIstObj(b))) {
+    // Beide haben denselben Knoten NEU angelegt: Behälter (z.B. Tag im Wochenplan) werden je Schlüssel gemergt; ein Datensatz mit
+    // widersprüchlichen Einzelwerten bleibt dagegen als Ganzes beim Server-Wert (kein Mischeintrag aus zwei Quellen).
+    if (b === undefined && Object.keys(l).some(k => r[k] !== undefined && (l[k] === null || typeof l[k] !== 'object' || r[k] === null || typeof r[k] !== 'object') && K(l[k]) !== K(r[k]))) {
+      ctx.konflikte.push({ pfad, lokal: syncKurz(l), server: syncKurz(r) });
+      return r;
+    }
+    const out = {}, keys = [...new Set([...Object.keys(r), ...Object.keys(l), ...Object.keys(b || {})])];
+    keys.forEach(k => { const v = syncMerge3(b ? b[k] : undefined, l[k], r[k], pfad + '/' + k, ctx); if (v !== undefined) out[k] = v; });
+    return out;
+  }
+  if (syncIstIdListe(l) && syncIstIdListe(r) && (b === undefined || syncIstIdListe(b))) {
+    const map = a => new Map((a || []).map(x => [String(x.id), x])), B = map(b), L = map(l), R = map(r);
+    const ids = [...new Set([...R.keys(), ...L.keys()])], out = [];
+    ids.forEach(id => { const v = syncMerge3(B.get(id), L.get(id), R.get(id), pfad + '[' + id + ']', ctx); if (v !== undefined) out.push(v); });
+    return out;
+  }
+  ctx.konflikte.push({ pfad, lokal: syncKurz(l), server: syncKurz(r) });   // Server-Wert bleibt
+  return r;
+}
+// base/lokal/remote ohne _ts. Rückgabe {merged, konflikte, geaendert} (geaendert: merged ≠ remote → Schreiben nötig)
+function syncMergeStand(base, lokal, remote) {
+  const ctx = { memo: new WeakMap(), konflikte: [] };
+  const merged = syncMerge3(base, lokal, remote, '', ctx);
+  return { merged, konflikte: ctx.konflikte, geaendert: syncKanon(merged, ctx.memo) !== syncKanon(remote, ctx.memo) };
+}
+// Serverstand als lokalen Stand übernehmen (wie der Listener: lokale Dokumente/Fotos bleiben erhalten)
+function syncStandUebernehmen(neu) {
+  const lokalVor = state;
+  state = neu;
+  ['mitarbeiter', 'fahrzeuge', 'artikel', 'baustellen', 'werkzeug'].forEach(k => { if (!Array.isArray(state[k])) state[k] = []; });
+  if (!state.plan) state.plan = {};
+  (state.fahrzeuge || []).forEach(f => { const l = (lokalVor.fahrzeuge || []).find(x => x.id === f.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) f.docs = l.docs; });
+  (state.mitarbeiter || []).forEach(m => { const l = (lokalVor.mitarbeiter || []).find(x => x.id === m.id); if (l) { if (l.foto && l.foto !== '_localOnly') m.foto = l.foto; if (Array.isArray(l.docs) && l.docs.some(d => d.data)) m.docs = l.docs; } });
+  (state.baustellen || []).forEach(b => { const l = (lokalVor.baustellen || []).find(x => x.id === b.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) b.docs = l.docs; });
+  try { safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state))); } catch (_) {}
+}
+let saveKette = Promise.resolve();
+// Ein Speichervorgang (läuft seriell hinter save()): frischer lokaler Schnappschuss → Transaktion mit Merge.
+async function syncMergeSpeichern(doVerify) {
+  const lokal = stripLargeData(state); const lokalTs = lokal._ts; delete lokal._ts;
+  let letzte = null;
+  const updater = current => {
+    if (current === null || current === undefined) {                  // Server leer (oder Cache leer → Firebase wiederholt bei Abweichung)
+      const w = syncKopie(lokal); w._ts = Date.now();
+      letzte = { leer: true, merged: syncKopie(lokal), konflikte: [], remoteGeaendert: false, ts: w._ts };
+      return JSON.stringify(w);
+    }
+    let remote;
+    try { remote = typeof current === 'string' ? JSON.parse(current) : syncKopie(current); } catch (e) { letzte = { fehler: 'Serverstand nicht lesbar' }; return undefined; }
+    if (!syncBase) { letzte = { fehler: 'Kein Sync-Basisstand – bitte Seite neu laden (nichts geschrieben)' }; return undefined; }
+    const base = syncKopie(syncBase), remoteTs = Number(remote._ts) || 0; delete remote._ts; delete base._ts;
+    const r = syncMergeStand(base, lokal, remote);
+    const remoteGeaendert = syncKanon(remote, new WeakMap()) !== syncKanon(base, new WeakMap());
+    letzte = { merged: r.merged, konflikte: r.konflikte, geaendert: r.geaendert, remoteGeaendert, ts: 0 };
+    if (!r.geaendert) return undefined;                               // Server enthält bereits alles
+    // Kopie: r.merged kann auf den lokalen Schnappschuss zeigen (nur lokal geändert) – der darf nicht verändert werden (Wiederholung der Transaktion)
+    const w = Object.assign({}, r.merged, { _ts: Math.max(Date.now(), remoteTs + 1) }); letzte.ts = w._ts;
+    return JSON.stringify(w);
+  };
+  let tr;
+  try { tr = await dbRef.transaction(updater, undefined, false); }
+  catch (e) { return { ok: false, error: e, grund: 'Transaktion nicht bestätigt: ' + (e && e.message || e) }; }
+  if (!tr.committed && letzte && letzte.fehler) return { ok: false, error: new Error(letzte.fehler), grund: letzte.fehler };
+  const geschrieben = tr.committed ? tr.snapshot.val() : null;
+  // Lokale Änderungen, die WÄHREND der Transaktion entstanden sind, dürfen nicht durch die Übernahme verloren gehen.
+  const jetzt = stripLargeData(state); delete jetzt._ts;
+  const lokalUnveraendert = syncKanon(jetzt, new WeakMap()) === syncKanon(lokal, new WeakMap());
+  const mergedMitTs = tr.committed ? (typeof geschrieben === 'string' ? JSON.parse(geschrieben) : syncKopie(geschrieben)) : Object.assign(syncKopie(letzte.merged), { _ts: state._ts });
+  if (lokalUnveraendert) {
+    const mergedOhneTs = syncKopie(mergedMitTs); delete mergedOhneTs._ts;
+    if (syncKanon(mergedOhneTs, new WeakMap()) !== syncKanon(lokal, new WeakMap())) {   // Server-Änderungen (oder Konflikt-Entscheide) einarbeiten
+      syncStandUebernehmen(syncKopie(mergedMitTs));
+      try { renderAll(); } catch (e) { console.warn('renderAll nach Merge', e); }
+    }
+    syncBase = syncKopie(mergedMitTs);
+    if (mergedMitTs._ts) state._ts = mergedMitTs._ts;
+  }   // sonst: Basis bleibt unverändert – der nächste Merge trennt eigene neue Änderungen sauber von Server-Änderungen
+  const konflikte = (letzte && letzte.konflikte) || [];
+  if (konflikte.length) {
+    console.warn('[Sync] Konflikte (Server-Wert blieb):', konflikte);
+    try { toast('Parallele Änderung', konflikte.length + ' Änderung(en) NICHT übernommen, weil jemand anderes dieselbe Stelle geändert hat (Server-Stand bleibt): ' + konflikte.slice(0, 3).map(k => k.pfad.replace(/^\//, '')).join('; ') + (konflikte.length > 3 ? ' …' : ''), '⚠️'); } catch (_) {}
+  }
+  if (!tr.committed) return { ok: true, verified: true, unveraendert: true, konflikte, teilweise: konflikte.length > 0 };
+  let verified = false, nachgeaendert = false;
+  if (doVerify) {
+    try {
+      const snap = await dbRef.once('value'), persisted = snap.val();
+      verified = persisted === geschrieben; nachgeaendert = !verified;
+    } catch (readErr) { return { ok: true, verified: false, verifyError: readErr, konflikte, teilweise: konflikte.length > 0 }; }
+  }
+  return { ok: true, verified, nachgeaendert, gemerged: !!(letzte && letzte.remoteGeaendert), konflikte, teilweise: konflikte.length > 0 };
+}
 function save(opts) {
   // Letzte Schutzschicht: ohne gültige Anmeldung weder Firebase noch lokalen Cache schreiben.
   if (!lagertoolDarfSchreiben()) return Promise.resolve(lagertoolSchreibsperre('save'));
@@ -3070,30 +3176,15 @@ function save(opts) {
   const slimJson = JSON.stringify(slimState);
   safeStorage.setItem('lagertool', slimJson);
   saveDocsToIDB(state);
-  // Firebase: gleiche schlanke Daten
+  // Firebase: Merge-Transaktion (siehe oben), seriell – jeder Lauf nimmt den dann aktuellen lokalen Stand.
   if (dbRef && hasReceivedFirebaseSync) {
     try {
       suppressListener = true;
-      const p = dbRef.set(slimJson).then(async () => {
-          showSyncIndicator('↑ Sync');
-          if (!doVerify) return {ok:true};
-          // Verifikation: den soeben geschriebenen Datensatz aus Firebase
-          // neu laden und mit dem gesendeten JSON vergleichen. Weicht er ab,
-          // hat zwischenzeitlich jemand/etwas anderes überschrieben - dann
-          // ist unser Schreibvorgang NICHT mehr zuverlässig der aktuelle Stand.
-          try {
-            const snap = await dbRef.once('value');
-            const persisted = snap.val();
-            if (persisted === slimJson) return {ok:true, verified:true};
-            return {ok:false, error:new Error('Nach dem Schreiben gelesener Datensatz weicht ab (evtl. zeitgleiche Änderung durch jemand anderen)')};
-          } catch(readErr) {
-            // Schreiben war laut Firebase erfolgreich, nur die Kontroll-Leseoperation
-            // schlug fehl - als unsicher (nicht verifiziert), aber nicht als Fehlschlag werten.
-            return {ok:true, verified:false, verifyError:readErr};
-          }
-        })
-        .catch(e => { console.warn('Firebase write error', e); suppressListener = false; return {ok:false, error:e}; })
-        .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); pendingSavePromise = null; });
+      const p = saveKette.then(() => syncMergeSpeichern(doVerify))
+        .then(res => { if (res && res.ok) showSyncIndicator(res.gemerged ? '↑↓ Sync (mit Änderungen anderer gemerged)' : '↑ Sync'); return res; })
+        .catch(e => { console.warn('Firebase write error', e); return { ok: false, error: e }; })
+        .finally(() => { setTimeout(() => { suppressListener = false; }, 2000); if (pendingSavePromise === p) pendingSavePromise = null; });
+      saveKette = p.catch(() => {});
       pendingSavePromise = p;
       return p;
     } catch(e) { suppressListener = false; return Promise.resolve({ok:false, error:e}); }
@@ -6506,6 +6597,34 @@ function wpSucheNorm(t) {
     .replace(/ß/g,'ss').toLowerCase().replace(/\s+/g,' ').trim();
 }
 
+// Status-Zelle des Wochenplans (Urlaub/Info folgt/…/unverknüpfter Excel-Eintrag). neben=true: steht neben Einsätzen.
+function wpStatusNebenEinsatz(statusE, ds, maId) {
+  if (!excelIstUnverknuepft(statusE)) return false;                       // Urlaub/Krank/… bleibt wie bisher exklusiv
+  const exTxt = excelTextVonEintrag(statusE);
+  if (excelStatusAusText(exTxt)) return false;                             // „Info folgt“ o.ä. ist Planungsstatus
+  return !excelUngeklaertAufgeloest(ds, maId, exTxt);
+}
+function wpStatusZelleHtml(statusE, m, ds, neben) {
+  const exTxt = excelTextVonEintrag(statusE);
+  const eigentlichStatus = excelIstUnverknuepft(statusE) ? excelStatusAusText(exTxt) : null; // z.B. "Info folgt"
+  const unverkn = excelIstUnverknuepft(statusE) && !eigentlichStatus && !excelUngeklaertAufgeloest(ds, m.id, exTxt);
+  const sHex = unverkn ? statusHex('Baustelle ungeklärt') : eigentlichStatus ? statusHex(eigentlichStatus) : (statusE.farbeHex||statusHex(statusE.status)), sTc=textCol(sHex);
+  const abwLeer = statusE.excelAbweichung ? '<span title="Excel-Zelle ist leer – Eintrag prüfen" style="margin-left:3px">⚠</span>' : '';
+  const hotelS = statusE.hotel ? '<span title="🏨 '+bsKwEsc(statusE.hotel)+'" style="font-size:10px;margin-left:3px">🏨</span>' : '';
+  // Unverknüpft: Excel-Bezeichnung statt pauschal "Baustelle ungeklärt", rot markiert
+  const anz = unverkn ? excelUnverknuepftAnzeige(exTxt, ds) : null;
+  const nebenTxt = neben ? ' · neben Einsatz' : '';
+  const inhalt = unverkn
+    ? '<span title="'+bsKwEsc(anz.titel + (neben ? ' – Excel-Eintrag steht neben einem anderen Einsatz dieses Tages' : ''))+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">'+bsKwEsc(anz.label + nebenTxt)+'</span></span>'
+    : eigentlichStatus
+      ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
+      : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
+  return '<div class="wp-cell" draggable="true" '
+    +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
+    +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center'+(unverkn?';border:1px solid #e8574b':'')+'" '
+    +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'
+    +inhalt+hotelS+abwLeer+'</div>';
+}
 function renderWochenplan() {
   wpInit();
   const allDates = [];
@@ -6674,41 +6793,26 @@ function renderWochenplan() {
             const label=bsKwEsc(e.excelText || (bs?bs.name:'?'));
             const hotelTxt = e.hotel || bs?.hotelName || '';
             const hotelIcon = hotelTxt ? '<span title="🏨 '+bsKwEsc(hotelTxt)+'" style="position:absolute;top:2px;right:3px;font-size:10px">🏨</span>' : '';
-            const matchWarn = e.matchingWarnung ? '<span title="'+(e.matchingWarnung==='historisch'?'Eindeutig mit einer früher/beendet geführten Baustelle verknüpft – To-do prüfen':'Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – To-do prüfen')+'" style="position:absolute;bottom:1px;left:3px;font-size:10px">⚠</span>' : '';
             const bsInfoLink = bs ? '<span title="Baustelle: '+bsKwEsc(bs.name)+' – Infos öffnen" onclick="event.stopPropagation();showBsModal('+maIdAttr(bs.id)+')" style="cursor:pointer;opacity:.8;font-size:10px;margin-right:3px">ℹ️</span>' : '';
             const zeitTxt = e.startzeit ? (e.startzeit+(e.endzeit?'–'+e.endzeit:'')) : '';
             const zeitHtml = zeitTxt ? '<span style="opacity:.7;font-size:10px"> ⏱'+zeitTxt+'</span>' : '';
             const fzgHtml = e.fahrzeugName ? '<span style="opacity:.7;font-size:10px"> 🚐'+e.fahrzeugName+'</span>' : '';
+            const terminHtml = e.terminAbweichung ? '<span title="'+bsKwEsc(excelTerminText(e.terminAbweichung, bs))+'" style="display:block;font-size:9px;color:#ff8a80">⚠ Termin weicht vom Auftrag ab</span>' : '';
             return '<div class="wp-cell" draggable="true" '
               +'data-key="'+key+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="'+(e.bsId||0)+'" '
-              +'style="background:'+bsHex+';color:'+bsText+';font-size:11px;position:relative;min-height:26px;cursor:grab" '
+              +'style="background:'+bsHex+';color:'+bsText+';font-size:11px;position:relative;min-height:26px;cursor:grab'+(e.terminAbweichung?';border:1px solid #e8574b':'')+'" '
               +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\',\''+key+'\')">'
-              +bsInfoLink+label+zeitHtml+fzgHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon+matchWarn
+              +bsInfoLink+label+zeitHtml+fzgHtml+terminHtml+(e.notiz?'<span style="opacity:.6;font-size:10px"> '+e.notiz+'</span>':'')+hotelIcon
               +(e.excelAbweichung?'<span title="Excel-Zelle ist leer – Einsatz prüfen" style="position:absolute;bottom:1px;right:3px;font-size:10px">⚠</span>':'')
               +'</div>';
           }).join('');
+          // Unverknüpfter Excel-Eintrag bleibt NEBEN den Einsätzen (Basis und __N) sichtbar, Warnung erhalten.
+          const nebenHtml = (statusE?.status && wpStatusNebenEinsatz(statusE, ds, m.id)) ? wpStatusZelleHtml(statusE, m, ds, true) : '';
           html+='<td style="'+bg+'padding:2px">'
-            +'<div style="display:flex;flex-direction:column;gap:2px">'+cellsHtml+'</div>'
+            +'<div style="display:flex;flex-direction:column;gap:2px">'+cellsHtml+nebenHtml+'</div>'
             +'</td>';
         } else if(statusE?.status){
-          const exTxt = excelTextVonEintrag(statusE);
-          const eigentlichStatus = excelIstUnverknuepft(statusE) ? excelStatusAusText(exTxt) : null; // z.B. "Info folgt"
-          const unverkn = excelIstUnverknuepft(statusE) && !eigentlichStatus && !excelUngeklaertAufgeloest(ds, m.id);
-          const sHex = unverkn ? statusHex('Baustelle ungeklärt') : eigentlichStatus ? statusHex(eigentlichStatus) : (statusE.farbeHex||statusHex(statusE.status)), sTc=textCol(sHex);
-          const abwLeer = statusE.excelAbweichung ? '<span title="Excel-Zelle ist leer – Eintrag prüfen" style="margin-left:3px">⚠</span>' : '';
-          const hotelS = statusE.hotel ? '<span title="🏨 '+bsKwEsc(statusE.hotel)+'" style="font-size:10px;margin-left:3px">🏨</span>' : '';
-          // Unverknüpft: Excel-Bezeichnung statt pauschal "Baustelle ungeklärt", rot markiert
-          const inhalt = unverkn
-            ? '<span title="'+(statusE.verknuepfung==='mehrdeutig'?'Mehrere mögliche Baustellen – automatisch nicht entschieden; To-do prüfen':'Keine eindeutige Baustelle gefunden – To-do prüfen')+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">'+(statusE.verknuepfung==='mehrdeutig'?'mehrdeutig – To-do':'nicht gefunden – To-do')+'</span></span>'
-            : eigentlichStatus
-              ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
-              : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
-          html+='<td style="'+bg+'padding:2px">'
-            +'<div class="wp-cell" draggable="true" '
-            +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
-            +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center'+(unverkn?';border:1px solid #e8574b':'')+'" '
-            +'onclick="wpMaCellClick('+maIdAttr(m.id)+',\''+ds+'\')">'
-            +inhalt+hotelS+abwLeer+'</div></td>';
+          html+='<td style="'+bg+'padding:2px">'+wpStatusZelleHtml(statusE, m, ds, false)+'</td>';
         } else {
           html+='<td style="'+bg+'padding:2px">'
             +'<div class="wp-cell leer" '
@@ -7622,6 +7726,21 @@ function bsHistorischeAliase(bs) {
   });
   return [...new Set(out)];
 }
+// Ausdrücklich bestätigte Excel-Bezeichnungen (exakte, normalisierte Schreibweise → bestehende Baustellen-ID).
+// Bewusst KEINE allgemeine Ortsgleichsetzung: nur die hier genannte Bezeichnung zählt.
+const EXCEL_BESTAETIGTE_ALIASE = [
+  { bsId: '1790574372105', alias: 'Mobil Gipf Oberfrick', bestaetigtVon: 'Luc', am: '2026-09-29' }   // = Mobil Frick / Oberstufe Ebnet
+];
+function bsBestaetigteAliase(bs) {
+  return bs ? EXCEL_BESTAETIGTE_ALIASE.filter(x => String(x.bsId) === String(bs.id)).map(x => x.alias) : [];
+}
+// Nur für den EXAKTEN Treffer (kein Wort-Teilmengen-Abgleich): bestätigte Bezeichnungen der Baustelle
+// und ihrer zusammengeführten Duplikate.
+function bsBestaetigteExakt(bs) {
+  const out = [...bsBestaetigteAliase(bs)];
+  (state.baustellen || []).forEach(d => { if (String(d.hauptBaustelleId ?? '') === String(bs.id)) out.push(...bsBestaetigteAliase(d)); });
+  return out;
+}
 function bsAbgleichAliase(bs) {
   const eigene = [...bsExcelAliase(bs), ...bsHistorischeAliase(bs)];
   (state.baustellen || []).forEach(d => {
@@ -7631,11 +7750,11 @@ function bsAbgleichAliase(bs) {
   });
   return [...new Set(eigene.filter(Boolean))];
 }
-// Deterministischer starker Treffer über den GESAMTEN Baustellenbestand.
-// Der Zeitraum wird hier bewusst NICHT vorab gefiltert: Excel darf eine Baustelle nennen,
-// die früher angelegt, beendet oder mit einem inzwischen veralteten von/bis-Datum gespeichert
-// wurde. Erst nach der Kandidatensuche wird entschieden, ob der Treffer eindeutig ist und
-// ob zusätzlich eine Zeitraum-/Historienwarnung nötig ist.
+// Deterministischer starker Treffer: keine freie Fuzzy-Entscheidung, sondern ein eindeutiger
+// Teilmengen-Treffer zwischen Excel-Bezeichnung und Name/Kommission/Projekt/Alias.
+// Beispiel: "Fust Rütihof Platten" darf eindeutig auf "Fust Rütihof" zeigen, wenn im
+// Einsatztag genau eine aktive Baustelle diese Identität erfüllt. Abweichende Orts-/Projektwörter
+// verhindern den Treffer (z.B. "Fust Service Diverses" ≠ "Fust Service Nebikon").
 function excelStarkeKandidaten(text, datum, kandidaten) {
   const tt = excelTokens(text);
   if (tt.length < 2) return [];
@@ -7646,6 +7765,7 @@ function excelStarkeKandidaten(text, datum, kandidaten) {
     return alleAInB || alleBInA;
   };
   return (kandidaten || []).filter(b => {
+    if (!bsImZeitraum(b, datum)) return false;
     const texte = [b.name, b.kommission, b.projekt, ...bsAbgleichAliase(b)].filter(Boolean);
     return texte.some(x => passt(excelTokens(x)));
   });
@@ -7669,71 +7789,53 @@ function excelTokAehnlich(a, b) { return a.length >= 5 && b.length >= 5 && excel
 //      zeigen auf die Hauptbaustelle.
 // Zusätzlich gilt die Zeitraumregel: Hat die Baustelle von/bis, muss der Einsatztag darin liegen.
 // Wort-/Kunden-/Tippfehler-Ähnlichkeiten werden NUR als Vorschlag gemeldet, nie verknüpft.
+// Status 'termin': Identität eindeutig, Einsatztag ausserhalb des Auftragszeitraums (siehe unten).
+function excelTerminInfo(bs, datum) { return { datum: datum || null, auftragVon: bs.von || null, auftragBis: bs.bis || null, bsName: bs.name }; }
 function excelBaustelleAbgleichen(text, datum) {
-  // WICHTIG: immer ALLE jemals angelegten Baustellen durchsuchen – auch beendete
-  // und Baustellen ausserhalb der aktuellen KW. Excel ist die Planungsquelle;
-  // die Baustellendatenbank liefert nur die Informations-Verknüpfung.
-  const alle = (state.baustellen || []).filter(b => !bsHauptVon(b));   // zusammengeführte Duplikate nicht doppelt zählen
+  const alle = (state.baustellen || []).filter(b => !bsHauptVon(b));   // Duplikate nicht als eigene Kandidaten
   const nt = excelNorm(text), tt = excelTokens(text);
   const leer = { status: 'keiner', kandidaten: [], vorschlaege: [] };
   if (!nt) return leer;
-
-  const warnGrund = b => bsIstBeendet(b) ? 'historisch' : (!bsImZeitraum(b, datum) ? 'zeitraum' : null);
-  const eindeutig = (b, weg) => {
-    const wg = warnGrund(b);
-    return { status: 'eindeutig', bs: b, kandidaten: [b], weg, zeitWarnung: !!wg, warnGrund: wg, vorschlaege: [] };
-  };
-  const nachIdEindeutig = arr => [...new Map((arr || []).map(b => [String(b.id), b])).values()];
-
-  // 1. Bewusste Identität: Excel-Alias, Matching-Alias, historischer Name,
-  //    Name eines zusammengeführten Datensatzes oder Auftragsnummer.
-  //    Diese Merkmale werden über den kompletten historischen Bestand geprüft.
-  const aliasExakt = nachIdEindeutig(alle.filter(b => {
-    if (bsAbgleichAliase(b).some(a => excelNorm(a) === nt)) return true;
+  const aktiv = alle.filter(b => !bsIstBeendet(b));
+  const exakt = alle.filter(b => {
+    if (excelNorm(b.name) === nt) return true;
+    if (excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt) return true;
+    if (bsAbgleichAliase(b).some(a => excelNorm(a) === nt) || bsBestaetigteExakt(b).some(a => excelNorm(a) === nt)) return true;
     const an = excelNorm(b.auftragsnummer);
     return !!(an && an.length >= 4 && (' ' + nt + ' ').includes(' ' + an + ' '));
-  }));
-  if (aliasExakt.length === 1) return eindeutig(aliasExakt[0], 'alias-exakt-alle');
-  if (aliasExakt.length > 1) {
-    const imZeit = aliasExakt.filter(b => bsImZeitraum(b, datum));
-    if (imZeit.length === 1) return eindeutig(imZeit[0], 'alias-exakt-zeit');
-    const aktiv = aliasExakt.filter(b => !bsIstBeendet(b));
-    if (aktiv.length === 1) return eindeutig(aktiv[0], 'alias-exakt-aktiv');
-    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: aliasExakt, vorschlaege: [] };
+  });
+  const exAktiv = exakt.filter(b => !bsIstBeendet(b));
+  const exImZeit = exAktiv.filter(b => bsImZeitraum(b, datum));
+
+  // Priorität 1: genau ein exakter Treffer im gültigen Zeitraum.
+  if (exImZeit.length === 1) return { status: 'eindeutig', bs: exImZeit[0], kandidaten: exImZeit, weg: 'exakt', vorschlaege: [] };
+  if (exImZeit.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: exImZeit, vorschlaege: [] };
+
+  // Priorität 2: eindeutiger deterministischer Teilmengen-Treffer im Zeitraum.
+  // Damit werden bekannte Varianten wie "... Platten" oder historische Projektnamen automatisch
+  // verbunden, aber nur wenn genau EINE Baustelle übrig bleibt.
+  const stark = excelStarkeKandidaten(text, datum, aktiv);
+  if (stark.length === 1) return { status: 'eindeutig', bs: stark[0], kandidaten: stark, weg: 'eindeutig-stark', vorschlaege: [] };
+  if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
+
+  // Identität EINDEUTIG (genau eine aktive Baustelle passt nach Name/Alias/Auftragsnr./Teilmenge),
+  // aber der Einsatztag liegt ausserhalb von von/bis: Verknüpfung auf die bestehende ID, der
+  // Terminkonflikt bleibt sichtbar (status 'termin', roter Hinweis + To-do). Termine/Monteure
+  // werden nie angepasst. Bei mehr als einer Identität greift weiter 'mehrdeutig/zeitraum'.
+  const identAktiv = [...new Map([...exAktiv, ...excelStarkeKandidaten(text, null, aktiv)].map(b => [String(b.id), b])).values()];
+  if (identAktiv.length === 1) {
+    return { status: 'termin', bs: identAktiv[0], kandidaten: identAktiv, weg: 'identitaet-termin', grund: 'zeitraum', terminInfo: excelTerminInfo(identAktiv[0], datum), vorschlaege: [] };
   }
 
-  // 2. Exakter Name / Kommission / Projekt über ALLE jemals angelegten Baustellen.
-  const exakt = nachIdEindeutig(alle.filter(b =>
-    excelNorm(b.name) === nt || excelNorm(b.kommission) === nt || excelNorm(b.projekt) === nt
-  ));
-  if (exakt.length === 1) return eindeutig(exakt[0], 'exakt-alle');
-  if (exakt.length > 1) {
-    const imZeit = exakt.filter(b => bsImZeitraum(b, datum));
-    if (imZeit.length === 1) return eindeutig(imZeit[0], 'exakt-zeit');
-    const aktiv = exakt.filter(b => !bsIstBeendet(b));
-    if (aktiv.length === 1) return eindeutig(aktiv[0], 'exakt-aktiv');
-    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: exakt, vorschlaege: [] };
+  // Mehrere Identitäten, keine passt zum Einsatztag: niemals still zuordnen.
+  if (exAktiv.length) {
+    const zeitKand = [...new Map([...exAktiv, ...excelAehnliche(tt, aktiv).filter(b => bsImZeitraum(b, datum))].map(b => [String(b.id), b])).values()];
+    return { status: 'mehrdeutig', grund: 'zeitraum', kandidaten: zeitKand, vorschlaege: [] };
   }
+  if (exakt.length) return { status: 'mehrdeutig', grund: 'beendet', kandidaten: exakt, vorschlaege: [] };
 
-  // 3. Starker deterministischer Teilmengen-Treffer ebenfalls über den GESAMTEN Bestand.
-  //    Beispiel: "Fust Rütihof Platten" ↔ "Fust Rütihof".
-  const stark = nachIdEindeutig(excelStarkeKandidaten(text, datum, alle));
-  if (stark.length === 1) return eindeutig(stark[0], 'eindeutig-stark-alle');
-  if (stark.length > 1) {
-    const imZeit = stark.filter(b => bsImZeitraum(b, datum));
-    if (imZeit.length === 1) return eindeutig(imZeit[0], 'eindeutig-stark-zeit');
-    const aktiv = stark.filter(b => !bsIstBeendet(b));
-    if (aktiv.length === 1) return eindeutig(aktiv[0], 'eindeutig-stark-aktiv');
-    return { status: 'mehrdeutig', grund: 'mehrere-historisch', kandidaten: stark, vorschlaege: [] };
-  }
-
-  // 4. Kein sicherer Treffer: auch Vorschläge aus dem gesamten historischen Bestand
-  //    anzeigen. Niemals raten; bei mehreren/unsicheren Kandidaten bleibt der Eintrag rot
-  //    und das To-do nennt die Kandidaten.
-  const vorschlaege = nachIdEindeutig([
-    ...excelAehnliche(tt, alle),
-    ...excelVorschlaege(tt, alle)
-  ]).slice(0, 5);
+  // Kein sicherer Treffer: nur Vorschläge anzeigen und To-do erzeugen; nie raten.
+  const vorschlaege = [...new Map([...excelAehnliche(tt, aktiv), ...excelVorschlaege(tt, aktiv)].map(b => [String(b.id), b])).values()].slice(0, 3);
   return { ...leer, vorschlaege };
 }
 // Wort-Ähnlichkeit (Name/Kunde/Ort/Projekt/Alias) – nur zur Information, nie automatisch.
@@ -7762,6 +7864,23 @@ function excelBsKurz(b) {
   const f = d => d ? d.slice(8,10) + '.' + d.slice(5,7) + '.' + d.slice(0,4) : '…';
   const zr = (b.von || b.bis) ? 'Zeitraum ' + (b.von && b.bis && b.von === b.bis ? f(b.von) : f(b.von) + '–' + f(b.bis)) : 'kein Zeitraum hinterlegt';
   return b.name + ' (Auftrag ' + (b.auftragsnummer || '–') + '; ' + zr + ')' + (bsIstBeendet(b) ? ' – beendet' : '');
+}
+// Anzeige-Trennung: fehlende Baustelle ≠ fehlende Verknüpfung ≠ mehrdeutig ≠ Terminabweichung.
+// Wird beim Rendern live berechnet (auch für ältere Einträge ohne gespeicherte Flags).
+function excelTerminText(t, bs) {
+  const f = d => d ? d.slice(8,10) + '.' + d.slice(5,7) + '.' + d.slice(0,4) : '…';
+  const b = bs || {}, von = t.auftragVon ?? b.von, bis = t.auftragBis ?? b.bis;
+  return 'Excel-Plan ' + f(t.datum) + ' liegt ausserhalb des Auftragszeitraums ' + f(von) + '–' + f(bis) + '. Nichts angepasst – bitte prüfen.';
+}
+function excelUnverknuepftAnzeige(text, ds) {
+  const ab = text ? excelBaustelleAbgleichen(text, ds) : { status: 'keiner', kandidaten: [], vorschlaege: [] };
+  if (ab.status === 'eindeutig' || ab.status === 'termin') return { label: 'Baustelle vorhanden – Verknüpfung fehlt', titel: 'Baustelle „' + ab.bs.name + '“ (ID ' + ab.bs.id + ') ist vorhanden, aber nicht verknüpft – „🔗 Excel-Abgleich“ ausführen' + (ab.status === 'termin' ? '. Achtung: Termin weicht vom Auftrag ab' : '') };
+  if (ab.status === 'mehrdeutig') {
+    if (ab.grund === 'zeitraum') return { label: 'mehrdeutig · Zeitraum-Konflikt – To-do', titel: 'Mehrere mögliche Baustellen, keine passt zum Einsatztag – automatisch nicht entschieden; To-do prüfen' };
+    if (ab.grund === 'beendet') return { label: 'nur beendete Baustelle – To-do', titel: 'Es gibt nur beendete Baustellen mit dieser Bezeichnung – To-do prüfen' };
+    return { label: 'mehrdeutig – To-do', titel: 'Mehrere mögliche Baustellen – automatisch nicht entschieden; To-do prüfen' };
+  }
+  return { label: 'keine Baustelle gefunden – To-do', titel: 'Keine passende Baustelle vorhanden – Baustelle anlegen oder Alias ergänzen (To-do)' };
 }
 // Original-Bezeichnung eines Planeintrags (ohne etwas zu erfinden)
 function excelTextVonEintrag(e) {
@@ -7796,10 +7915,19 @@ function planStatusAnzeige(e) {
   if (e.status === 'Frei' && /^ferien\b/.test(t)) return 'Ferien';
   return e.status;
 }
-// Ungeklärter Eintrag, der bereits durch einen Einsatz am selben Tag aufgelöst ist
-function excelUngeklaertAufgeloest(datum, maId) {
-  const b = ((state.plan || {})[datum] || {})['ma' + maId + '_' + datum];
-  return !!(b && b.bsId != null && b.bsId !== '');
+// Ungeklärter Eintrag, der durch einen Einsatz am selben Tag aufgelöst ist: NUR wenn ein Einsatz desselben
+// Mitarbeiters an diesem Tag (Basis- oder __N-Schlüssel) auf genau die Baustelle zeigt, die der Excel-Text
+// eindeutig bezeichnet (Information vollständig abgebildet). Ein Einsatz auf eine ANDERE Baustelle löst den
+// Eintrag nicht auf: er bleibt sichtbar und die Warnung bleibt erhalten (Excel ist die Planungsquelle).
+function excelAufloesenderEinsatz(tag, datum, maId, text) {
+  const ab = text ? excelBaustelleAbgleichen(text, datum) : null;
+  if (!ab || (ab.status !== 'eindeutig' && ab.status !== 'termin')) return null;
+  const base = 'ma' + maId + '_' + datum;
+  const k = Object.keys(tag || {}).find(key => (key === base || key.indexOf(base + '__') === 0) && tag[key] && tag[key].bsId != null && tag[key].bsId !== '' && String(tag[key].bsId) === String(ab.bs.id));
+  return k ? tag[k] : null;
+}
+function excelUngeklaertAufgeloest(datum, maId, text) {
+  return !!excelAufloesenderEinsatz(((state.plan || {})[datum]) || {}, datum, maId, text);
 }
 // Text eines ungeklärten Eintrags, der eigentlich ein Planungsstatus ist (z.B. "Info folgt")
 function excelStatusAusText(text) { const k = excelZelleKlassifizieren(text); return k.typ === 'status' ? k.status : null; }
@@ -7846,14 +7974,14 @@ function excelEintragSetzen(ma, datum, k) {
     return { art: 'status' };
   }
   const ab = excelBaustelleAbgleichen(k.text, datum);
-  if (ab.status === 'eindeutig') {
+  if (ab.status === 'eindeutig' || ab.status === 'termin') {
     const gleich = prevBase && String(prevBase.bsId) === String(ab.bs.id);
     tag[baseKey] = { maId: ma.id, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: gleich ? (prevBase.notiz || '') : '',
       startzeit: gleich ? (prevBase.startzeit ?? null) : null, endzeit: gleich ? (prevBase.endzeit ?? null) : null,
       fahrzeugId: gleich ? (prevBase.fahrzeugId ?? null) : null, fahrzeugName: gleich ? (prevBase.fahrzeugName || '') : '',
-      excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig',
-      ...(ab.zeitWarnung ? { matchingWarnung: ab.warnGrund || 'zeitraum' } : {}), ...(hotel ? { hotel } : {}) };
-    return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig', zeitWarnung: !!ab.zeitWarnung };
+      excelText: k.text, quelle: 'excel', matchingWeg: ab.weg || 'eindeutig', ...(hotel ? { hotel } : {}),
+      ...(ab.status === 'termin' ? { terminAbweichung: ab.terminInfo } : {}) };
+    return { art: 'verknuepft', bs: ab.bs, weg: ab.weg || 'eindeutig', termin: ab.status === 'termin' };
   }
   tag[statusKey] = { maId: ma.id, status: 'Baustelle ungeklärt', farbeHex: statusHex('Baustelle ungeklärt'), notiz: 'Baustelle ungeklärt: ' + k.text,
     excelText: k.text, quelle: 'excel', verknuepfung: ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt',
@@ -7884,19 +8012,17 @@ function excelZelleKontrollieren(ma, datum, k) {
   if (base) {
     if (st || hotelE) return F('alter Eintrag steht noch');
     if (excelTextVonEintrag(base) !== k.text) return F('sichtbarer Text weicht ab');
-    if (ab.status === 'eindeutig' && String(base.bsId) !== String(ab.bs.id)) return F('mit falscher Baustelle verknüpft');
-    if (base.matchingWarnung || (ab.status === 'eindeutig' && ab.zeitWarnung)) {
-      const wg = base.matchingWarnung || ab.warnGrund;
-      return W(wg === 'historisch'
-        ? 'Eindeutig mit einer früher/beendet geführten Baustelle verknüpft – Status/Zeitraum der Baustelle prüfen'
-        : 'Eindeutig verknüpft, aber Einsatzdatum liegt ausserhalb des hinterlegten Baustellenzeitraums – Baustellendatum prüfen');
+    if ((ab.status === 'eindeutig' || ab.status === 'termin') && String(base.bsId) !== String(ab.bs.id)) return F('mit falscher Baustelle verknüpft');
+    if (base.terminAbweichung || ab.status === 'termin') {
+      const tb = ab.status === 'termin' ? ab.bs : (state.baustellen || []).find(b => String(b.id) === String(base.bsId));
+      return W('Verknüpft, aber Termin weicht vom Auftrag ab' + (tb ? ' – ' + excelBsKurz(tb) : ''));
     }
     return null;
   }
   if (!st || excelTextVonEintrag(st) !== k.text) return F('Excel-Text nicht übernommen');
   if (hotelE) return F('alter Eintrag steht noch');
   if (!excelIstUnverknuepft(st)) return F('als Status statt als Baustelle gespeichert');
-  if (ab.status === 'eindeutig') return W('Baustelle „' + ab.bs.name + '“ vorhanden, aber nicht verknüpft (bsId fehlt)');
+  if (ab.status === 'eindeutig' || ab.status === 'termin') return W('Baustelle „' + ab.bs.name + '“ vorhanden, aber nicht verknüpft (bsId fehlt)' + (ab.status === 'termin' ? ' – Termin weicht vom Auftrag ab' : ''));
   return null;   // ausdrücklich ungeklärt mit gleichem Excel-Text = korrekt (fehlende Baustelle hat eigenes To-do)
 }
 // (Veraltet, nicht mehr verwendet – ersetzt durch excelTagLeeren) Excel-Zelle leer, im Plan steht aber noch ein Einsatz/Status: nicht löschen,
@@ -7936,8 +8062,8 @@ function excelVerknuepfungsTodosAktualisieren() {
     Object.entries(tag || {}).forEach(([key, e]) => {
       if (!excelIstUnverknuepft(e) || String(key).indexOf('status_ma') !== 0) return;
       const maId = e.maId ?? bsPlanMaId(key, e);
-      if (excelUngeklaertAufgeloest(ds, maId)) return;          // durch Einsatz am selben Tag aufgelöst
       const text = excelTextVonEintrag(e); if (!text) return;
+      if (excelUngeklaertAufgeloest(ds, maId, text)) return;    // durch Einsatz auf DIE bezeichnete Baustelle aufgelöst
       if (excelStatusAusText(text)) return;                     // eigentlich Planungsstatus, keine Baustelle
       const d = new Date(ds + 'T12:00'), kw = bsGetKW(d), jahr = getMonday(d).getFullYear();
       const sk = 'excel-verknuepfung:' + excelNorm(text) + ':' + jahr + '-' + kw;
@@ -7992,27 +8118,91 @@ function excelVerknuepfungsTodosAktualisieren() {
   return { neu, erledigt, wiedereroeffnet };
 }
 
+// Gemeinsame Verknüpfungsregel für Nachabgleich UND gezielte Bestandsreparatur. Ändert nur DIESEN Eintrag:
+// status_ma<id> → ma<id>_<datum> mit der bestehenden bsId. Zeiten, Fahrzeug, Notiz, Hotel, Herkunft und
+// Excel-Originaltext bleiben erhalten; ein bereits vorhandener Basis-Einsatz wird nie überschrieben.
+function excelEintragRelink(tag, key, e, ds, ab) {
+  const maId = e.maId ?? bsPlanMaId(key, e);
+  const baseKey = 'ma' + maId + '_' + ds;
+  if (tag[baseKey]) return { ok: false, grund: 'Einsatz am selben Tag besteht bereits' };
+  const text = excelTextVonEintrag(e);
+  const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, terminAbweichung, ...rest } = e;
+  // Nur die erste Zeile „Baustelle ungeklärt: …“ entfernen; weitere Notizzeilen bleiben.
+  const restNotiz = String(notiz || '').split('\n').filter((z, i) => !(i === 0 && /^\s*Baustelle ungeklärt\s*[:\-–]/i.test(z))).join('\n').trim();
+  tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel',
+    matchingWeg: ab.weg || 'eindeutig', ...(ab.status === 'termin' ? { terminAbweichung: ab.terminInfo } : {}) };
+  delete tag[key];
+  return { ok: true, baseKey };
+}
+function excelTageText(dsListe) {
+  const T = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  return [...dsListe].sort().map(ds => { const d = new Date(ds + 'T12:00'); return T[d.getDay()] + ' ' + String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.'; }).join(', ');
+}
+// To-dos für Terminabweichungen (Excel-Plan ↔ Auftragszeitraum): eines je Baustelle und KW, rot/hoch,
+// automatisch erledigt sobald keine Abweichung mehr besteht. Termine/Monteure werden NICHT angepasst.
+function excelTerminTodosAktualisieren() {
+  if (!state.todos) state.todos = [];
+  const abDatum = fmtDate(getMonday(new Date()));
+  const gruppen = new Map();
+  Object.entries(state.plan || {}).forEach(([ds, tag]) => Object.entries(tag || {}).forEach(([key, e]) => {
+    if (!e || !e.terminAbweichung || e.bsId == null || e.bsId === '' || ds < abDatum) return;
+    const d = new Date(ds + 'T12:00'), kw = bsGetKW(d), jahr = getMonday(d).getFullYear();
+    const sk = 'excel-termin:' + e.bsId + ':' + jahr + '-' + kw;
+    if (!gruppen.has(sk)) gruppen.set(sk, { bsId: e.bsId, kw, tage: new Set(), mas: new Set(), texte: new Set() });
+    const g = gruppen.get(sk); g.tage.add(ds); g.mas.add(String(e.maId ?? bsPlanMaId(key, e))); const t = excelTextVonEintrag(e); if (t) g.texte.add(t);
+  }));
+  const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : 'Mitarbeiter ' + id; };
+  let neu = 0, erledigt = 0, wiedereroeffnet = 0;
+  gruppen.forEach((g, sk) => {
+    const bs = (state.baustellen || []).find(b => String(b.id) === String(g.bsId));
+    const text = 'Termin weicht vom Auftrag ab: ' + (bs ? excelBsKurz(bs) : 'Baustelle ' + g.bsId) + '.'
+      + '\nKW ' + g.kw + ' · Excel-Plan: ' + excelTageText(g.tage) + ' · Monteure: ' + [...g.mas].map(maName).sort((x, y) => x.localeCompare(y, 'de')).join(', ')
+      + (g.texte.size ? ' · Excel: ' + [...g.texte].join(' / ') : '')
+      + '\nExcel bleibt die Planungsquelle – Termine und Monteure wurden NICHT angepasst. Bitte Auftragsdatum oder Wochenplan prüfen.';
+    const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
+    if (vorhanden) {
+      if (vorhanden.erledigt && vorhanden.erledigtDurch === 'Automatischer Abgleich') { vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; wiedereroeffnet++; }
+      if (!vorhanden.erledigt && vorhanden.text !== text) vorhanden.text = text;
+      return;
+    }
+    const r = todoErstellen({ text, bsId: g.bsId, quelle: 'Excel-Abgleich', kind: 'excel-termin', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk });
+    if (r.status === 'neu') neu++;
+  });
+  state.todos.forEach(t => {
+    if (t.kind !== 'excel-termin' || t.erledigt || t.bereinigt || !t.schluessel) return;
+    if (!gruppen.has(t.schluessel)) { t.erledigt = true; t.erledigtDurch = 'Automatischer Abgleich'; t.erledigtAm = new Date().toISOString().slice(0,10); erledigt++; }
+  });
+  return { neu, erledigt, wiedereroeffnet };
+}
+
 // Nachträglicher Abgleich aller unverknüpften Einträge (z.B. nach neuer Baustelle/Alias).
+// Idempotent: verknüpft nur eindeutige Treffer, überschreibt nie einen bestehenden Einsatz,
+// entfernt keine gültige Verknüpfung und erzeugt keine Dubletten (To-dos je Schlüssel).
 function excelNachAbgleich() {
-  let verknuepft = 0;
+  let verknuepft = 0, termin = 0;
   Object.entries(state.plan || {}).forEach(([ds, tag]) => {
     Object.keys(tag || {}).forEach(key => {
       const e = tag[key];
-      // Einsatz auf einem zusammengeführten Eintrag (hauptBaustelleId) → Hauptbaustelle
+      // Bereits verknüpfter Einsatz: Duplikat → Hauptbaustelle; Terminabweichung (nur Excel-Einträge) nachführen
       if (e && e.bsId != null && key.indexOf('status_ma') !== 0) {
         const bsE = (state.baustellen || []).find(b => String(b.id) === String(e.bsId));
         const haupt = bsHauptVon(bsE);
         if (haupt) { e.bsId = haupt.id; e.farbeHex = getHex(haupt); verknuepft++; }
+        const bsZ = haupt || bsE;
+        if (bsZ && (e.quelle === 'excel' || e.excelText)) {
+          if (!bsImZeitraum(bsZ, ds)) {
+            const neuInfo = excelTerminInfo(bsZ, ds);
+            if (JSON.stringify(e.terminAbweichung) !== JSON.stringify(neuInfo)) e.terminAbweichung = neuInfo;
+          } else if (e.terminAbweichung) delete e.terminAbweichung;
+        }
         return;
       }
       if (!excelIstUnverknuepft(e) || key.indexOf('status_ma') !== 0) return;
       const text = excelTextVonEintrag(e); if (!text) return;
       const maIdX = e.maId ?? bsPlanMaId(key, e);
-      // Bereits durch Einsatz am selben Tag aufgelöst: Excel-Text dort ergänzen, nichts löschen
-      if (excelUngeklaertAufgeloest(ds, maIdX)) {
-        const b = tag['ma' + maIdX + '_' + ds]; if (!b.excelText) b.excelText = text;
-        return;
-      }
+      // Bereits durch Einsatz auf DIE bezeichnete Baustelle aufgelöst: Excel-Text dort ergänzen, nichts löschen
+      const aufl = excelAufloesenderEinsatz(tag, ds, maIdX, text);
+      if (aufl) { if (!aufl.excelText) aufl.excelText = text; return; }
       // Text ist eigentlich ein Planungsstatus (z.B. "Info folgt") → gleiche Regel wie Import
       const stTxt = excelStatusAusText(text);
       if (stTxt) {
@@ -8021,7 +8211,7 @@ function excelNachAbgleich() {
         return;
       }
       const ab = excelBaustelleAbgleichen(text, ds);
-      if (ab.status !== 'eindeutig') {
+      if (ab.status !== 'eindeutig' && ab.status !== 'termin') {
         e.verknuepfung = ab.status === 'mehrdeutig' ? 'mehrdeutig' : 'fehlt';
         e.kandidatenIds = ab.kandidaten.map(b => b.id);
         if (ab.grund) e.konfliktGrund = ab.grund; else delete e.konfliktGrund;
@@ -8029,19 +8219,13 @@ function excelNachAbgleich() {
         if (!e.excelText) e.excelText = text;
         return;
       }
-      const maId = e.maId ?? bsPlanMaId(key, e);
-      const baseKey = 'ma' + maId + '_' + ds;
-      if (tag[baseKey]) return; // bereits anderer Einsatz vorhanden → nichts überschreiben
-      const { status, verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, farbeHex, notiz, ...rest } = e;
-      const restNotiz = String(notiz || '').replace(/^\s*Baustelle ungeklärt\s*[:\-–]\s*.+$/i, '').trim();
-      tag[baseKey] = { ...rest, maId, bsId: ab.bs.id, farbeHex: getHex(ab.bs), notiz: restNotiz, excelText: text, quelle: e.quelle || 'excel', matchingWeg: ab.weg || 'eindeutig',
-        ...(ab.zeitWarnung ? { matchingWarnung: ab.warnGrund || 'zeitraum' } : {}) };
-      delete tag[key];
-      verknuepft++;
+      const r = excelEintragRelink(tag, key, e, ds, ab);   // bei bestehendem Basis-Einsatz: nichts überschreiben
+      if (r.ok) { verknuepft++; if (ab.status === 'termin') termin++; }
     });
   });
   const t = excelVerknuepfungsTodosAktualisieren();
-  return { verknuepft, ...t };
+  const tt = excelTerminTodosAktualisieren();
+  return { verknuepft, termin, ...t, terminTodosNeu: tt.neu, terminTodosErledigt: tt.erledigt };
 }
 
 // Reparatur bereits importierter Einträge: Bezeichnung aus notiz wiederherstellen
@@ -8056,10 +8240,283 @@ function excelReparatur() {
   return { repariert, ohneText };
 }
 
+// ── Gezielte Bestandsreparatur unverknüpfter Planeinträge ──────────────────────────────
+// Schritt 1 (verändert NICHTS): excelBestandVorschau() → je Eintrag Datum, Mitarbeiter, Originaltext,
+//   Aktion, Ziel-ID und Konflikte. Schritt 2: excelBestandReparieren({vorschau}) rechnet die Vorschau
+//   beim Ausführen NEU und wendet nur Einträge an, die unverändert noch gelten (parallele Änderungen
+//   werden dadurch nicht überschrieben). Kein Wochenersatz: es wird je Eintrag genau status_ma → ma…
+//   umgeschrieben, alles andere (manuelle Einträge, __2/__3, Zeiten, Fahrzeuge, Notizen, andere Tage) bleibt.
+function excelMaNameKurz(id) { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : 'Mitarbeiter ' + id; }
+function excelBestandVorschau(opts) {
+  opts = opts || {};
+  const von = opts.von || fmtDate(addDays(getMonday(new Date()), -7)), bis = opts.bis || '9999-12-31';
+  const items = [], aliasItems = [];
+  EXCEL_BESTAETIGTE_ALIASE.forEach(x => {
+    const bs = (state.baustellen || []).find(b => String(b.id) === String(x.bsId));
+    if (!bs) { aliasItems.push({ ...x, aktion: 'ziel-fehlt', konflikte: ['Baustelle ' + x.bsId + ' existiert nicht'] }); return; }
+    if (bsExcelAliase(bs).some(a => excelNorm(a) === excelNorm(x.alias))) return;
+    aliasItems.push({ ...x, bsName: bs.name, aktion: 'alias-ergaenzen', konflikte: [] });
+  });
+  Object.keys(state.plan || {}).sort().forEach(ds => {
+    if (ds < von || ds > bis) return;
+    const tag = state.plan[ds] || {};
+    Object.entries(tag).forEach(([key, e]) => {
+      if (!e || key.indexOf('status_ma') !== 0 || !excelIstUnverknuepft(e)) return;
+      const maId = e.maId ?? bsPlanMaId(key, e), text = excelTextVonEintrag(e);
+      const z = { datum: ds, key, maId, ma: excelMaNameKurz(maId), text, konflikte: [] };
+      if (!text) { items.push({ ...z, aktion: 'ohne-text', konflikte: ['Kein Originaltext rekonstruierbar – Excel erneut importieren'] }); return; }
+      const st = excelStatusAusText(text);
+      if (st) { items.push({ ...z, aktion: 'status', zielStatus: st }); return; }   // z.B. „Info folgt“ ist Planungsstatus
+      if (excelUngeklaertAufgeloest(ds, maId, text)) { items.push({ ...z, aktion: 'aufgeloest', konflikte: ['Einsatz auf dieselbe Baustelle besteht bereits – nichts zu verknüpfen'] }); return; }
+      const ab = excelBaustelleAbgleichen(text, ds);
+      if (ab.status === 'eindeutig' || ab.status === 'termin') {
+        const baseKey = 'ma' + maId + '_' + ds, konf = [];
+        if (tag[baseKey]) konf.push('Basis-Einsatz besteht bereits (bsId ' + tag[baseKey].bsId + ') – wird nicht überschrieben');
+        if (ab.status === 'termin') konf.push('Termin weicht ab: ' + excelBsKurz(ab.bs) + ' ↔ Plan ' + ds + ' (bleibt sichtbar, nichts angepasst)');
+        items.push({ ...z, aktion: tag[baseKey] ? 'blockiert' : 'verknuepfen', zielId: ab.bs.id, zielName: ab.bs.name, weg: ab.weg, termin: ab.status === 'termin', konflikte: konf });
+      } else if (ab.status === 'mehrdeutig') {
+        items.push({ ...z, aktion: 'mehrdeutig', konflikte: ['Nicht automatisch: ' + (ab.grund || 'mehrere') + ' – ' + ab.kandidaten.map(excelBsKurz).join('; ')], kandidaten: ab.kandidaten.map(b => b.id) });
+      } else {
+        items.push({ ...z, aktion: 'fehlt', konflikte: ['Keine passende Baustelle' + (ab.vorschlaege && ab.vorschlaege.length ? ' – Vorschlag (nicht zugeordnet): ' + ab.vorschlaege.map(excelBsKurz).join('; ') : '')] });
+      }
+    });
+  });
+  const anz = a => items.filter(i => i.aktion === a).length;
+  return { erstellt: new Date().toISOString(), stand: state._ts || null, von, bis, items, aliasItems,
+    zaehler: { verknuepfen: anz('verknuepfen'), status: anz('status'), alias: aliasItems.filter(x => x.aktion === 'alias-ergaenzen').length,
+      blockiert: anz('blockiert'), mehrdeutig: anz('mehrdeutig'), fehlt: anz('fehlt'), ohneText: anz('ohne-text'), aufgeloest: anz('aufgeloest'),
+      termin: items.filter(i => i.termin).length } };
+}
+// ── Atomarer Schreibweg für Excel-Abgleich/-Reparatur ─────────────────────────────────
+// Der Datenspeicher ist EIN Firebase-Knoten 'lagertool' (JSON-String des Gesamtstands). Eine getrennte
+// „Frische-Prüfung“ vor save() schützt nicht zwischen Lesen und Schreiben. Deshalb: Firebase-Transaktion
+// (Compare-and-Set). Der Mutator läuft auf dem FRISCHEN Serverstand; bei jedem Konflikt ruft Firebase ihn
+// erneut mit dem neuen Stand auf. Zwischenzeitliche Änderungen anderer Nutzer bleiben so erhalten – es wird
+// nie ein alter Gesamtstand zurückgeschrieben. Der lokale `state` wird im Firebase-Modus NICHT verändert;
+// der Listener übernimmt den bestätigten Serverstand.
+function excelMitState(st, fn) { const orig = state; state = st; try { return fn(); } finally { state = orig; } }
+const excelKopie = o => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
+// Reihenfolge-unabhängiger Vergleich (Schlüsselreihenfolge ist für Eintragsdaten bedeutungslos)
+const excelKanon = o => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v)) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
+const excelGleich = (a, b) => excelKanon(a) === excelKanon(b);
+// Bestätigten Serverstand lokal übernehmen (Firebase gewinnt, wie im Listener) und als neue Merge-Basis merken.
+function excelServerStandUebernehmen(stand) {
+  if (!stand || typeof stand !== 'object') return;
+  syncBase = syncKopie(stand);
+  syncStandUebernehmen(stand);
+}
+async function excelServerLesen() {
+  const snap = (typeof dbRef.get === 'function') ? await dbRef.get() : await dbRef.once('value');
+  const raw = snap.val();
+  return typeof raw === 'string' ? JSON.parse(raw) : raw;
+}
+// mutator(st) → { geaendert:boolean, ... } ; wird mit state===st ausgeführt und darf st direkt ändern.
+// verifiziere(serverStand, res) → string[] (Abweichungen; leer = Nachlesen bestätigt).
+// Rückgabe: { status, ok, res, abweichungen?, grund? } mit status:
+//   'nichts-zu-tun' | 'geschrieben-verifiziert' | 'geschrieben-nachlesen-abweichend' |
+//   'geschrieben-nachlesen-fehlgeschlagen' | 'nicht-geschrieben' | 'unklar' |
+//   'lokal-gespeichert' | 'lokal-zurueckgesetzt'
+async function excelAtomarAendern(mutator, verifiziere, opts) {
+  opts = opts || {};
+  if (typeof dbRef === 'undefined' || !dbRef) {                       // lokaler Modus ohne Firebase
+    const res = mutator(state);
+    if (!res || !res.geaendert) return { status: 'nichts-zu-tun', ok: true, res };
+    const sv = await save({ verify: true });
+    if (!sv || !sv.ok) { if (typeof res.undo === 'function') res.undo(state); return { status: 'lokal-zurueckgesetzt', ok: false, res, grund: 'Speichern nicht bestätigt – nur LOKAL zurückgesetzt' }; }
+    return { status: 'lokal-gespeichert', ok: true, res };
+  }
+  let letzte = null;
+  const updater = current => {
+    if (current === null || current === undefined) return current;    // Firebase ruft ggf. zuerst mit leerem Cache auf → erneut mit Serverstand
+    let remote;
+    try { remote = typeof current === 'string' ? JSON.parse(current) : JSON.parse(JSON.stringify(current)); }
+    catch (e) { letzte = { geaendert: false, fehler: 'Serverstand nicht lesbar' }; return undefined; }
+    let res;
+    try { res = excelMitState(remote, () => mutator(remote)); }
+    catch (e) { letzte = { geaendert: false, fehler: 'Mutator-Fehler: ' + (e && e.message || e) }; return undefined; }
+    letzte = res || { geaendert: false };
+    if (!res || !res.geaendert) return undefined;                       // Abbruch, nichts schreiben
+    remote._ts = Math.max(Date.now(), (Number(remote._ts) || 0) + 1);
+    return JSON.stringify(remote);
+  };
+  let tr;
+  try { tr = await dbRef.transaction(updater, undefined, false); }
+  catch (e) { return { status: 'unklar', ok: false, grund: 'Transaktion nicht bestätigt: ' + (e && e.message || e) + ' – bitte neu laden und Vorschau prüfen' }; }
+  if (!tr || !tr.committed) {
+    if (letzte && letzte.fehler) return { status: 'nicht-geschrieben', ok: false, grund: letzte.fehler };
+    return { status: 'nichts-zu-tun', ok: true, res: letzte };
+  }
+  // Nachlesen (frisch vom Server, nicht aus unserem Mutator-Ergebnis)
+  let stand;
+  try { stand = await excelServerLesen(); }
+  catch (e) { return { status: 'geschrieben-nachlesen-fehlgeschlagen', ok: false, res: letzte, grund: 'Geschrieben, aber Nachlesen fehlgeschlagen: ' + (e && e.message || e) }; }
+  if (!stand) return { status: 'geschrieben-nachlesen-fehlgeschlagen', ok: false, res: letzte, grund: 'Geschrieben, aber Serverstand beim Nachlesen leer' };
+  const abw = verifiziere ? verifiziere(stand, letzte) : [];
+  try { excelServerStandUebernehmen(excelKopie(stand)); } catch (_) {}   // lokale Ansicht = bestätigter Serverstand (auch bei Abweichung: die Wahrheit anzeigen)
+  if (abw.length) return { status: 'geschrieben-nachlesen-abweichend', ok: false, res: letzte, abweichungen: abw, grund: 'Geschrieben, aber Nachlesen weicht ab: ' + abw.slice(0, 5).join(' | ') };
+  return { status: 'geschrieben-verifiziert', ok: true, res: letzte };
+}
+// Unabhängige Nachlese-Prüfung gegen den Vorzustand (nicht gegen das Mutator-Ergebnis):
+// gespeicherte ID == Ziel-ID, Originaltext, erhaltene Zusatzdaten, nur der ersetzte Eintrag entfernt, Aliase.
+const EXCEL_RELINK_VERWORFEN = ['status', 'verknuepfung', 'kandidatenIds', 'konfliktGrund', 'vorschlagIds', 'farbeHex', 'notiz', 'terminAbweichung'];
+function excelBestandVerifizieren(R, res) {
+  const abw = [], ex = res && res.erwartung; if (!ex) return ['Keine Erwartung vorhanden'];
+  (ex.items || []).forEach(x => {
+    const tag = (R.plan || {})[x.datum], lbl = x.datum + ' ' + x.maName + ' „' + x.text + '“';
+    if (!tag) { abw.push(lbl + ': Tag fehlt im Serverstand'); return; }
+    const ziel = tag[x.nachKey];
+    if (!ziel) { abw.push(lbl + ': Zieleintrag ' + x.nachKey + ' fehlt'); return; }
+    if (x.aktion === 'verknuepfen') {
+      if (String(ziel.bsId) !== String(x.zielId)) abw.push(lbl + ': gespeicherte ID ' + ziel.bsId + ' ≠ vorgesehene Ziel-ID ' + x.zielId);
+      if (ziel.excelText !== x.text) abw.push(lbl + ': Originaltext weicht ab');
+      Object.keys(x.vorEintrag).filter(f => !EXCEL_RELINK_VERWORFEN.includes(f)).forEach(f => { if (!excelGleich(ziel[f], x.vorEintrag[f])) abw.push(lbl + ': Zusatzfeld „' + f + '“ nicht erhalten'); });
+      const notizErw = String(x.vorEintrag.notiz || '').split('\n').filter((z, i) => !(i === 0 && /^\s*Baustelle ungeklärt\s*[:\-–]/i.test(z))).join('\n').trim();
+      if (String(ziel.notiz || '') !== notizErw) abw.push(lbl + ': Notiz nicht erhalten');
+      if (x.nachKey !== x.key && tag[x.key] !== undefined) abw.push(lbl + ': ersetzter ungeklärter Eintrag ' + x.key + ' steht noch');
+    } else {
+      if (ziel.status !== x.zielStatus) abw.push(lbl + ': Status ' + ziel.status + ' ≠ ' + x.zielStatus);
+      if (ziel.excelText !== x.text) abw.push(lbl + ': Originaltext weicht ab');
+      Object.keys(x.vorEintrag).filter(f => !['status', 'verknuepfung', 'kandidatenIds', 'konfliktGrund', 'vorschlagIds', 'farbeHex', 'notiz', 'excelText'].includes(f)).forEach(f => { if (!excelGleich(ziel[f], x.vorEintrag[f])) abw.push(lbl + ': Zusatzfeld „' + f + '“ nicht erhalten'); });
+    }
+    // Ausschliesslich der ersetzte Eintrag darf verschwunden/geändert sein
+    Object.keys(x.vorTag).forEach(k => {
+      if (k === x.key || k === x.nachKey) return;
+      if ((ex.items || []).some(y => y.datum === x.datum && (y.key === k || y.nachKey === k))) return;   // anderer, ebenfalls reparierter Eintrag
+      if (!excelGleich(tag[k], x.vorTag[k])) abw.push(lbl + ': fremder Eintrag ' + k + ' wurde verändert/entfernt');
+    });
+  });
+  (ex.aliase || []).forEach(a => {
+    const bs = (R.baustellen || []).find(b => String(b.id) === String(a.bsId)), lbl = 'Alias „' + a.alias + '“';
+    if (!bs) { abw.push(lbl + ': Baustelle ' + a.bsId + ' fehlt'); return; }
+    const jetzt = Array.isArray(bs.excelAliases) ? bs.excelAliases : [];
+    if (!jetzt.includes(a.alias)) abw.push(lbl + ': nicht in excelAliases gespeichert (ID ' + a.bsId + ')');
+    a.vorher.forEach(v => { if (!jetzt.includes(v)) abw.push(lbl + ': bisheriger Alias „' + v + '“ ging verloren'); });
+    const { excelAliases: _e, ...restJetzt } = bs;
+    if (!excelGleich(restJetzt, a.bsOhneAlias)) abw.push(lbl + ': andere Felder der Baustelle ' + a.bsId + ' wurden verändert');
+  });
+  (ex.todoIdsVorher || []).forEach(id => { if (!(R.todos || []).some(t => String(t.id) === String(id))) abw.push('To-do ' + id + ' ist verschwunden'); });
+  return abw;
+}
+// Mutator der Bestandsreparatur: berechnet die Vorschau auf dem FRISCHEN Stand neu und wendet nur an,
+// was mit der vom Benutzer geprüften Vorschau übereinstimmt (parallele Änderungen → übersprungen).
+function excelBestandAnwenden(st, vor) {
+  const jetzt = excelBestandVorschau({ von: vor.von, bis: vor.bis });
+  const gleich = (a, b) => a.datum === b.datum && a.key === b.key && String(a.maId) === String(b.maId) && a.text === b.text && a.aktion === b.aktion
+    && String(a.zielId ?? '') === String(b.zielId ?? '') && String(a.zielStatus ?? '') === String(b.zielStatus ?? '');
+  const machbar = i => i.aktion === 'verknuepfen' || i.aktion === 'status';
+  const zuTun = jetzt.items.filter(n => machbar(n) && vor.items.some(v => gleich(v, n)));
+  const aliasTun = jetzt.aliasItems.filter(n => n.aktion === 'alias-ergaenzen' && (vor.aliasItems || []).some(v => String(v.bsId) === String(n.bsId) && v.alias === n.alias));
+  const uebersprungen = vor.items.filter(v => machbar(v) && !zuTun.some(n => gleich(v, n))).length;
+  if (!zuTun.length && !aliasTun.length) return { geaendert: false, uebersprungen, hinweis: 'Nichts zu tun (bereits repariert oder Vorschau veraltet)' };
+  const erw = { items: [], aliase: [], todoIdsVorher: (st.todos || []).map(t => t.id) };
+  const sich = { erstellt: new Date().toISOString(), stand: st._ts || null, items: [], aliase: [] };
+  let verknuepft = 0, status = 0;
+  aliasTun.forEach(a => {
+    const bs = (st.baustellen || []).find(b => String(b.id) === String(a.bsId)); if (!bs) return;
+    const { excelAliases: rawVor, ...bsOhne } = bs, vorher = bsExcelAliase(bs);
+    bs.excelAliases = [...new Set([...vorher, a.alias])];
+    erw.aliase.push({ bsId: a.bsId, alias: a.alias, vorher, bsOhneAlias: excelKopie(bsOhne) });
+    sich.aliase.push({ bsId: a.bsId, vorExcelAliases: excelKopie(rawVor), nachExcelAliases: excelKopie(bs.excelAliases) });
+  });
+  zuTun.forEach(n => {
+    const tag = st.plan[n.datum], e = tag && tag[n.key]; if (!e) return;
+    const vorTag = excelKopie(tag), vorEintrag = excelKopie(e), t = excelTextVonEintrag(e);
+    if (n.aktion === 'status') {
+      const { verknuepfung, kandidatenIds, konfliktGrund, vorschlagIds, ...restS } = e;
+      tag[n.key] = { ...restS, status: n.zielStatus, farbeHex: statusHex(n.zielStatus), notiz: t, excelText: t };
+      status++;
+      erw.items.push({ aktion: 'status', datum: n.datum, key: n.key, nachKey: n.key, maName: n.ma, text: t, zielStatus: n.zielStatus, vorEintrag, vorTag });
+      sich.items.push({ datum: n.datum, key: n.key, nachKey: n.key, vorEintrag, nachEintrag: excelKopie(tag[n.key]) });
+      return;
+    }
+    const ab = excelBaustelleAbgleichen(n.text, n.datum);
+    if ((ab.status !== 'eindeutig' && ab.status !== 'termin') || String(ab.bs.id) !== String(n.zielId)) return;
+    const r = excelEintragRelink(tag, n.key, e, n.datum, ab);
+    if (!r.ok) return;
+    verknuepft++;
+    erw.items.push({ aktion: 'verknuepfen', datum: n.datum, key: n.key, nachKey: r.baseKey, maName: n.ma, text: n.text, zielId: n.zielId, vorEintrag, vorTag });
+    sich.items.push({ datum: n.datum, key: n.key, nachKey: r.baseKey, vorEintrag, nachEintrag: excelKopie(tag[r.baseKey]) });
+  });
+  excelVerknuepfungsTodosAktualisieren(); excelTerminTodosAktualisieren();
+  return { geaendert: erw.items.length + erw.aliase.length > 0, verknuepft, status, alias: erw.aliase.length, uebersprungen, erwartung: erw, sicherung: sich,
+    undo: s2 => excelRuecknahmeAnwenden(s2, sich) };   // nur für den lokalen Modus (ohne Firebase)
+}
+function excelBestandErgebnisText(r) {
+  const z = r.res || {};
+  const zahlen = (z.verknuepft != null ? z.verknuepft + ' verknüpft, ' + z.status + ' Status korrigiert, ' + z.alias + ' Alias ergänzt' + (z.uebersprungen ? ', ' + z.uebersprungen + ' übersprungen (inzwischen geändert)' : '') : '');
+  return zahlen;
+}
+async function excelBestandReparieren(opts) {
+  opts = opts || {};
+  if (!lagertoolDarfSchreiben()) return { ok: false, status: 'nicht-geschrieben', grund: 'Keine Schreibberechtigung' };
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return { ok: false, status: 'nicht-geschrieben', grund: 'Nur für Admin/Entwickler' };
+  const vor = opts.vorschau;
+  if (!vor || !Array.isArray(vor.items)) return { ok: false, status: 'nicht-geschrieben', grund: 'Zuerst die Vorschau erzeugen und prüfen' };
+  const r = await excelAtomarAendern(st => excelBestandAnwenden(st, vor), excelBestandVerifizieren);
+  const res = r.res || {};
+  const out = { ...r, geaendert: (res.verknuepft || 0) + (res.status || 0) + (res.alias || 0), verknuepft: res.verknuepft || 0, status: r.status, statusAnzahl: res.status || 0,
+    alias: res.alias || 0, uebersprungen: res.uebersprungen || 0, hinweis: res.hinweis, sicherung: res.sicherung || null,
+    nachgelesen: r.status === 'geschrieben-verifiziert' ? true : (r.status.startsWith('geschrieben-') ? false : null) };
+  if (res.sicherung) {
+    window._letzteExcelReparatur = { sicherung: res.sicherung, geschrieben: r.status.startsWith('geschrieben-') || r.status === 'lokal-gespeichert', status: r.status };
+    try { safeStorage.setItem('lagertool_backup_excel_reparatur_' + Date.now(), JSON.stringify(res.sicherung)); } catch (_) {}
+  }
+  return out;
+}
+// Gezielte Rücknahme einer Reparatur AUF DEM SERVER: je Eintrag nur, wenn dort noch exakt unser geschriebener
+// Stand steht (Compare-and-Set auf Eintragsebene). Änderungen anderer Nutzer werden nie überschrieben,
+// sondern als Konflikt gemeldet. Bestätigt erst nach frischem Nachlesen.
+function excelRuecknahmeAnwenden(st, sich) {
+  const konflikte = []; let n = 0; const erw = [];
+  (sich.items || []).forEach(x => {
+    const tag = (st.plan || {})[x.datum], lbl = x.datum + ' ' + x.nachKey;
+    if (!tag || !excelGleich(tag[x.nachKey], x.nachEintrag)) { konflikte.push(lbl + ': Eintrag wurde inzwischen anders geändert – nicht zurückgenommen'); return; }
+    if (x.nachKey !== x.key && tag[x.key] !== undefined) { konflikte.push(lbl + ': Ursprungseintrag ' + x.key + ' existiert wieder – nicht zurückgenommen'); return; }
+    delete tag[x.nachKey]; tag[x.key] = excelKopie(x.vorEintrag); n++; erw.push(x);
+  });
+  (sich.aliase || []).forEach(a => {
+    const bs = (st.baustellen || []).find(b => String(b.id) === String(a.bsId));
+    if (!bs || !excelGleich(bs.excelAliases, a.nachExcelAliases)) { konflikte.push('Alias-Liste der Baustelle ' + a.bsId + ' wurde inzwischen geändert – nicht zurückgenommen'); return; }
+    if (a.vorExcelAliases === undefined) delete bs.excelAliases; else bs.excelAliases = excelKopie(a.vorExcelAliases);
+    n++; erw.push({ alias: a });
+  });
+  if (n) { try { excelVerknuepfungsTodosAktualisieren(); excelTerminTodosAktualisieren(); } catch (_) {} }
+  return { geaendert: n > 0, zurueck: n, konflikte, erwRuecknahme: erw };
+}
+async function excelBestandRuecknahme(sicherung) {
+  if (!lagertoolDarfSchreiben() || !(currentLoginUser?.admin || currentLoginUser?.entwickler)) return { ok: false, status: 'nicht-geschrieben', grund: 'Keine Berechtigung' };
+  if (!sicherung || !Array.isArray(sicherung.items)) return { ok: false, status: 'nicht-geschrieben', grund: 'Keine Sicherung vorhanden' };
+  const r = await excelAtomarAendern(st => excelRuecknahmeAnwenden(st, sicherung), (R, res) => {
+    const abw = [];
+    (res.erwRuecknahme || []).forEach(x => {
+      if (x.alias) { const bs = (R.baustellen || []).find(b => String(b.id) === String(x.alias.bsId)); if (!bs || !excelGleich(bs.excelAliases, x.alias.vorExcelAliases)) abw.push('Alias-Liste ' + x.alias.bsId + ' nicht zurückgesetzt'); return; }
+      const tag = (R.plan || {})[x.datum];
+      if (!tag || !excelGleich(tag[x.key], x.vorEintrag)) abw.push(x.datum + ' ' + x.key + ': Ursprungseintrag nicht wiederhergestellt');
+      if (x.nachKey !== x.key && tag && tag[x.nachKey] !== undefined) abw.push(x.datum + ' ' + x.nachKey + ': steht noch');
+    });
+    return abw;
+  });
+  const res = r.res || {};
+  if (r.status === 'geschrieben-verifiziert') { r.rueckgenommen = res.zurueck; r.konflikte = res.konflikte; if (window._letzteExcelReparatur) window._letzteExcelReparatur = null; }
+  r.konflikte = res.konflikte || []; r.rueckgenommen = res.zurueck || 0;
+  return r;
+}
+// Hinweis nach Firebase-Sync (schreibt NICHT): weist Admins auf eindeutig verknüpfbare Einträge hin,
+// z.B. nach Änderungen an Baustellen/Aliassen über MCP oder ein anderes Gerät.
+let _excelHinweisSig = '';
+function excelHinweisNachSync() {
+  if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return;
+  const z = excelBestandVorschau().zaehler, n = z.verknuepfen + z.status + z.alias;
+  const sig = n + ':' + (state._ts || '');
+  if (!n || sig === _excelHinweisSig) return;
+  _excelHinweisSig = sig;
+  toast('Excel-Abgleich', n + ' Wochenplan-Einträge können eindeutig verknüpft/korrigiert werden – Vorschau unter „🔗 Excel-Abgleich“ im Wochenplan', '🔗');
+}
+
 // Vorschau des Abgleichs für eine Woche – verändert NICHTS.
 function excelAbgleichVorschau(montag) {
   const mo = montag ? new Date(montag) : getMonday(new Date()); mo.setHours(12,0,0,0);
-  const erg = { kw: bsGetKW(mo), verknuepft: [], wuerdeVerknuepft: [], fehlend: [], mehrdeutig: [], abweichend: [] };
+  const erg = { kw: bsGetKW(mo), verknuepft: [], wuerdeVerknuepft: [], fehlend: [], mehrdeutig: [], abweichend: [], termin: [] };
   const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : String(id); };
   for (let i = 0; i < 7; i++) {
     const ds = fmtDate(addDays(mo, i)), tag = (state.plan || {})[ds] || {};
@@ -8071,18 +8528,18 @@ function excelAbgleichVorschau(montag) {
         if (!excelIstUnverknuepft(e)) return;
         const text = excelTextVonEintrag(e);
         if (!text) { erg.abweichend.push({ ...z, grund: 'Ungeklärt ohne Originaltext' }); return; }
-        if (excelUngeklaertAufgeloest(ds, maId)) { erg.abweichend.push({ ...z, text, grund: 'Veralteter „ungeklärt“-Eintrag neben bestehendem Einsatz' }); return; }
+        if (excelUngeklaertAufgeloest(ds, maId, text)) { erg.abweichend.push({ ...z, text, grund: 'Veralteter „ungeklärt“-Eintrag neben bestehendem Einsatz auf derselben Baustelle' }); return; }
         const st = excelStatusAusText(text);
         if (st) { erg.abweichend.push({ ...z, text, grund: 'Als Baustelle erfasst, ist aber Status „' + st + '“' }); return; }
         const ab = excelBaustelleAbgleichen(text, ds);
-        if (ab.status === 'eindeutig') erg.wuerdeVerknuepft.push({ ...z, text, bs: ab.bs.name, bsId: ab.bs.id });
+        if (ab.status === 'eindeutig' || ab.status === 'termin') erg.wuerdeVerknuepft.push({ ...z, text, bs: ab.bs.name, bsId: ab.bs.id, ...(ab.status === 'termin' ? { termin: true } : {}) });
         else if (ab.status === 'mehrdeutig') erg.mehrdeutig.push({ ...z, text, grund: ab.grund, kandidaten: ab.kandidaten.map(excelBsKurz) });
         else erg.fehlend.push({ ...z, text, vorschlaege: (ab.vorschlaege || []).map(excelBsKurz) });
       } else if (e.bsId != null && e.bsId !== '') {
         const bs = (state.baustellen || []).find(b => String(b.id) === String(e.bsId));
         if (!bs) erg.abweichend.push({ ...z, grund: 'Baustelle ' + e.bsId + ' existiert nicht' });
         else if (bsIstBeendet(bs)) erg.abweichend.push({ ...z, text: bs.name, grund: 'Einsatz auf beendeter Baustelle' });
-        else erg.verknuepft.push({ ...z, bs: bs.name, text: e.excelText || '' });
+        else { erg.verknuepft.push({ ...z, bs: bs.name, text: e.excelText || '' }); if (e.terminAbweichung) erg.termin.push({ ...z, bs: bs.name, text: e.excelText || '', grund: 'Termin weicht vom Auftrag ab (' + excelBsKurz(bs) + ')' }); }
       }
     });
   }
@@ -8199,6 +8656,7 @@ window.LagerToolExcel = {
   importRows: rows => parseWochenplanExcel(rows), nachAbgleich: excelNachAbgleich,
   reparatur: excelReparatur, vorschau: excelAbgleichVorschau, aliase: bsExcelAliase,
   zusammenfuehrenVorschau: bsZusammenfuehrenVorschau, zusammenfuehren: bsZusammenfuehren,
+  bestandVorschau: excelBestandVorschau, bestandReparieren: excelBestandReparieren, bestandRuecknahme: excelBestandRuecknahme, bestaetigteAliase: () => EXCEL_BESTAETIGTE_ALIASE.slice(),
   kontrolle: () => window._letzteExcelKontrolle || []
 };
 
@@ -8208,40 +8666,96 @@ function wpExcelPanelToggle() {
   p.style.display = p.style.display === 'none' ? '' : 'none';
   if (p.style.display === '') wpExcelPanelRender();
 }
+function excelBestandTabelleHtml(v) {
+  const f = ds => ds.slice(8,10) + '.' + ds.slice(5,7) + '.';
+  const zeilen = [];
+  (v.aliasItems || []).forEach(a => zeilen.push('<tr style="vertical-align:top"><td>–</td><td>–</td><td>' + bsKwEsc(a.alias) + '</td><td>' + bsKwEsc(a.aktion + ' → ' + (a.bsName || '') + ' (ID ' + a.bsId + ')') + '</td><td style="color:#ff8a80">' + bsKwEsc((a.konflikte || []).join('; ')) + '</td></tr>'));
+  v.items.forEach(i => zeilen.push('<tr style="vertical-align:top"><td>' + f(i.datum) + '</td><td>' + bsKwEsc(i.ma) + '</td><td>' + bsKwEsc(i.text || '(kein Originaltext)') + '</td><td>'
+    + bsKwEsc(i.aktion + (i.zielId != null ? ' → ' + i.zielName + ' (ID ' + i.zielId + ')' : '') + (i.zielStatus ? ' → ' + i.zielStatus : '')) + '</td><td style="color:#ff8a80">' + bsKwEsc((i.konflikte || []).join('; ')) + '</td></tr>'));
+  if (!zeilen.length) return '<div style="font-size:11px;margin-top:6px">Keine Reparatur nötig.</div>';
+  return '<div style="max-height:260px;overflow:auto;margin-top:6px"><table style="font-size:11px;border-collapse:collapse;width:100%"><thead><tr style="text-align:left;color:var(--muted)"><th>Datum</th><th>Mitarbeiter</th><th>Originaltext</th><th>Aktion / Ziel</th><th>Konflikte</th></tr></thead><tbody>' + zeilen.join('') + '</tbody></table></div>';
+}
 function wpExcelPanelRender() {
   const p = document.getElementById('wp-excel-panel'); if (!p) return;
-  let offen = 0, ohneText = 0;
-  Object.values(state.plan || {}).forEach(tag => Object.entries(tag || {}).forEach(([k, e]) => {
-    if (!excelIstUnverknuepft(e)) return; if (excelTextVonEintrag(e)) offen++; else ohneText++;
-  }));
   const v = excelAbgleichVorschau(wpBaseMonday || getMonday(new Date()));
+  const bv = window._excelVorschau || null, z = (bv || excelBestandVorschau()).zaehler;
+  const machbar = bv ? bv.zaehler.verknuepfen + bv.zaehler.status + bv.zaehler.alias : 0;
   p.innerHTML = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     + '<strong style="font-size:13px">🔗 Excel-Abgleich</strong>'
-    + '<span style="font-size:12px;color:var(--muted)">' + offen + ' unverknüpfte Einträge' + (ohneText ? ' · ' + ohneText + ' ohne Originaltext' : '') + '</span>'
-    + '<span style="font-size:12px;color:var(--muted)">· KW ' + v.kw + ': ' + v.verknuepft.length + ' verknüpft, ' + v.wuerdeVerknuepft.length + ' eindeutig verknüpfbar, ' + v.fehlend.length + ' fehlend, ' + v.mehrdeutig.length + ' mehrdeutig, ' + v.abweichend.length + ' abweichend</span>'
+    + '<span style="font-size:12px;color:var(--muted)">Bestand: ' + z.verknuepfen + ' eindeutig verknüpfbar (davon ' + z.termin + ' mit Terminabweichung), ' + z.status + ' Status falsch abgelegt (z.B. Info folgt), ' + z.mehrdeutig + ' mehrdeutig, ' + z.fehlt + ' ohne Baustelle' + (z.ohneText ? ', ' + z.ohneText + ' ohne Originaltext' : '') + '</span>'
+    + '<span style="font-size:12px;color:var(--muted)">· KW ' + v.kw + ': ' + v.verknuepft.length + ' verknüpft, ' + v.termin.length + ' Termin abweichend, ' + v.wuerdeVerknuepft.length + ' verknüpfbar, ' + v.fehlend.length + ' fehlend, ' + v.mehrdeutig.length + ' mehrdeutig, ' + v.abweichend.length + ' abweichend</span>'
     + '<div class="spacer"></div>'
+    + '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelBestandVorschau()">🔍 Reparatur-Vorschau</button>'
+    + (bv ? '<button type="button" class="btn btn-secondary btn-sm" ' + (machbar ? '' : 'disabled ') + 'onclick="wpExcelBestandAusfuehren()">✅ Vorschau ausführen (' + machbar + ')</button>' : '')
+    + (window._letzteExcelReparatur && window._letzteExcelReparatur.geschrieben ? '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelRuecknahme()">↩ Letzte Reparatur gezielt zurücknehmen</button>' : '')
     + '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelAktion(\'reparatur\')">🛠 Bezeichnungen wiederherstellen + abgleichen</button>'
     + '<button type="button" class="btn btn-secondary btn-sm" onclick="wpExcelAktion(\'abgleich\')">🔄 Erneut abgleichen</button>'
     + '<button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById(\'wp-excel-reimport\').click()">⬆ Excel erneut importieren</button>'
     + '<input type="file" id="wp-excel-reimport" accept=".xlsx,.xls,.csv" style="display:none" onchange="wpFileImport(event)">'
     + '</div>'
+    + (bv ? excelBestandTabelleHtml(bv) : '')
+    + (v.termin.length ? '<div style="font-size:11px;margin-top:6px;color:#ff8a80">' + v.termin.map(a => '⚠ ' + a.datum.slice(8,10) + '.' + a.datum.slice(5,7) + '. ' + bsKwEsc(a.ma) + ' – ' + bsKwEsc(a.text) + ': ' + bsKwEsc(a.grund)).join('<br>') + '</div>' : '')
     + (v.abweichend.length ? '<div style="font-size:11px;margin-top:6px;max-height:140px;overflow:auto">' + v.abweichend.map(a => '⚠ ' + a.datum.slice(8,10) + '.' + a.datum.slice(5,7) + '. ' + bsKwEsc(a.ma) + (a.text ? ' – ' + bsKwEsc(a.text) : '') + ': ' + bsKwEsc(a.grund)).join('<br>') + '</div>' : '')
-    + (ohneText ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">Einträge ohne Originaltext können nicht rekonstruiert werden – dafür die Excel-Datei erneut importieren.</div>' : '');
+    + (z.ohneText ? '<div style="font-size:11px;color:var(--muted);margin-top:6px">Einträge ohne Originaltext können nicht rekonstruiert werden – dafür die Excel-Datei erneut importieren.</div>' : '');
+}
+function wpExcelBestandVorschau() {
+  window._excelVorschau = excelBestandVorschau();
+  wpExcelPanelRender();
+}
+function excelSicherungHerunterladen(sich) {
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(sich, null, 1)], { type: 'application/json' }));
+    a.download = 'lagertool-excel-reparatur-sicherung-' + Date.now() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (_) {}
+}
+async function wpExcelBestandAusfuehren() {
+  const v = window._excelVorschau;
+  if (!v) return toast('Hinweis', 'Zuerst „Reparatur-Vorschau“ erzeugen und prüfen', 'ℹ️');
+  const r = await excelBestandReparieren({ vorschau: v });
+  if (r.sicherung) excelSicherungHerunterladen(r.sicherung);
+  window._excelVorschau = null;
+  try { renderWochenplan(); } catch (_) {} try { renderTodoPage(); } catch (_) {}
+  wpExcelPanelRender();
+  const zahlen = excelBestandErgebnisText(r);
+  if (r.status === 'nichts-zu-tun') return toast('Excel-Reparatur', r.hinweis || 'Nichts zu tun', 'ℹ️');
+  if (r.status === 'geschrieben-verifiziert') return toast('Excel-Reparatur', zahlen + ' · vom Server nachgelesen und geprüft ✔', '🔗');
+  if (r.status === 'lokal-gespeichert') return toast('Excel-Reparatur', zahlen + ' · lokal gespeichert (kein Firebase)', '🔗');
+  if (r.status === 'lokal-zurueckgesetzt') return toast('Nichts gespeichert', r.grund + ' – nur die LOKALE Ansicht wurde zurückgesetzt', '⚠️');
+  if (r.status === 'nicht-geschrieben') return toast('Nichts geändert', r.grund || 'Fehler', '⚠️');
+  // geschrieben, aber nicht bestätigt / unklar: KEINE Erfolgsmeldung, KEIN stiller Rollback
+  toast('Reparatur NICHT bestätigt', (r.grund || r.status) + ' – Server-Stand prüfen; Sicherung wurde heruntergeladen. Gezielte Rücknahme im Panel möglich.', '⛔');
+}
+async function wpExcelRuecknahme() {
+  const l = window._letzteExcelReparatur;
+  if (!l || !l.sicherung) return toast('Hinweis', 'Keine Sicherung der letzten Reparatur vorhanden', 'ℹ️');
+  if (!confirm('Letzte Reparatur auf dem Server gezielt zurücknehmen?\n\nNur Einträge, die dort noch exakt dem geschriebenen Stand entsprechen, werden zurückgesetzt. Änderungen anderer Nutzer bleiben unangetastet.')) return;
+  const r = await excelBestandRuecknahme(l.sicherung);
+  try { renderWochenplan(); } catch (_) {} wpExcelPanelRender();
+  if (r.status === 'geschrieben-verifiziert') return toast('Rücknahme bestätigt', r.rueckgenommen + ' Einträge auf dem Server zurückgesetzt und nachgelesen' + (r.konflikte.length ? ' · ' + r.konflikte.length + ' Konflikt(e) NICHT zurückgenommen: ' + r.konflikte.slice(0, 3).join('; ') : ''), '↩');
+  if (r.status === 'lokal-gespeichert') return toast('Rücknahme', r.rueckgenommen + ' Einträge zurückgesetzt (lokal, kein Firebase)', '↩');
+  if (r.status === 'nichts-zu-tun') return toast('Rücknahme', 'Nichts zurückzunehmen' + (r.konflikte.length ? ' – Konflikte: ' + r.konflikte.slice(0, 3).join('; ') : ''), 'ℹ️');
+  toast('Rücknahme NICHT bestätigt', r.grund || r.status, '⛔');
 }
 async function wpExcelAktion(art) {
   if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('excel-abgleich');
   if (!(currentLoginUser?.admin || currentLoginUser?.entwickler)) return toast('Zugriff verweigert', 'Nur für Admin/Entwickler', '🔒');
-  const backupPlan = JSON.stringify(state.plan || {}), backupTodos = JSON.stringify(state.todos || []);
-  const rep = art === 'reparatur' ? excelReparatur() : { repariert: 0 };
-  const r = excelNachAbgleich();
-  const res = await save({verify:true});
-  if (!res || !res.ok) {
-    state.plan = JSON.parse(backupPlan); state.todos = JSON.parse(backupTodos);
-    renderWochenplan(); return toast('Fehler', 'Speichern nicht bestätigt – nichts geändert', '⚠️');
-  }
-  renderWochenplan(); try { renderTodoPage(); } catch(_) {}
+  // Läuft auf dem frischen Serverstand in einer Transaktion (kein Überschreiben paralleler Änderungen).
+  const r = await excelAtomarAendern(st => {
+    const vorher = JSON.stringify({ plan: st.plan || {}, todos: st.todos || [] }), vorPlan = excelKopie(st.plan || {}), vorTodos = excelKopie(st.todos || []);
+    const rep = art === 'reparatur' ? excelReparatur() : { repariert: 0 };
+    const n = excelNachAbgleich();
+    const nachher = JSON.stringify({ plan: st.plan || {}, todos: st.todos || [] });
+    return { geaendert: vorher !== nachher, rep, n, plan: excelKopie(st.plan || {}), undo: s2 => { s2.plan = vorPlan; s2.todos = vorTodos; } };
+  }, (R, res) => excelGleich(R.plan || {}, res.plan) ? [] : ['Wochenplan im Serverstand weicht vom geschriebenen Stand ab']);
+  try { renderWochenplan(); } catch (_) {} try { renderTodoPage(); } catch (_) {}
   wpExcelPanelRender();
-  toast('Excel-Abgleich', (rep.repariert ? rep.repariert + ' Bezeichnungen wiederhergestellt, ' : '') + r.verknuepft + ' verknüpft, ' + r.neu + ' neue To-dos, ' + r.erledigt + ' To-dos erledigt', '🔗');
+  const res = r.res || {}, n = res.n || {}, rep = res.rep || {};
+  if (r.status === 'nichts-zu-tun') return toast('Excel-Abgleich', 'Nichts zu verknüpfen – Stand unverändert', 'ℹ️');
+  if (r.status === 'geschrieben-verifiziert' || r.status === 'lokal-gespeichert')
+    return toast('Excel-Abgleich', (rep.repariert ? rep.repariert + ' Bezeichnungen wiederhergestellt, ' : '') + n.verknuepft + ' verknüpft, ' + (n.neu || 0) + ' neue To-dos, ' + (n.erledigt || 0) + ' To-dos erledigt' + (r.status === 'geschrieben-verifiziert' ? ' · nachgelesen ✔' : ''), '🔗');
+  toast('Excel-Abgleich – NICHT bestätigt', r.grund || r.status, '⚠️');
 }
 
 // ── Excel/PDF-Import für Wochenplan ──
@@ -8471,6 +8985,7 @@ function parseWochenplanExcel(rows) {
   });
 
   const todoRes = excelVerknuepfungsTodosAktualisieren();
+  try { excelTerminTodosAktualisieren(); } catch (_) {}   // Terminabweichungen Excel ↔ Auftrag als rote To-dos
   // Gegenkontrolle: jede importierte Zelle gegen den resultierenden Planeintrag prüfen
   const kontrollAbw = [];
   importiert.forEach(({ ma, datum, k }) => {
@@ -8485,6 +9000,7 @@ function parseWochenplanExcel(rows) {
   window._letzteExcelKontrolle = kontrollAbw;
   save({verify:true}).then(res => {
     if (!res || !res.ok) toast('Achtung', 'Speichern nicht bestätigt – bitte Import wiederholen', '⚠️');
+    else if (res.teilweise) toast('Import teilweise übernommen', res.konflikte.length + ' Zelle(n) wurden parallel von anderen geändert und NICHT überschrieben – Wochenplan/To-dos prüfen', '⚠️');
   });
   renderWochenplan();
   try { wpExcelPanelRender(); } catch(_) {}
@@ -10180,6 +10696,7 @@ async function saveBsModal() {
     return; // Modal bleibt bewusst offen
   }
   closeBsModal();
+  const syncTeilweise = !!saveResult.teilweise;   // parallele Änderung derselben Stelle: Server-Wert blieb (Meldung unten)
   if (konflikte.length) toast('Teilweise gespeichert', konflikte.length+' Konflikt(e) übersprungen: '+konflikte.join('; '), '⚠️');
   // Falls die Baustelle in der aktuell angezeigten Woche nicht sichtbar wäre, zu ihrem Start springen
   if (data.von) {
@@ -10193,7 +10710,8 @@ async function saveBsModal() {
     renderWochenplan();
   }
   try{renderTodoPage();}catch(_){ }
-  if (!konflikte.length) toast('Baustelle gespeichert',name + (excelNach.verknuepft ? ' – ' + excelNach.verknuepft + ' Excel-Einträge verknüpft' : ''),'✅');
+  if (syncTeilweise) toast('Baustelle teilweise gespeichert', name + ': ' + saveResult.konflikte.length + ' Änderung(en) NICHT übernommen, weil jemand anderes dieselben Felder parallel geändert hat (' + saveResult.konflikte.slice(0, 3).map(k => k.pfad.replace(/^\//, '')).join('; ') + ') – Server-Stand bleibt, bitte prüfen', '⚠️');
+  else if (!konflikte.length) toast('Baustelle gespeichert',name + (excelNach.verknuepft ? ' – ' + excelNach.verknuepft + ' Excel-Einträge verknüpft' : ''),'✅');
 }
 
 function deleteBs() {
@@ -10798,7 +11316,7 @@ function startFirebaseListener() {
       // NICHT hier auf false setzen, sonst kommt das Echo durch!
       if (suppressListener) { firebaseReady = true; return; }
       const data = snapshot.val();
-      if (!data) { firebaseReady = true; markFirebaseSynced(); return; }
+      if (!data) { syncBase = null; firebaseReady = true; markFirebaseSynced(); return; }
       try {
         const remote = typeof data === 'string' ? JSON.parse(data) : data;
 
@@ -10814,6 +11332,9 @@ function startFirebaseListener() {
 
         if (lokalIstNeuer || (lokalHatDaten && remoteIstLeer)) {
           console.log('[Firebase] Lokal gewinnt (ts:' + state._ts + ' > remote:' + remote._ts + ')');
+          // Der lokale Stand kann auf einem ÄLTEREN Serverstand beruhen (z.B. offline bearbeitet): Basis bewusst leer → ZUSAMMENFÜHREN statt
+          // überschreiben: Einträge beider Seiten bleiben, bei widersprüchlichen Werten gilt der Server (Konflikt wird gemeldet).
+          syncBase = {};
           markFirebaseSynced();
           firebaseReady = true;
           save();
@@ -10823,6 +11344,7 @@ function startFirebaseListener() {
           // Firebase-Daten übernehmen
           console.log('[Firebase] Server-Modus: Übernehme Firebase-Daten (' + (remote.mitarbeiter?.length||0) + ' MA, ' + (remote.artikel?.length||0) + ' Art)');
           const lokalVorSync = state;
+          syncBase = syncKopie(remote);          // Basis für den 3-Wege-Merge beim nächsten Speichern (vor Migrationen!)
           state = remote;
           if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
           if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
@@ -10877,13 +11399,12 @@ function startFirebaseListener() {
           // sichtbar wird (beim allerersten Aufruf vor dem Sync war er noch leer).
           if (!currentLoginUser && typeof renderLoginBiometricUI === 'function') renderLoginBiometricUI();
           showSyncIndicator('↓ Firebase → Lokal');
+          try { excelHinweisNachSync(); } catch (_) {}
           // Falls Baustellen wiederhergestellt wurden, sofort zurück nach Firebase schreiben
           if (lokalBsAnzahl > 0 && remoteBsAnzahl < lokalBsAnzahl && dbRef && lagertoolDarfSchreiben()) {
-            state._ts = Date.now();
-            suppressListener = true;
-            const slimJson = JSON.stringify(stripLargeData(state));
-            dbRef.set(slimJson).then(() => showSyncIndicator('↑ Baustellen wiederhergestellt'))
-              .finally(() => setTimeout(() => { suppressListener = false; }, 2000));
+            // Über den Merge-Speicherweg (Basis = eben gelesener Serverstand): fügt nur die fehlenden Baustellen hinzu,
+            // überschreibt keine zwischenzeitlichen Änderungen anderer.
+            save().then(res => showSyncIndicator(res && res.ok ? '↑ Baustellen wiederhergestellt' : '⚠ Wiederherstellung nicht bestätigt'));
           }
         }
 
@@ -11249,6 +11770,7 @@ function importData(e) {
         const slimJson = JSON.stringify(stripLargeData(state));
         dbRef.set(slimJson)
           .then(() => {
+            try { syncBase = syncKopie(JSON.parse(slimJson)); } catch (_) {}
             toast('Import OK', 'Daten geladen und zu Firebase gespeichert', '✅');
             showSyncIndicator('↑ Import Sync OK');
           })
@@ -12626,6 +13148,8 @@ function printBaustatus(bauId) {
 function forceSave() {
   if (!lagertoolDarfSchreiben()) return lagertoolSchreibsperre('forceSave');
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
+  // Ausdrücklicher Override: schreibt den lokalen Stand UNBEDINGT (kein Merge) und überschreibt parallele Änderungen anderer.
+  if (!confirm('Erzwingt das Schreiben des lokalen Stands nach Firebase und überschreibt parallele Änderungen anderer Nutzer (z.B. Tobias, MCP, Reparatur).\n\nNormalerweise genügt das automatische Speichern. Trotzdem erzwingen?')) return;
   state._ts = Date.now();
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
@@ -12639,6 +13163,7 @@ function forceSave() {
     const slimJson = JSON.stringify(stripLargeData(state));
     dbRef.set(slimJson)
       .then(() => {
+        try { syncBase = syncKopie(JSON.parse(slimJson)); } catch (_) {}
         btn.innerHTML = '✅ Gespeichert!';
         btn.style.background = 'var(--green,#4be88a)';
         showSyncIndicator('↑ Sync OK');
@@ -13519,6 +14044,9 @@ async function gptExecuteActions(actions,originalMessage){
     }
     if(saveResult.verifyError){
       console.warn('[GPT] Verifikations-Lesevorgang nach dem Speichern fehlgeschlagen', saveResult.verifyError);
+    }
+    if(saveResult.teilweise){
+      errors.push('Achtung: '+saveResult.konflikte.length+' Änderung(en) wurden NICHT übernommen, weil dieselben Daten parallel von jemand anderem geändert wurden ('+saveResult.konflikte.slice(0,3).map(k=>k.pfad.replace(/^\//,'')).join('; ')+') – Server-Stand blieb erhalten, bitte Ergebnis prüfen.');
     }
     try{renderTodoPage();}catch(_){ }
     try{renderWochenplan();}catch(_){ }
