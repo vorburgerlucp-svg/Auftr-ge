@@ -3439,6 +3439,20 @@ const TODO_ABKLAERUNG_RE = /(klär|unklar|ungeklärt|prüf|fehlt|fehlend|nicht g
 const TODO_AKTION_RE = /(senden|schicken|informier|anrufen|telefonier|bestell|organisier|buchen|abholen|vorbereit|weiterleit|mitteil|melden|einlad|reservier|reparier|service|garage|mfk|reifen|rechnung|offerte|abnahme|geburtstag|hotel)/i;
 const TODO_MELDUNG_RE = /^(?:änderung(?:en)?\s*(?:im\s*|am\s*)?(?:wochenplan|plan)|wochenplan(?:änderung|[\s-]*(?:geändert|aktualisiert|angepasst|synchronisiert|abgeglichen))|plan(?:änderung|ung)?\s*(?:geändert|aktualisiert|angepasst)|umdisposition\b|umgeplant|(?:monteur|mitarbeiter)(?:wechsel|tausch)|(?:datum|termin)(?:sänderung|s?\s*(?:geändert|verschoben))|(?:excel|gpt|mcp)[\s-]*(?:sync|abgleich|import|synchronisation)|synchronisation\b|sync\b|abgleich\s+(?:erfolgreich|abgeschlossen|durchgeführt)|update:|status(?:meldung|update)|info:|hinweis:|baustelle\s+(?:erstellt|geändert|aktualisiert)|notiz\s+bei\s|to-do\s+aktualisiert|fahrzeug\s+für\s.+\sgeändert)/i;
 
+function todoIstAutomatisch(t) {
+  if (!t) return true;
+  if (t.ausdruecklich === true || t.quelle === 'Manuell') return false;
+  const quelle = String(t.quelle || '').toLowerCase();
+  const kind = String(t.kind || '').toLowerCase();
+  const key = String(t.schluessel || t.dedupeKey || '').toLowerCase();
+  if (kind === 'audit' || kind.startsWith('excel-')) return true;
+  if (/^(automatisch|excel(?:-|$)|gpt-(?:änderung|abklärung|konflikt|fahrzeugservice))/.test(quelle)) return true;
+  if (/^(excel-|abklaerung:|fahrzeugservice:|geburtstag:)/.test(key)) return true;
+  // Bekannte Altbestände ohne Herkunft, wie die bisherigen Verknüpfungsmeldungen.
+  if (!quelle && /^(?:Baustelle (?:fehlt \/ nicht verknüpft|mehrdeutig \/ nicht automatisch verknüpft):|Excel-Abgleich Abweichung KW |Termin weicht vom Auftrag ab:)/.test(String(t.text || '').trim())) return true;
+  return false;
+}
+
 function todoTextNorm(t) {
   return String(t||'').replace(/🤖/g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
@@ -3453,7 +3467,7 @@ function todoIstReineMeldung(t) {
   if (t.kind === 'audit') return true;                           // automatisches Änderungsprotokoll
   return TODO_MELDUNG_RE.test(text.split('\n')[0].trim());
 }
-function todoIstOffen(t) { return !!t && !t.erledigt && !t.bereinigt; }
+function todoIstOffen(t) { return !!t && !todoIstAutomatisch(t) && !t.erledigt && !t.bereinigt; }
 // Eindeutiger reiner Audit-Eintrag: vom früheren gptAudit() erzeugt (kind 'audit',
 // quelle 'GPT-Änderung', '🤖'-Präfix) UND einer der bekannten Protokolltexte.
 // Garagentermine ('🤖 Fahrzeug … – Garagentermin …') sind Serviceaufgaben und zählen NIE dazu.
@@ -3482,6 +3496,7 @@ function todoErstellen(daten, opts) {
   }, daten);
   if (opts.schluessel) t.schluessel = opts.schluessel;
   if (opts.ausdruecklich) t.ausdruecklich = true;
+  if (!(t.ausdruecklich === true || t.quelle === 'Manuell')) return { status:'meldung', todo:null };
   if (!opts.ausdruecklich && todoIstReineMeldung(t)) return { status:'meldung', todo:null };
   const dup = todoFindeOffeneDublette(t);
   if (dup) return { status:'dublette', todo:dup };
@@ -3586,7 +3601,7 @@ function todoWorkflowEnsure(t) {
 }
 function todoIstGeschlossen(t){ return !!t && todoWorkflowEnsure(t)?.status === 'closed'; }
 function todoIstErledigtWorkflow(t){ return !!t && (todoWorkflowEnsure(t)?.status === 'completed' || t.erledigt === true) && !todoIstGeschlossen(t); }
-function todoIstAktivWorkflow(t){ return !!t && !t.bereinigt && !todoIstGeschlossen(t); }
+function todoIstAktivWorkflow(t){ return !!t && !todoIstAutomatisch(t) && !t.bereinigt && !todoIstGeschlossen(t); }
 function todoIstHandlungsOffen(t){ return todoIstAktivWorkflow(t) && !todoIstErledigtWorkflow(t); }
 function todoDatumZeit(v){
   if(!v) return '–';
@@ -3751,7 +3766,7 @@ function todoIdAttr(id) {
 }
 function renderTodoPage() {
   if (!state.todos) state.todos = [];
-  const gueltigeIds = new Set(state.todos.map(t=>t.id));
+  const gueltigeIds = new Set(state.todos.filter(t => !todoIstAutomatisch(t)).map(t=>t.id));
   [...todoAusgewaehlt].forEach(id=>{ if(!gueltigeIds.has(id)) todoAusgewaehlt.delete(id); });
 
   const aktiv=state.todos.filter(todoIstAktivWorkflow);
@@ -3761,7 +3776,7 @@ function renderTodoPage() {
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   set('todo-stat-p1',p1); set('todo-stat-p2',p2); set('todo-stat-normal',normal); set('todo-stat-offen',handlung.length); set('todo-stat-erledigt',erledigt);
 
-  let liste=state.todos.slice();
+  let liste=state.todos.filter(t => !todoIstAutomatisch(t));
   if(todoFilter==='offen') liste=liste.filter(todoIstAktivWorkflow);
   else if(todoFilter==='erledigt') liste=liste.filter(t=>todoIstErledigtWorkflow(t));
   else if(todoFilter==='alle') liste=liste.filter(todoIstAktivWorkflow);
@@ -3860,7 +3875,7 @@ async function addTodoItem() {
   const textEl=document.getElementById('todo-neu-text'), zustEl=document.getElementById('todo-neu-zustaendig');
   const text=String(textEl?.value||'').trim(); if(!text)return toast('Fehler','Text erforderlich','⚠️');
   const actor=todoActor(), now=new Date().toISOString(), priority=todoPrioritaetAusText(text), id=Date.now()+Math.floor(Math.random()*10000);
-  const todo={id,text,bsId:null,zustaendig:String(zustEl?.value||'').trim()||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:now,erstelltVon:actor.name,quelle:'Manuell',priority,
+  const todo={id,text,bsId:null,zustaendig:String(zustEl?.value||'').trim()||'–',erledigt:false,erledigtDurch:null,erledigtAm:null,notiz:'',erstelltAm:now,erstelltVon:actor.name,quelle:'Manuell',ausdruecklich:true,priority,
     wf:{status:'open',seenBy:{},processingBy:null,processingAt:null,completedBy:null,completedAt:null,closedBy:null,closedAt:null,push:priority?{requestedAt:now,sentAt:null}:{}}};
   const res=await todoPersistMutation(s=>{if(!(s.todos||[]).some(x=>String(x.id)===String(id)))s.todos.push(JSON.parse(JSON.stringify(todo)));},{pushTodoId:priority?id:null});
   if(!res?.ok)return toast('Nicht gespeichert',res?.error?.message||'Firebase-Fehler','⚠️');
@@ -8294,83 +8309,14 @@ function excelLeerMarkieren(ma, datum) {
 }
 // Ergebnis als rotes To-do je KW (dedupliziert, automatisch erledigt bei 0 Abweichungen).
 function excelKontrolleTodo(abweichungen, montag) {
-  if (!state.todos) state.todos = [];
-  const mo = getMonday(new Date(montag + 'T12:00')), kw = bsGetKW(mo), sk = 'excel-kontrolle:' + mo.getFullYear() + '-' + kw;
-  const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
-  if (!abweichungen.length) {
-    if (vorhanden && !vorhanden.erledigt) { vorhanden.erledigt = true; vorhanden.erledigtDurch = 'Automatischer Abgleich'; vorhanden.erledigtAm = new Date().toISOString().slice(0,10); }
-    return null;
-  }
-  const zeilen = abweichungen.slice(0, 25).map(a => '• ' + (a.art === 'warnung' ? 'Verknüpfungswarnung' : 'Fehler') + ' ' + (a.datum ? a.datum.slice(8,10) + '.' + a.datum.slice(5,7) + '. ' : '') + a.ma + ': Excel „' + (a.excel || '(leer)') + '“ – ' + a.grund);
-  const text = 'Excel-Abgleich Abweichung KW ' + kw + ': ' + abweichungen.length + ' Zelle(n) stimmen nach dem Import nicht mit dem Wochenplan überein – bitte prüfen.\n'
-    + zeilen.join('\n') + (abweichungen.length > 25 ? '\n… und ' + (abweichungen.length - 25) + ' weitere' : '');
-  if (vorhanden) { vorhanden.text = text; if (vorhanden.erledigtDurch === 'Automatischer Abgleich') { vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; } return vorhanden; }
-  return todoErstellen({ text, quelle: 'Excel-Abgleich', kind: 'excel-kontrolle', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk }).todo;
+  // Automatische Prüfmeldungen erzeugen und verändern keine To-dos mehr.
+  return null;
 }
 // Verknüpfungs-To-dos: genau eines je Excel-Bezeichnung und KW; automatisch erledigt,
 // sobald keine unverknüpften Einträge dieser Gruppe mehr bestehen.
 function excelVerknuepfungsTodosAktualisieren() {
-  if (!state.todos) state.todos = [];
-  const abDatum = fmtDate(getMonday(new Date()));   // To-dos nur ab aktueller Woche
-  const gruppen = new Map();
-  Object.entries(state.plan || {}).forEach(([ds, tag]) => {
-    Object.entries(tag || {}).forEach(([key, e]) => {
-      if (!excelIstUnverknuepft(e) || String(key).indexOf('status_ma') !== 0) return;
-      const maId = e.maId ?? bsPlanMaId(key, e);
-      const text = excelTextVonEintrag(e); if (!text) return;
-      if (excelUngeklaertAufgeloest(ds, maId, text)) return;    // durch Einsatz auf DIE bezeichnete Baustelle aufgelöst
-      if (excelStatusAusText(text)) return;                     // eigentlich Planungsstatus, keine Baustelle
-      const d = new Date(ds + 'T12:00'), kw = bsGetKW(d), jahr = getMonday(d).getFullYear();
-      const sk = 'excel-verknuepfung:' + excelNorm(text) + ':' + jahr + '-' + kw;
-      if (!gruppen.has(sk)) gruppen.set(sk, { text, kw, tage: new Set(), mas: new Set(), kand: new Set(), vorschl: new Set(), zeitraum: false, mehrdeutig: false, aktuell: false, anzahl: 0 });
-      const g = gruppen.get(sk);
-      g.tage.add(ds); g.mas.add(String(maId)); g.anzahl++;
-      // Kandidaten/Vorschläge immer aktuell berechnen (auch für Einträge anderer Schreibwege ohne gespeicherte Angaben)
-      const ab = excelBaustelleAbgleichen(text, ds);
-      (ab.kandidaten || []).forEach(b => g.kand.add(String(b.id)));
-      (ab.vorschlaege || []).forEach(b => g.vorschl.add(String(b.id)));
-      if (ab.grund === 'zeitraum') g.zeitraum = true;
-      if (ab.status === 'mehrdeutig') g.mehrdeutig = true;
-      if (ds >= abDatum) g.aktuell = true;
-    });
-  });
-  const TAGE = ['So','Mo','Di','Mi','Do','Fr','Sa'];
-  const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : 'Mitarbeiter ' + id; };
-  let neu = 0, erledigt = 0, wiedereroeffnet = 0;
-  gruppen.forEach((g, sk) => {
-    if (!g.aktuell) return;
-    const tage = [...g.tage].sort().map(ds => { const d = new Date(ds + 'T12:00'); return TAGE[d.getDay()] + ' ' + String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.'; });
-    const bsL = ids => [...ids].map(id => (state.baustellen || []).find(b => String(b.id) === id)).filter(Boolean).map(excelBsKurz);
-    const kand = bsL(g.kand), vorschl = bsL(g.vorschl);
-    const problem = g.mehrdeutig
-      ? 'Baustelle mehrdeutig / nicht automatisch verknüpft: ' + g.text + '. Mehr als eine plausible Baustelle ist möglich; bitte eindeutige Zuordnung/Alias festlegen.'
-      : 'Baustelle fehlt / nicht verknüpft: ' + g.text + '. Keine eindeutig passende Baustelle gefunden. Bitte Baustelle anlegen oder Alias ergänzen.';
-    const text = problem
-      + '\nKW ' + g.kw + ' · Tage: ' + tage.join(', ') + ' · Monteure: ' + [...g.mas].map(maName).sort((a,b)=>a.localeCompare(b,'de')).join(', ')
-      + ' · ' + g.anzahl + (g.anzahl === 1 ? ' Eintrag offen' : ' Einträge offen')
-      + (g.mehrdeutig && kand.length ? (g.zeitraum ? '\nZeitraum-Konflikt – bitte prüfen: ' : '\nMögliche Baustellen (mehrdeutig): ') + kand.join('; ') : '')
-      + (vorschl.length ? '\nMögliche Baustelle (ähnlich, NICHT automatisch zugeordnet – ggf. als Alias ergänzen): ' + vorschl.join('; ') : '');
-    const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
-    if (vorhanden) {
-      // Automatisch erledigt, aber wieder offene Einträge → wieder eröffnen (nichts verdecken)
-      if (vorhanden.erledigt && vorhanden.erledigtDurch === 'Automatischer Abgleich') {
-        vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; wiedereroeffnet++;
-      }
-      if (!vorhanden.erledigt && vorhanden.text !== text) vorhanden.text = text; // Tage/Monteure/Anzahl aktuell halten
-      return; // manuell erledigte nicht erneut anlegen (keine Dubletten)
-    }
-    const r = todoErstellen({ text, quelle: 'Excel-Abgleich', kind: 'excel-verknuepfung', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk });
-    if (r.status === 'neu') neu++;
-  });
-  // Erst erledigen, wenn KEIN Eintrag der Gruppe (Bezeichnung + KW) mehr offen ist
-  state.todos.forEach(t => {
-    if (t.kind !== 'excel-verknuepfung' || t.erledigt || t.bereinigt || !t.schluessel) return;
-    if (!gruppen.has(t.schluessel)) {
-      t.erledigt = true; t.erledigtDurch = 'Automatischer Abgleich'; t.erledigtAm = new Date().toISOString().slice(0,10);
-      erledigt++;
-    }
-  });
-  return { neu, erledigt, wiedereroeffnet };
+  // Automatische Prüfmeldungen erzeugen und verändern keine To-dos mehr.
+  return { neu: 0, erledigt: 0, wiedereroeffnet: 0 };
 }
 
 // Gemeinsame Verknüpfungsregel für Nachabgleich UND gezielte Bestandsreparatur. Ändert nur DIESEN Eintrag:
@@ -8396,38 +8342,8 @@ function excelTageText(dsListe) {
 // To-dos für Terminabweichungen (Excel-Plan ↔ Auftragszeitraum): eines je Baustelle und KW, rot/hoch,
 // automatisch erledigt sobald keine Abweichung mehr besteht. Termine/Monteure werden NICHT angepasst.
 function excelTerminTodosAktualisieren() {
-  if (!state.todos) state.todos = [];
-  const abDatum = fmtDate(getMonday(new Date()));
-  const gruppen = new Map();
-  Object.entries(state.plan || {}).forEach(([ds, tag]) => Object.entries(tag || {}).forEach(([key, e]) => {
-    if (!e || !e.terminAbweichung || e.bsId == null || e.bsId === '' || ds < abDatum) return;
-    const d = new Date(ds + 'T12:00'), kw = bsGetKW(d), jahr = getMonday(d).getFullYear();
-    const sk = 'excel-termin:' + e.bsId + ':' + jahr + '-' + kw;
-    if (!gruppen.has(sk)) gruppen.set(sk, { bsId: e.bsId, kw, tage: new Set(), mas: new Set(), texte: new Set() });
-    const g = gruppen.get(sk); g.tage.add(ds); g.mas.add(String(e.maId ?? bsPlanMaId(key, e))); const t = excelTextVonEintrag(e); if (t) g.texte.add(t);
-  }));
-  const maName = id => { const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id)); return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : 'Mitarbeiter ' + id; };
-  let neu = 0, erledigt = 0, wiedereroeffnet = 0;
-  gruppen.forEach((g, sk) => {
-    const bs = (state.baustellen || []).find(b => String(b.id) === String(g.bsId));
-    const text = 'Termin weicht vom Auftrag ab: ' + (bs ? excelBsKurz(bs) : 'Baustelle ' + g.bsId) + '.'
-      + '\nKW ' + g.kw + ' · Excel-Plan: ' + excelTageText(g.tage) + ' · Monteure: ' + [...g.mas].map(maName).sort((x, y) => x.localeCompare(y, 'de')).join(', ')
-      + (g.texte.size ? ' · Excel: ' + [...g.texte].join(' / ') : '')
-      + '\nExcel bleibt die Planungsquelle – Termine und Monteure wurden NICHT angepasst. Bitte Auftragsdatum oder Wochenplan prüfen.';
-    const vorhanden = state.todos.find(t => t.schluessel === sk && !t.bereinigt);
-    if (vorhanden) {
-      if (vorhanden.erledigt && vorhanden.erledigtDurch === 'Automatischer Abgleich') { vorhanden.erledigt = false; vorhanden.erledigtDurch = null; vorhanden.erledigtAm = null; wiedereroeffnet++; }
-      if (!vorhanden.erledigt && vorhanden.text !== text) vorhanden.text = text;
-      return;
-    }
-    const r = todoErstellen({ text, bsId: g.bsId, quelle: 'Excel-Abgleich', kind: 'excel-termin', prioritaet: 'hoch', zustaendig: '–' }, { schluessel: sk });
-    if (r.status === 'neu') neu++;
-  });
-  state.todos.forEach(t => {
-    if (t.kind !== 'excel-termin' || t.erledigt || t.bereinigt || !t.schluessel) return;
-    if (!gruppen.has(t.schluessel)) { t.erledigt = true; t.erledigtDurch = 'Automatischer Abgleich'; t.erledigtAm = new Date().toISOString().slice(0,10); erledigt++; }
-  });
-  return { neu, erledigt, wiedereroeffnet };
+  // Automatische Prüfmeldungen erzeugen und verändern keine To-dos mehr.
+  return { neu: 0, erledigt: 0, wiedereroeffnet: 0 };
 }
 
 // Nachträglicher Abgleich aller unverknüpften Einträge (z.B. nach neuer Baustelle/Alias).
@@ -14276,18 +14192,8 @@ async function gptExecuteActions(actions,originalMessage){
     const textNorm=gptNorm(text);
     const isRedundant=auditedTextsThisBatch.some(at=>at===textNorm || (at.length>8 && textNorm.length>8 && (at.indexOf(textNorm)!==-1 || textNorm.indexOf(at)!==-1)));
     if(isRedundant) continue;
-    // Nicht mehr pauschal verwerfen. Ohne ausdrücklichen Auftrag gilt ein
-    // create_todo als reine Begleitmeldung, wenn es
-    //  (a) einem bekannten Meldungsmuster entspricht (ein dueDate ändert daran nichts), oder
-    //  (b) in einem Planungsdurchlauf eine gerade geänderte Person/Baustelle
-    //      betrifft und weder offene Frage/fehlende Angabe noch konkrete
-    //      Handlung (z.B. "Kunden über den Monteurwechsel informieren") enthält.
-    // Echte Abklärungen und echte Aufgaben bleiben erlaubt.
-    if(!requestedTodo){
-      const betrifftAenderung = planningBatch && mutationRefs.some(r=>r && r.length>2 && textNorm.includes(r));
-      const istMeldung = todoIstReineMeldung({text}) || (betrifftAenderung && !TODO_ABKLAERUNG_RE.test(text) && !TODO_AKTION_RE.test(text));
-      if(istMeldung) continue;
-    }
+    // Aufgaben nur auf ausdrücklichen Wunsch anlegen.
+    if(!requestedTodo) continue;
     const site=gptFindSite(a);
     const dueDate=gptNormDate(a.due_date), dueTime=gptNormTime(a.due_time);
     const r=gptTodo(text,a.responsible||gptActor().name,site?.id||null,'GPT-To-do',dueDate,dueTime,'arbeit',{ausdruecklich:requestedTodo});
