@@ -8930,10 +8930,36 @@ async function wpExcelAktion(art) {
 }
 
 // ── Excel/PDF-Import für Wochenplan ──
+// ── Sicherheitssperre: TEST-Wochenpläne dürfen nie in den produktiven Wochenplan importiert werden ──
+// Erkennung doppelt: (1) Dateiname (z.B. „Wochenplanung_TEST_2026-2027.xlsx“), (2) Steuerblatt „_Sync“ mit testfile=true.
+const WP_TEST_MELDUNG = 'TEST-Wochenplan erkannt. Diese Datei darf nicht in den produktiven Wochenplan importiert werden.';
+function wpIstTestDateiname(name) {
+  const n = String(name || '');
+  return /wochenplan\w*[\s_.-]*test/i.test(n) || /test[\s_.-]*wochenplan/i.test(n);
+}
+function wpIstTestWorkbook(wb) {
+  const sheetName = ((wb && wb.SheetNames) || []).find(n => String(n).trim().toLowerCase() === '_sync');
+  const ws = sheetName && wb.Sheets && wb.Sheets[sheetName];
+  if (!ws) return false;
+  const zelle = a => String((ws[a] && ws[a].v) ?? '').trim().toLowerCase();
+  if (zelle('A1') === 'testfile' && zelle('B1') === 'true') return true;
+  try {
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      .some(r => String(r[0]).trim().toLowerCase() === 'testfile' && String(r[1]).trim().toLowerCase() === 'true');
+  } catch (_) { return true; }   // _Sync vorhanden, aber nicht lesbar → sicherheitshalber sperren
+}
+function wpTestDateiSperre(dateiname) {
+  console.warn('[Wochenplan] Import gesperrt (' + (dateiname || 'unbekannt') + '): ' + WP_TEST_MELDUNG);
+  try { toast('Import gesperrt', WP_TEST_MELDUNG, '⛔'); } catch (_) {}
+  try { alert(WP_TEST_MELDUNG); } catch (_) {}
+  return { ok: false, grund: 'test-wochenplan' };
+}
+
 function wpFileImport(event) {
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = '';
+  if (wpIstTestDateiname(file.name)) return wpTestDateiSperre(file.name);   // gilt für Excel UND PDF
   if (file.name.toLowerCase().endsWith('.pdf')) {
     wpPdfImport(file);
   } else {
@@ -8947,6 +8973,7 @@ function wpExcelImportFile(file) {
     try {
       if (typeof XLSX === 'undefined') return toast('Fehler', 'Excel-Bibliothek nicht geladen', '❌');
       const wb = XLSX.read(e.target.result, { type: 'array' });
+      if (wpIstTestDateiname(file && file.name) || wpIstTestWorkbook(wb)) return wpTestDateiSperre(file && file.name);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       parseWochenplanExcel(rows);
