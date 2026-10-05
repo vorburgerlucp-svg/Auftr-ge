@@ -8821,10 +8821,10 @@ async function bsZusammenfuehren(dupId, hauptId, opts) {
   return prot;
 }
 // Gemeinsame Schnittstelle für ALLE Browser-basierten Import-Läufe (manuell, geplant):
-// dieselben Regeln wie die Oberfläche. Beispiel: LagerToolExcel.importRows(rows)
+// dieselben Regeln wie die Oberfläche. Beispiel: LagerToolExcel.importRows(rows, { kontext: 'produktion', workbook, dateiname })
 window.LagerToolExcel = {
   klassifizieren: excelZelleKlassifizieren, abgleichen: excelBaustelleAbgleichen,
-  importRows: rows => parseWochenplanExcel(rows), nachAbgleich: excelNachAbgleich,
+  importRows: (rows, optionen) => wpImportRowsGeschuetzt(rows, optionen), nachAbgleich: excelNachAbgleich,
   reparatur: excelReparatur, vorschau: excelAbgleichVorschau, aliase: bsExcelAliase,
   zusammenfuehrenVorschau: bsZusammenfuehrenVorschau, zusammenfuehren: bsZusammenfuehren,
   bestandVorschau: excelBestandVorschau, bestandReparieren: excelBestandReparieren, bestandRuecknahme: excelBestandRuecknahme, bestaetigteAliase: () => EXCEL_BESTAETIGTE_ALIASE.slice(),
@@ -8931,31 +8931,54 @@ async function wpExcelAktion(art) {
 
 // ── Excel/PDF-Import für Wochenplan ──
 // ── Sicherheitssperre: TEST-Wochenpläne dürfen nie in den produktiven Wochenplan importiert werden ──
-// Harter interner Marker: Steuerblatt „_Sync“ mit testfile=true. Zusätzliche Schutzschichten: jedes Blatt „_Sync“
-// (auch ohne Marker) und das Wort TEST im Dateinamen (Gross-/Kleinschreibung egal). Kein Fallback, kein Teilimport.
+// Regeln: Dateiname mit dem Wort TEST → sperren; kein Blatt „_Sync“ → wie bisher; „_Sync“ mit testfile=true → sperren;
+// „_Sync“ mit testfile=false → erlauben (spätere Produktionsdatei); „_Sync“ ohne gültigen Marker (A1 = testfile,
+// B1 = true/false) → als unklare Sync-Datei sperren. Kein Fallback, kein Teilimport.
 const WP_TEST_MELDUNG = 'TEST-Wochenplan erkannt. Import in den produktiven Wochenplan ist gesperrt.';
+const WP_SYNC_UNKLAR_MELDUNG = 'Wochenplan mit unklarem Sync-Status erkannt. Produktiver Import wurde aus Sicherheitsgründen gesperrt.';
 function wpIstTestDateiname(name) {
   // „TEST“ als eigenes Wort (von Nicht-Buchstaben begrenzt): Wochenplanung_TEST_2026.xlsx, Test Wochenplan.xlsx, TEST2027.xlsx
   return /(^|[^a-zäöüß])test(?![a-zäöüß])/i.test(String(name || ''));
 }
-function wpTestGruendeWorkbook(wb) {
+// Sync-Status des Workbooks: 'kein-sync' | 'testfile=true' | 'testfile=false' | 'sync-unklar'
+function wpSyncStatus(wb) {
   const sheetName = ((wb && wb.SheetNames) || []).find(n => String(n).trim().toLowerCase() === '_sync');
-  if (!sheetName) return [];
-  const gruende = ['_sync-blatt'];
+  if (!sheetName) return 'kein-sync';
   const ws = wb.Sheets && wb.Sheets[sheetName];
-  const zelle = a => String((ws && ws[a] && ws[a].v) ?? '').trim().toLowerCase();
-  if (zelle('A1') === 'testfile' && zelle('B1') === 'true') gruende.push('testfile=true');
-  return gruende;
+  const a1 = ws && ws.A1, b1 = ws && ws.B1;
+  if (!a1 || String(a1.v ?? '').trim().toLowerCase() !== 'testfile' || !b1) return 'sync-unklar';
+  const wert = typeof b1.v === 'boolean' ? b1.v : String(b1.v ?? '').trim().toLowerCase();
+  if (wert === true || wert === 'true') return 'testfile=true';
+  if (wert === false || wert === 'false') return 'testfile=false';
+  return 'sync-unklar';
 }
 function wpTestDateiPruefung(dateiname, wb) {
-  const gruende = [...(wpIstTestDateiname(dateiname) ? ['dateiname'] : []), ...(wb ? wpTestGruendeWorkbook(wb) : [])];
-  return { gesperrt: gruende.length > 0, gruende };
+  const gruende = [];
+  if (wpIstTestDateiname(dateiname)) gruende.push('dateiname');
+  const sync = wb ? wpSyncStatus(wb) : 'kein-sync';
+  if (sync === 'testfile=true' || sync === 'sync-unklar') gruende.push(sync);
+  const test = gruende.includes('dateiname') || gruende.includes('testfile=true');
+  return { gesperrt: gruende.length > 0, gruende, sync, meldung: test ? WP_TEST_MELDUNG : (gruende.length ? WP_SYNC_UNKLAR_MELDUNG : '') };
 }
-function wpTestDateiSperre(dateiname, gruende) {
-  console.warn('[Wochenplan] Import gesperrt (' + (dateiname || 'unbekannt') + ', ' + (gruende || []).join(', ') + '): ' + WP_TEST_MELDUNG);
-  try { toast('Import gesperrt', WP_TEST_MELDUNG, '⛔'); } catch (_) {}
-  try { alert(WP_TEST_MELDUNG); } catch (_) {}
-  return { ok: false, grund: 'test-wochenplan', gruende: gruende || [] };
+function wpTestDateiSperre(dateiname, pruefung) {
+  const meldung = (pruefung && pruefung.meldung) || WP_TEST_MELDUNG, gruende = (pruefung && pruefung.gruende) || [];
+  console.warn('[Wochenplan] Import gesperrt (' + (dateiname || 'unbekannt') + ', ' + gruende.join(', ') + '): ' + meldung);
+  try { toast('Import gesperrt', meldung, '⛔'); } catch (_) {}
+  try { alert(meldung); } catch (_) {}
+  return { ok: false, grund: gruende.includes('dateiname') || gruende.includes('testfile=true') ? 'test-wochenplan' : 'sync-unklar', gruende, meldung };
+}
+// Öffentliche Schnittstelle (window.LagerToolExcel.importRows): standardmässig gesperrt. Nur mit ausdrücklichem
+// Produktionskontext UND dem Workbook, aus dem die Zeilen stammen (dieselbe Prüfung wie beim Datei-Import).
+const WP_IMPORTROWS_MELDUNG = "LagerToolExcel.importRows ist gesperrt: nur mit { kontext: 'produktion', workbook } erlaubt.";
+function wpImportRowsGeschuetzt(rows, optionen) {
+  const o = optionen || {};
+  if (o.kontext !== 'produktion' || !o.workbook || !Array.isArray(o.workbook.SheetNames)) {
+    console.warn('[Wochenplan] ' + WP_IMPORTROWS_MELDUNG);
+    return { ok: false, grund: 'kein-produktionskontext', meldung: WP_IMPORTROWS_MELDUNG };
+  }
+  const pruefung = wpTestDateiPruefung(o.dateiname, o.workbook);
+  if (pruefung.gesperrt) return wpTestDateiSperre(o.dateiname, pruefung);
+  return parseWochenplanExcel(rows);
 }
 
 function wpFileImport(event) {
@@ -8963,7 +8986,7 @@ function wpFileImport(event) {
   if (!file) return;
   event.target.value = '';
   const vorab = wpTestDateiPruefung(file.name, null);   // vor jedem Lesen, gilt für Excel UND PDF
-  if (vorab.gesperrt) return wpTestDateiSperre(file.name, vorab.gruende);
+  if (vorab.gesperrt) return wpTestDateiSperre(file.name, vorab);
   if (file.name.toLowerCase().endsWith('.pdf')) {
     wpPdfImport(file);
   } else {
@@ -8978,7 +9001,7 @@ function wpExcelImportFile(file) {
       if (typeof XLSX === 'undefined') return toast('Fehler', 'Excel-Bibliothek nicht geladen', '❌');
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const pruefung = wpTestDateiPruefung(file && file.name, wb);   // vor jeder Auswertung/Planmutation
-      if (pruefung.gesperrt) return wpTestDateiSperre(file && file.name, pruefung.gruende);
+      if (pruefung.gesperrt) return wpTestDateiSperre(file && file.name, pruefung);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       parseWochenplanExcel(rows);
