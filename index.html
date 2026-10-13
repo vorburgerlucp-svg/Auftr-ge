@@ -3252,8 +3252,10 @@ function save(opts) {
     pendingSaveBeforeSync = true;
     return Promise.resolve({ok:false, error:new Error('Firebase noch nicht synchronisiert – Änderung nur lokal vorgemerkt')});
   }
-  // Kein dbRef (z.B. lokaler Modus ohne Firebase) - localStorage-Speicherung reicht.
-  return Promise.resolve({ok:true});
+  // Ein lokaler Entwurf ist für andere Benutzer noch nicht sichtbar.
+  // Aufrufer dürfen ihn deshalb nicht als zentral gespeichert bestätigen.
+  return Promise.resolve({ok:false, verified:false, localOnly:true,
+    error:new Error('Keine Serververbindung – Änderung nur auf diesem Gerät vorgemerkt')});
 }
 
 // ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
@@ -10841,6 +10843,9 @@ async function saveBsModal() {
   if(!name) return toast('Fehler','Name erforderlich','⚠️');
   if(!state.baustellen) state.baustellen=[];
   const id=parseInt(document.getElementById('bs-modal-id').value)||Date.now();
+  // Bei fehlender Serververbindung bleibt das Formular offen: denselben Entwurf
+  // erneut speichern, statt bei jedem Versuch eine weitere Baustelle anzulegen.
+  document.getElementById('bs-modal-id').value=String(id);
   // Stand VOR dieser Speicherung merken - wird für die Umdisposition
   // (Von/Bis- bzw. Team-Änderung, Priorität 4) gebraucht.
   const oldBs = state.baustellen.find(b=>b.id===id) || null;
@@ -10920,7 +10925,9 @@ async function saveBsModal() {
   // Änderung als ausgeführt (gleiches Prinzip wie beim GPT-Assistenten).
   const saveResult = await save({verify:true});
   if (!saveResult || !saveResult.ok) {
-    toast('Nicht gespeichert', 'Firebase-Speichern fehlgeschlagen – bitte erneut versuchen', '⛔');
+    toast('Nicht zentral gespeichert', saveResult?.localOnly
+      ? 'Änderung nur auf diesem Gerät vorgemerkt. Verbindung herstellen und erneut speichern.'
+      : 'Server-Speichern fehlgeschlagen – bitte erneut versuchen', '⛔');
     return; // Modal bleibt bewusst offen
   }
   closeBsModal();
