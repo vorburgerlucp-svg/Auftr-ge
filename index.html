@@ -876,6 +876,7 @@
 <div id="page-meldungen" class="page">
   <h2>🔔 Meldungen</h2>
   <p class="subtitle">Benachrichtigungen von Monteuren — quittieren um zu schliessen</p>
+  <div id="bz-section" class="card" style="margin-bottom:14px"></div>
   <div id="meldungen-liste"></div>
 </div>
 
@@ -3391,6 +3392,212 @@ function fahrzeugManuelleResetPruefen() {
 function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdowns(); renderHistory(); renderFzgSettings(); renderWerkzeugDropdowns(); renderFahrzeugePage(); renderKatSelects(); }
 
 // ── NAVIGATION ─────────────────────────────────────────
+// ── BÜRO: RAPPORTE UND BAUSTELLENMELDUNGEN (Worker) ──
+// Die Daten liegen auf dem Server (R2). Die Büro-Sitzung wird nur im Speicher dieser Seite gehalten.
+const BZ_WORKER = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+const BZ_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Abgeschlossen' };
+const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittiert: 'Quittiert', abgeschlossen: 'Abgeschlossen', zurueckgegeben: 'Zur Bearbeitung zurück', wieder_geoeffnet: 'Wieder geöffnet' };
+let bzSession = null;          // { token, name }
+let bzDaten = { meldungen: [], rapporte: [] };
+let bzSiteId = '';
+let bzBusy = {};               // verhindert Doppelklicks je Vorgang
+let bzMeldung = null;          // Fehler- oder Hinweistext
+
+function bzEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function bzName(id) {
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : ('ID ' + id);
+}
+
+function bzFehlertext(e) {
+  if (e.code === 'status_conflict') return 'Der Vorgang wurde inzwischen von jemand anderem geändert. Die Liste wird aktualisiert.';
+  if (e.code === 'already_quittiert') return 'Dieser Vorgang wurde bereits quittiert.';
+  if (e.code === 'forbidden') return 'Dafür fehlt die Berechtigung.';
+  if (e.code === 'invalid_transition') return 'Dieser Statuswechsel ist nicht erlaubt.';
+  if (e.code === 'zuweisung_required') return 'Bitte einen Monteur auswählen.';
+  if (e.status === 0) return 'Keine Verbindung zum Server. Nichts wurde geändert. Bitte erneut versuchen.';
+  if (e.code === 'unauthorized') return 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.';
+  return 'Der Vorgang konnte nicht abgeschlossen werden.';
+}
+
+async function bzCall(method, path, body) {
+  let res;
+  try {
+    res = await fetch(BZ_WORKER + path, {
+      method,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, bzSession ? { Authorization: 'Bearer ' + bzSession.token } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+  } catch (netz) {
+    const e = new Error('network'); e.status = 0; e.code = 'network'; throw e;
+  }
+  let data = null;
+  try { data = await res.json(); } catch (x) { data = null; }
+  if (!res.ok) {
+    const e = new Error(data && data.error ? data.error : 'http_' + res.status);
+    e.status = res.status; e.code = data && data.error; e.aktuell = data && data.aktuell;
+    if (res.status === 401 && bzSession) { bzSession = null; }
+    throw e;
+  }
+  return data;
+}
+
+async function bzAnmelden() {
+  const name = (document.getElementById('bz-login-name')?.value || '').trim();
+  const pin = document.getElementById('bz-login-pin')?.value || '';
+  if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
+  try {
+    const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
+    bzSession = { token: r.officeSession, name };
+    bzMeldung = null;
+    await bzLaden();
+  } catch (e) {
+    bzSession = null;
+    bzMeldung = e.status === 0 ? bzFehlertext(e) : 'Name oder PIN ist ungültig.';
+    bzRender();
+  }
+}
+
+function bzAbmelden() {
+  bzSession = null;
+  bzDaten = { meldungen: [], rapporte: [] };
+  bzMeldung = null;
+  bzRender();
+}
+
+// Laedt alle Vorgaenge vom Server. Ein Fehler laesst die alte Anzeige stehen und sagt es.
+async function bzLaden() {
+  if (!bzSession) return bzRender();
+  try {
+    const [m, r] = await Promise.all([bzCall('GET', '/app/admin/meldungen'), bzCall('GET', '/app/admin/rapporte')]);
+    bzDaten = { meldungen: m.meldungen || [], rapporte: r.rapporte || [] };
+    bzMeldung = null;
+  } catch (e) {
+    if (e.code === 'unauthorized' || e.status === 401) { bzSession = null; bzMeldung = 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.'; }
+    else bzMeldung = bzFehlertext(e);
+  }
+  bzRender();
+}
+
+// Statuswechsel. expectedStatus ist der Stand, den das Büro gerade sieht.
+async function bzStatus(id, nach, zugewiesenId) {
+  const m = bzDaten.meldungen.find(x => String(x.id) === String(id));
+  if (!m || bzBusy[id]) return;
+  bzBusy[id] = true;
+  try {
+    const body = { nach, expectedStatus: m.status };
+    if (zugewiesenId) body.zugewiesenId = String(zugewiesenId);
+    await bzCall('POST', '/app/admin/meldungen/' + encodeURIComponent(String(id)) + '/status', body);
+    toast('Gespeichert', BZ_STATUS[nach] || '', '✅');
+  } catch (e) {
+    toast('Nicht gespeichert', bzFehlertext(e), '⚠️');
+  } finally {
+    delete bzBusy[id];
+  }
+  await bzLaden();
+}
+
+function bzMonteurOptionen(aktuell) {
+  const monteure = (state.mitarbeiter || []).filter(x => (x.rolle || '').toLowerCase() === 'monteur');
+  return '<option value="">– wählen –</option>' + monteure.map(x => {
+    const sel = String(x.id) === String(aktuell) ? ' selected' : '';
+    return `<option value="${bzEsc(x.id)}"${sel}>${bzEsc(((x.vorname || '') + ' ' + (x.nachname || '')).trim())}</option>`;
+  }).join('');
+}
+
+function bzAktionen(m) {
+  const id = JSON.stringify(String(m.id));
+  if (m.status === 'eingereicht') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen('')}</select>
+      <button class="btn btn-primary btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>In Bearbeitung setzen</button>`;
+  }
+  if (m.status === 'in_bearbeitung') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen(m.zugewiesenId)}</select>
+      <button class="btn btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>Zuweisung speichern</button>`;
+  }
+  if (m.status === 'quittiert') {
+    return `<button class="btn btn-primary btn-sm" onclick='bzStatus(${id}, "abgeschlossen")'>Abschließen</button>
+      <button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Zur Bearbeitung öffnen</button>`;
+  }
+  if (m.status === 'abgeschlossen') {
+    return `<button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Wieder öffnen</button>`;
+  }
+  return '';
+}
+
+// Zuweisung kommt aus dem Auswahlfeld derselben Karte.
+function bzStatusAusSelect(id, nach) {
+  const sel = document.getElementById('bz-z-' + id);
+  const wert = sel ? sel.value : '';
+  if (nach === 'in_bearbeitung' && !wert) { toast('Fehlende Angaben', 'Bitte einen Monteur auswählen', '⚠️'); return; }
+  bzStatus(id, nach, wert);
+}
+
+function bzVerlauf(v) {
+  if (!v || !v.length) return '<div style="font-size:12px;color:var(--muted)">Noch kein Verlauf</div>';
+  return v.map(e => {
+    const art = BZ_AKTION[e.aktion] || e.aktion;
+    return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${bzEsc(String(e.at || '').slice(0, 16).replace('T', ' '))} · ${bzEsc(art)} · ${bzEsc(BZ_STATUS[e.von] || e.von)} → ${bzEsc(BZ_STATUS[e.nach] || e.nach)} · durch ${bzEsc(bzName(e.durchId))}${e.kommentar ? ' · ' + bzEsc(e.kommentar) : ''}</div>`;
+  }).join('');
+}
+
+function bzRender() {
+  const el = document.getElementById('bz-section');
+  if (!el) return;
+  if (!bzSession) {
+    el.innerHTML = `
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Büro-Anmeldung für Rapporte und Meldungen</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Name und PIN wie bei der Anmeldung. Die Prüfung erfolgt auf dem Server.</div>
+      <input type="text" id="bz-login-name" placeholder="Name" style="margin-bottom:6px">
+      <input type="password" id="bz-login-pin" maxlength="4" inputmode="numeric" placeholder="PIN" style="margin-bottom:6px">
+      <button class="btn btn-primary" onclick="bzAnmelden()">Anmelden</button>
+      ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin-top:8px">${bzEsc(bzMeldung)}</div>` : ''}`;
+    return;
+  }
+  const baustellen = state.baustellen || [];
+  if (!bzSiteId && baustellen.length) bzSiteId = String(baustellen[0].id);
+  const siteOpts = baustellen.map(b => `<option value="${bzEsc(b.id)}"${String(b.id) === bzSiteId ? ' selected' : ''}>${bzEsc(b.name)}</option>`).join('');
+  const rapporte = bzDaten.rapporte.filter(r => String(r.siteId) === bzSiteId).sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  const meldungen = bzDaten.meldungen.filter(m => String(m.siteId) === bzSiteId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div><b>Angemeldet als ${bzEsc(bzSession.name)}</b></div>
+      <button class="btn btn-sm" onclick="bzAbmelden()">Abmelden</button>
+    </div>
+    <label>Baustelle</label>
+    <select id="bz-site" onchange="bzSiteId=this.value;bzRender()">${siteOpts}</select>
+    ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin:8px 0">${bzEsc(bzMeldung)}</div>` : ''}
+    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Eingereichte Arbeitsrapporte (${rapporte.length})</div>
+    ${rapporte.length ? rapporte.map(r => `
+      <div style="border-top:1px solid var(--border);padding:8px 0;font-size:13px">
+        <div><b>${bzEsc(r.datum)}</b> · ${bzEsc(r.timeStart)}–${bzEsc(r.timeEnd)} · Pause ${bzEsc(r.breakMinutes)} min${r.totalHours != null ? ' · ' + bzEsc(String(r.totalHours).replace('.', ',')) + ' h' : ''}</div>
+        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(r.autorId))} · eingereicht ${bzEsc(String(r.createdAt || '').slice(0, 16).replace('T', ' '))}</div>
+        <div style="white-space:pre-line">${bzEsc(r.workPerformed)}</div>
+        ${r.materialUsed ? `<div style="font-size:12px">Material: ${bzEsc(r.materialUsed)}</div>` : ''}
+        ${r.issues ? `<div style="font-size:12px">Probleme: ${bzEsc(r.issues)}</div>` : ''}
+        ${r.extraWork ? `<div style="font-size:12px">Extra: ${bzEsc(r.extraWork)}</div>` : ''}
+        ${r.notes ? `<div style="font-size:12px">Notizen: ${bzEsc(r.notes)}</div>` : ''}
+      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Rapporte für diese Baustelle</div>'}
+    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Baustellenmeldungen (${meldungen.length})</div>
+    ${meldungen.length ? meldungen.map(m => `
+      <div style="border-top:1px solid var(--border);padding:8px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div><b>${bzEsc(m.type)}</b> · ${bzEsc(m.message)}</div>
+          <span style="font-size:12px;font-weight:700">${bzEsc(BZ_STATUS[m.status] || m.status)}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(m.autorId))} · ${bzEsc(String(m.createdAt || '').slice(0, 16).replace('T', ' '))}${m.zugewiesenId ? ' · zugewiesen an ' + bzEsc(bzName(m.zugewiesenId)) : ''}</div>
+        ${m.quittiertAt ? `<div style="font-size:12px">Quittiert: ${bzEsc(String(m.quittiertAt).slice(0, 16).replace('T', ' '))}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${bzAktionen(m)}</div>
+        <details style="margin-top:6px"><summary style="font-size:12px;cursor:pointer">Verlauf (${(m.verlauf || []).length})</summary>${bzVerlauf(m.verlauf)}</details>
+      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Meldungen für diese Baustelle</div>'}
+    <div style="margin-top:10px"><button class="btn btn-sm" onclick="bzLaden()">↻ Aktualisieren</button></div>`;
+}
+
 function showPage(id) {
   // Admin-only Bereiche (Priorität 13): Lagerverwaltung und Fahrzeug-Inventar.
   // Gleiches Muster wie bei "einstellungen" weiter unten - verhindert auch
@@ -3417,7 +3624,7 @@ function showPage(id) {
   if (id === 'mitarbeiter') renderMitarbeiterPage();
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
-  if (id === 'meldungen') renderMeldungen();
+  if (id === 'meldungen') { renderMeldungen(); if (bzSession) bzLaden(); else bzRender(); }
   if (id === 'meinprofil') renderMeinProfil();
   if (id === 'einstellungen') {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
