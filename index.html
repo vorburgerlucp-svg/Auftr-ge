@@ -29,6 +29,7 @@
   let hasReceivedFirebaseSync = false;
   let pendingSaveBeforeSync = false;
   function markFirebaseSynced() {
+  if (typeof officeAnmeldungNachSync === 'function') officeAnmeldungNachSync();
     hasReceivedFirebaseSync = true;
     if (pendingSaveBeforeSync) {
       pendingSaveBeforeSync = false;
@@ -454,8 +455,7 @@
           <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
             style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
             data-hidden-id="login-name-id"
-            onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
-            oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
+            autocomplete="username">
           <input type="hidden" id="login-name-id" value="">
         </div>
       </div>
@@ -2342,9 +2342,11 @@ function debugClick() {
   console.log('Debug aktiv - jetzt auf den Button klicken (einmalig)');
 }
 
+function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser */ }
+
 function load() {
-  const s = safeStorage.getItem('lagertool');
-  if (s) state = JSON.parse(s);
+  // Kein Gesamtzustand im Browser-Speicher: Daten kommen nach dem Login aus Firebase.
+  try { localStorage.removeItem('lagertool'); } catch (_) {}
   // _ts zurücksetzen: Firebase soll beim Start immer gewinnen.
   // Nach eigenem Save wird _ts neu gesetzt und suppressListener schützt den Write.
   state._ts = 0;
@@ -2750,46 +2752,106 @@ function fzgMonteurPickerOpen() {
   }, { excludeFzgId: fzgId });
 }
 
-function doLogin(fromBiometric) {
-  const id = maIdValue(document.getElementById('login-name-id').value);
-  const pin = document.getElementById('login-pin').value.trim();
+// Büro-Anmeldung: Name und PIN gehen an den Worker. Der Browser prueft nichts selbst.
+// Erst mit dem Firebase-Custom-Token wird Firebase angemeldet, danach werden die Daten geladen.
+const LT_WORKER_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+let officeAnmeldungLaeuft = false;
+let officeWartetAufSync = null;
+
+async function doLogin() {
   const errEl = document.getElementById('login-error');
-
-  if (!id) { errEl.textContent = 'Bitte Name wählen'; errEl.style.display = 'block'; return; }
-  if (pin.length !== 4) { errEl.textContent = 'PIN muss 4 Ziffern sein'; errEl.style.display = 'block'; return; }
-
-  const m = state.mitarbeiter.find(x => x.id === id);
-  if (!m || m.pin !== pin) {
-    if (fromBiometric) {
-      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. geändert) - veraltete
-      // Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
-      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
-      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
-      renderLoginBiometricUI();
-      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
-    } else {
-      errEl.textContent = 'Name oder PIN ungültig';
-    }
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
-  // Zugriff auf dieses Tool nur für Entwickler/Administratoren - alle anderen
-  // (Leiter, Monteur, Chef-Monteur) nutzen die Monteur-App.
-  if (!istAdminUser(m)) {
-    errEl.textContent = 'Kein Zugriff — dieses Tool ist nur für Entwickler und Administratoren. Bitte die Monteur-App verwenden.';
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
+  const name = (document.getElementById('login-name')?.value || '').trim();
+  const pin = (document.getElementById('login-pin')?.value || '').trim();
   errEl.style.display = 'none';
+  if (!name || !/^\d{4}$/.test(pin)) {
+    errEl.textContent = 'Bitte Name und 4-stelligen PIN eingeben';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (officeAnmeldungLaeuft) return;
+  officeAnmeldungLaeuft = true;
+  let r;
+  try {
+    const res = await fetch(LT_WORKER_URL + '/app/office/anmelden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, pin }),
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+    let data = null;
+    try { data = await res.json(); } catch (x) { data = null; }
+    if (!res.ok || !data || !data.firebaseToken || !data.officeSession) {
+      throw new Error(res.status === 0 ? 'netz' : 'abgelehnt');
+    }
+    r = data;
+  } catch (e) {
+    officeAnmeldungLaeuft = false;
+    document.getElementById('login-pin').value = '';
+    errEl.textContent = e.message === 'netz'
+      ? 'Keine Verbindung zum Server. Bitte erneut versuchen.'
+      : 'Name oder PIN ungültig';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server.
+  bzSession = { token: r.officeSession, name };
+  lagertoolSitzungMaId = String(r.employeeId);
+  officeWartetAufSync = String(r.employeeId);
+  document.getElementById('login-pin').value = '';
+  officeFirebaseAnmelden(r.firebaseToken);
+}
+
+// Firebase ausschliesslich mit dem Custom-Token. Keine anonyme Anmeldung.
+function officeFirebaseAnmelden(token) {
+  try {
+    if (typeof firebase === 'undefined') throw new Error('sdk');
+    firebase.auth().signInWithCustomToken(token)
+      .then(() => {
+        startFirebaseListener();
+      })
+      .catch(err => {
+        console.error('[Firebase] Anmeldung mit Token fehlgeschlagen');
+        officeAnmeldungFehlgeschlagen('Firebase-Anmeldung fehlgeschlagen. Bitte erneut anmelden.');
+      });
+  } catch (e) {
+    officeAnmeldungFehlgeschlagen('Firebase ist nicht verfügbar.');
+  }
+}
+
+function officeAnmeldungFehlgeschlagen(text) {
+  officeAnmeldungLaeuft = false;
+  officeWartetAufSync = null;
+  bzSession = null;
+  lagertoolSitzungMaId = null;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = text;
+  errEl.style.display = 'block';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+// Nach der ersten Synchronisation: Büro-Berechtigung im geladenen Datenbestand bestaetigen.
+function officeAnmeldungNachSync() {
+  if (!officeWartetAufSync) return;
+  const id = officeWartetAufSync;
+  officeWartetAufSync = null;
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  if (!m || !istAdminUser(m)) {
+    officeAnmeldungFehlgeschlagen('Kein Zugang: dieses Konto hat keine Büro-Berechtigung.');
+    firebase.auth().signOut().catch(() => {});
+    return;
+  }
   currentLoginUser = m;
-  lagertoolSitzungMaId = m.id;
-  try { sessionStorage.setItem('lagertool_login', JSON.stringify({id: m.id})); } catch(e) {}
+  lagertoolSitzungMaId = String(m.id);
+  officeAnmeldungLaeuft = false;
   finishLogin();
-  if (!fromBiometric) maybeOfferWebauthnSetup(m);
+}
+
+// Ablauf der Firebase-Sitzung (nach ca. einer Stunde): sauber zur Anmeldung zurueck.
+function officeSitzungAbgelaufen() {
+  if (!currentLoginUser) return;
+  toast('Sitzung abgelaufen', 'Bitte erneut anmelden.', '⏱');
+  setTimeout(() => location.reload(), 1500);
 }
 
 function finishLogin() {
@@ -2931,6 +2993,7 @@ function findStoredBiometricLogins() {
 }
 
 async function webauthnRegister(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   try {
     if (!istAdminUser(m)) throw new Error('KEIN_ZUGRIFF');
     if (!m.pin) throw new Error('KEIN_PIN');
@@ -2991,6 +3054,7 @@ async function webauthnLoginAttempt(entry) {
 }
 
 function renderLoginBiometricUI() {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   const area = document.getElementById('login-biometric-area');
   if (!area) return;
   const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
@@ -3007,6 +3071,7 @@ function showLoginPinForm() {
 }
 
 function maybeOfferWebauthnSetup(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   if (!webauthnPlatformOk || !istAdminUser(m)) return;
   if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return;
   if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return;
@@ -3058,6 +3123,8 @@ async function doLogout() {
     }
   } catch(e) {}
   try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
+  try { await firebase.auth().signOut(); } catch(e) {}
+  try { indexedDB.deleteDatabase('lagertool_docs'); } catch(e) {}
   location.reload();
 }
 // save() bleibt für alle bestehenden Aufrufer 100% wie bisher nutzbar
@@ -3165,7 +3232,7 @@ function syncStandUebernehmen(neu) {
   (state.fahrzeuge || []).forEach(f => { const l = (lokalVor.fahrzeuge || []).find(x => x.id === f.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) f.docs = l.docs; });
   (state.mitarbeiter || []).forEach(m => { const l = (lokalVor.mitarbeiter || []).find(x => x.id === m.id); if (l) { if (l.foto && l.foto !== '_localOnly') m.foto = l.foto; if (Array.isArray(l.docs) && l.docs.some(d => d.data)) m.docs = l.docs; } });
   (state.baustellen || []).forEach(b => { const l = (lokalVor.baustellen || []).find(x => x.id === b.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) b.docs = l.docs; });
-  try { safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state))); } catch (_) {}
+  try { lagertoolKeinCache( JSON.stringify(stripLargeData(state))); } catch (_) {}
 }
 let saveKette = Promise.resolve();
 // Ein Speichervorgang (läuft seriell hinter save()): frischer lokaler Schnappschuss → Transaktion mit Merge.
@@ -3232,7 +3299,7 @@ function save(opts) {
   // die Docs allein sind ~29MB. Docs werden separat in IndexedDB gespeichert.
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   // Firebase: Merge-Transaktion (siehe oben), seriell – jeder Lauf nimmt den dann aktuellen lokalen Stand.
   if (dbRef && hasReceivedFirebaseSync) {
@@ -3849,7 +3916,7 @@ async function todoPersistMutation(mutator, opts={}) {
       try { if(typeof persisted==='string') persisted=JSON.parse(persisted); } catch(_){ persisted=null; }
       if(persisted && Array.isArray(persisted.todos)) {
         state.todos=persisted.todos; state._ts=persisted._ts||state._ts;
-        safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+        lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
       }
       renderTodoPage();
       todoPopupPruefen();
@@ -11707,7 +11774,7 @@ function saveFirebaseConfig() {
   if (k) state.config.fbApiKey    = k.value.trim();
   if (p) state.config.fbProjectId = p.value.trim();
   if (a) state.config.fbAppId     = a.value.trim();
-  safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+  lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
 }
 
 function applyFirebaseConfig() {
@@ -11732,16 +11799,7 @@ function initFirebase(url, key, pid, appid) {
   window._fbPid = pid;
   try {
     firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
-    console.log('[Firebase] app initialized');
-    firebase.auth().signInAnonymously()
-      .then(() => {
-        console.log('[Firebase] anonym angemeldet');
-        startFirebaseListener();
-      })
-      .catch((err) => {
-        console.error('[Firebase] Anmeldung fehlgeschlagen', err);
-        toast('Firebase Anmeldung fehlgeschlagen', err.message || '', '⚠️');
-      });
+    console.log('[Firebase] app initialized (ohne Anmeldung, wartet auf Büro-Login)');
   } catch (e) {
     console.error('[Firebase] init error', e);
   }
@@ -11833,7 +11891,7 @@ function startFirebaseListener() {
           migrationMeldungenMaIdReparatur();
           migrationTodoNotizMerge();
           markFirebaseSynced();
-          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+          lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
           renderAll();
           try { todoNachRemoteSync(); } catch (_) {}
           setTimeout(updateMeldungenBadge, 100);
@@ -11862,7 +11920,8 @@ function startFirebaseListener() {
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
     }, (err) => {
-      console.error('[Firebase] listener error', err);
+      console.error('[Firebase] listener error');
+      if (currentLoginUser) officeSitzungAbgelaufen();
       showSyncIndicator('❌ ' + err.message);
     });
     const statusEl = document.getElementById('fb-status');
@@ -11879,7 +11938,7 @@ function startFirebaseListener() {
 // ── FAHRZEUGHISTORIE EXPORT ─────────────────────────────
 // NOTFALL: zeigt den aktuellen localStorage-Inhalt zur Rettung/Diagnose an
 function notfallDatenAnzeigen() {
-  const raw = safeStorage.getItem('lagertool');
+  const raw = null;
   if (!raw) { alert('Kein lokaler Datenbestand gefunden.'); return; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch(e) { alert('Daten beschädigt: ' + e.message); return; }
@@ -11997,7 +12056,7 @@ function exportFzgHistorie() {
 // ── SYNC FÜR MONTEUR-APP ────────────────────────────────
 function officeSyncExport() {
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
-  const data = safeStorage.getItem('lagertool');
+  const data = null;
   if (!data) return toast('Fehler','Keine Daten','⚠️');
   // Speichere unter einem zweiten Key den die Monteur-App auch lesen kann
   // Versuche alle möglichen Storage-Keys
@@ -12203,7 +12262,7 @@ function importData(e) {
       markFirebaseSynced();
       // Schlanke Daten nach localStorage (72KB statt 29MB), Docs nach IndexedDB
       const slimJson = JSON.stringify(stripLargeData(state));
-      safeStorage.setItem('lagertool', slimJson);
+      lagertoolKeinCache( slimJson);
       saveDocsToIDB(state);
       renderAll();
 
@@ -13596,7 +13655,7 @@ function forceSave() {
   state._ts = Date.now();
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   if (dbRef) {
     const btn = document.getElementById('btn-force-save');
