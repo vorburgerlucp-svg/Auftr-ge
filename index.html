@@ -2346,6 +2346,7 @@ function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser *
 
 // Altbestaende aus frueheren Versionen: gespeicherte Biometrie-PINs und API-Schluessel werden entfernt.
 function bereinigeAltbestaende() {
+  try { indexedDB.deleteDatabase('lagertool_docs'); } catch (_) {}
   try { safeStorage.keys(WEBAUTHN_PIN_PREFIX).forEach(k => safeStorage.removeItem(k)); } catch (_) {}
   try { localStorage.removeItem('lagertool_claude_key'); } catch (_) {}
 }
@@ -3326,73 +3327,10 @@ function save(opts) {
     error:new Error('Keine Serververbindung – Änderung nur auf diesem Gerät vorgemerkt')});
 }
 
-// ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
-function openDocsDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('lagertool_docs', 1);
-    req.onupgradeneeded = e => { e.target.result.createObjectStore('docs'); };
-    req.onsuccess = e => resolve(e.target.result);
-    req.onerror = e => reject(e.target.error);
-  });
-}
-
-async function saveDocsToIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readwrite');
-    const store = tx.objectStore('docs');
-    // Fahrzeug-Docs
-    (s.fahrzeuge||[]).forEach(f => {
-      if (f.docs?.some(d => d.data)) store.put(f.docs, 'fzg_' + f.id);
-    });
-    // Mitarbeiter-Docs + Fotos
-    (s.mitarbeiter||[]).forEach(m => {
-      if (m.foto && m.foto !== '_localOnly') store.put(m.foto, 'foto_' + m.id);
-      if (m.docs?.some(d => d.data)) store.put(m.docs, 'ma_' + m.id);
-    });
-    // Baustellen-Docs
-    (s.baustellen||[]).forEach(b => {
-      if (b.docs?.some(d => d.data)) store.put(b.docs, 'bs_' + b.id);
-    });
-  } catch(e) { console.warn('IndexedDB write error:', e); }
-}
-
-async function loadDocsFromIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readonly');
-    const store = tx.objectStore('docs');
-    const get = key => new Promise(r => { const req = store.get(key); req.onsuccess = () => r(req.result); req.onerror = () => r(null); });
-    for (const f of (s.fahrzeuge||[])) {
-      const docs = await get('fzg_' + f.id);
-      if (docs) f.docs = docs;
-    }
-    for (const m of (s.mitarbeiter||[])) {
-      const foto = await get('foto_' + m.id);
-      if (foto) m.foto = foto;
-      const docs = await get('ma_' + m.id);
-      if (docs) m.docs = docs;
-    }
-    for (const b of (s.baustellen||[])) {
-      const docs = await get('bs_' + b.id);
-      if (docs && Array.isArray(b.docs)) {
-        // NICHT das ganze Array überschreiben (das würde auf einem anderen
-        // Gerät hochgeladene Server-Dokumente wieder verschwinden lassen,
-        // da diese nie in die lokale IndexedDB dieses Geräts gelangen).
-        // Nur bei _localOnly-Einträgen die lokal zwischengespeicherten Bytes
-        // wieder anhängen; Server-Dokumente (storage:'site-document') bleiben
-        // exakt so, wie sie aus Firebase kamen.
-        b.docs = b.docs.map(d => {
-          if (!d._localOnly) return d;
-          const match = docs.find(x => x.name === d.name && x.type === d.type);
-          return match || d;
-        });
-      } else if (docs && !b.docs) {
-        b.docs = docs;
-      }
-    }
-  } catch(e) { console.warn('IndexedDB read error:', e); }
-}
+// Dokumente (Fotos, PDFs) werden NICHT dauerhaft im Browser gespeichert. Sie liegen nur im Speicher der Sitzung
+// bzw. im Worker. Altbestaende aus frueheren Versionen werden beim Start geloescht (bereinigeAltbestaende).
+function saveDocsToIDB(s) { /* bewusst leer: kein dauerhafter Dokumentcache im Browser */ }
+function loadDocsFromIDB(s) { return Promise.resolve(); }
 
 // Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
 // Firebase bekommt nur die schlanken Nutzdaten (~72 KB statt ~29 MB).
