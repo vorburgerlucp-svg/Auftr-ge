@@ -4,11 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>LagerTool – Monteur</title>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<script>if (typeof emailjs !== 'undefined') { try { emailjs.init('uEjZ4g6QkqHfSFjQ_'); } catch(e) {} }</script>
+<script src="monteur-api.js"></script>
 <style>
   :root {
     --bg: #0d0f12; --surface: #16191e; --surface2: #1d2127; --border: #2a2e36;
@@ -203,12 +199,11 @@
   <div class="login-box">
     <h1>⬡ LagerTool</h1>
     <p class="subtitle">Monteur-Ansicht</p>
-    <div id="login-biometric-area"></div>
     <div id="login-form-fields">
       <div class="sp-wrap">
         <label>Name</label>
         <input type="text" id="login-name" placeholder="Name eingeben…" autocomplete="off"
-          onfocus="loginPickerOpen()" onclick="loginPickerOpen()" oninput="loginPickerFilter()">
+          >
         <input type="hidden" id="login-name-id" value="">
       </div>
       <label>PIN</label>
@@ -216,16 +211,6 @@
       <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
       <button class="btn btn-primary btn-block" onclick="doLogin()">Anmelden</button>
     </div>
-  </div>
-</div>
-
-<!-- WEBAUTHN-EINRICHTUNGS-PROMPT (nach erstem PIN-Login) -->
-<div class="modal-overlay" id="webauthn-modal">
-  <div class="modal-box" style="max-width:340px">
-    <h1 style="font-size:16px;margin-bottom:6px">🔒 Gesichtserkennung einrichten?</h1>
-    <p class="subtitle" id="webauthn-modal-text" style="margin-bottom:18px;text-align:left"></p>
-    <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="webauthnModalYes()">Einrichten</button>
-    <button class="btn btn-block" onclick="webauthnModalNo()">Nicht jetzt</button>
   </div>
 </div>
 
@@ -389,39 +374,17 @@
 
 <script>
 // ════════════════════════════════════════════════════════
-// LagerTool – Monteur-App (eigenständig, gleiche Firebase-DB)
+// LagerTool – Monteur-App. Alle Daten kommen vom Worker (/app/monteur/*).
 // ════════════════════════════════════════════════════════
 
-// ── FIREBASE CONFIG (identisch mit Haupt-LagerTool) ──
-const FB_URL   = 'https://wochenplanung-6b50a-default-rtdb.europe-west1.firebasedatabase.app';
-const FB_KEY   = 'AIzaSyBwCjK7nzs8BV3GyFTouVFK16aUWGTntu4';
-const FB_PID   = 'wochenplanung-6b50a';
-const FB_APPID = '1:715914728927:web:7630a296888f052c8f606a';
-
 let state = { mitarbeiter:[], fahrzeuge:[], artikel:[], orders:[], baustellen:[], plan:{}, monteurMeldungen:[], kategorien:[], werkzeug:[] };
-let dbRef = null;
-let suppressListener = false;
-let hasReceivedFirebaseSync = false;
 let currentLoginUser = null;
-let webauthnPlatformOk = false; // Gerät/Browser unterstützt Face ID / Fingerabdruck via WebAuthn
 let cart = []; // [{artikelId, menge}]
 let bestSelKat = '';
 let bestTab = 'bestellen';
 let wpBaseMonday = getMonday(new Date());
 let spActiveInput = null;
 
-// ── SAFE STORAGE (localStorage Fallback) ──
-const safeStorage = (() => {
-  const mem = {};
-  let useLS = true;
-  try { localStorage.setItem('__t__','1'); localStorage.removeItem('__t__'); } catch(e) { useLS = false; }
-  return {
-    getItem: k => useLS ? localStorage.getItem(k) : (mem[k] ?? null),
-    setItem: (k,v) => { if (useLS) { try { localStorage.setItem(k,v); } catch(e){ useLS=false; mem[k]=v; } } else mem[k]=v; },
-    removeItem: k => { if (useLS) { try { localStorage.removeItem(k); } catch(e){} } delete mem[k]; },
-    keys: prefix => (useLS ? Object.keys(localStorage) : Object.keys(mem)).filter(k => k.startsWith(prefix))
-  };
-})();
 
 // ── UTILITY ──
 function fmtDate(d) {
@@ -487,20 +450,15 @@ function sortArtikelListe(list) {
 
 // ── LOAD / SAVE ──
 function load() {
-  const s = safeStorage.getItem('lagertool');
-  if (s) { try { state = JSON.parse(s); } catch(e) {} }
-  state._ts = 0; // Firebase gewinnt beim Start immer
-  if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
-  if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
-  if (!Array.isArray(state.artikel)) state.artikel = [];
-  if (!Array.isArray(state.orders)) state.orders = [];
-  if (!Array.isArray(state.baustellen)) state.baustellen = [];
-  if (!Array.isArray(state.monteurMeldungen)) state.monteurMeldungen = [];
-  if (!Array.isArray(state.kategorien)) state.kategorien = [];
-  if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
-  if (!state.plan) state.plan = {};
-  if (!state.config) state.config = {};
-  if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
+  // Kein lokaler Gesamtzustand mehr. Alte Browser-Kopien (inkl. frueherer PIN-Daten) werden entfernt.
+  try { localStorage.removeItem('lagertool'); } catch (e) {}
+  try { Object.keys(localStorage).filter(k => k.startsWith('monteur_webauthn_')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
+  try { sessionStorage.removeItem('monteur_login'); } catch (e) {}
+  state = emptyState();
+}
+
+function emptyState() {
+  return { mitarbeiter: [], fahrzeuge: [], artikel: [], orders: [], baustellen: [], plan: {}, monteurMeldungen: [], kategorien: [], werkzeug: [], config: {} };
 }
 
 function stripLargeData(s) {
@@ -565,26 +523,11 @@ function migrationTestBaustelle() {
   save();
 }
 
-let pendingSaveBeforeSync = false;
-function markFirebaseSynced() {
-  hasReceivedFirebaseSync = true;
-  if (pendingSaveBeforeSync) { pendingSaveBeforeSync = false; save(); }
-}
 
+// Der Gesamtzustand wird nicht mehr gespeichert. Jede Aenderung, die noch keinen sicheren
+// Endpunkt hat, meldet das sichtbar statt still verworfen zu werden.
 function save() {
-  state._ts = Date.now();
-  const slimJson = JSON.stringify(stripLargeData(state));
-  safeStorage.setItem('lagertool', slimJson);
-  if (dbRef && hasReceivedFirebaseSync) {
-    try {
-      suppressListener = true;
-      dbRef.set(slimJson).then(() => setSyncStatus('ok','Sync'))
-        .catch(() => setSyncStatus('err','Fehler'))
-        .finally(() => setTimeout(() => { suppressListener = false; }, 2000));
-    } catch(e) { suppressListener = false; }
-  } else if (dbRef && !hasReceivedFirebaseSync) {
-    pendingSaveBeforeSync = true;
-  }
+  toast('Nicht gespeichert', 'Diese Funktion ist in der Monteur-App noch nicht angebunden.', '⚠️');
 }
 
 function setSyncStatus(state, label) {
@@ -594,70 +537,72 @@ function setSyncStatus(state, label) {
   if (lbl) lbl.textContent = label;
 }
 
-// ── FIREBASE INIT ──
-window.addEventListener('load', function() {
-  let versuche = 0;
-  const tryInit = () => {
-    if (typeof firebase !== 'undefined') initFirebase();
-    else if (versuche < 50) { versuche++; setTimeout(tryInit, 100); }
-    else setSyncStatus('err','Offline');
-  };
-  tryInit();
+// ── START ──
+const MONTEUR_WORKER_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+window.addEventListener('load', function () {
+  MonteurApi.configure({ baseUrl: MONTEUR_WORKER_URL, onSessionEnd: onSessionEnded });
+  load();
+  setSyncStatus('ok', 'Bereit');
 });
 
-function initFirebase() {
-  try {
-    firebase.initializeApp({ apiKey: FB_KEY, databaseURL: FB_URL, projectId: FB_PID, appId: FB_APPID });
-    firebase.auth().signInAnonymously()
-      .then(() => startFirebaseListener())
-      .catch((err) => { console.error('[Firebase] Anmeldung fehlgeschlagen', err); setSyncStatus('err','Anmeldung fehlgeschlagen'); });
-  } catch(e) { console.error('[Firebase] init error', e); setSyncStatus('err','Fehler'); }
+function onSessionEnded() {
+  if (!currentLoginUser) return;
+  currentLoginUser = null;
+  state = emptyState();
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-pin').value = '';
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = 'Die Sitzung ist abgelaufen. Bitte erneut anmelden.';
+  errEl.style.display = 'block';
 }
 
-function startFirebaseListener() {
-  try {
-    const _db = firebase.database();
-    dbRef = _db.ref('lagertool');
-    dbRef.on('value', (snapshot) => {
-      if (suppressListener) return;
-      const data = snapshot.val();
-      if (!data) { markFirebaseSynced(); setSyncStatus('ok','Bereit'); return; }
-      try {
-        const remote = typeof data === 'string' ? JSON.parse(data) : data;
-        const istPrivilegiert = currentLoginUser?.entwickler || currentLoginUser?.admin;
-        const lokalIstNeuer = istPrivilegiert && state._ts && remote._ts && state._ts > remote._ts;
-        if (lokalIstNeuer) {
-          markFirebaseSynced();
-          save();
-        } else {
-          const lokalVorSync = state;
-          state = remote;
-          if (!Array.isArray(state.mitarbeiter)) state.mitarbeiter = [];
-          if (!Array.isArray(state.fahrzeuge)) state.fahrzeuge = [];
-          if (!Array.isArray(state.artikel)) state.artikel = [];
-          if (!Array.isArray(state.orders)) state.orders = [];
-          if (!Array.isArray(state.baustellen)) state.baustellen = [];
-          if (!Array.isArray(state.monteurMeldungen)) state.monteurMeldungen = [];
-          if (!Array.isArray(state.kategorien)) state.kategorien = [];
-          if (!Array.isArray(state.werkzeug)) state.werkzeug = [];
-          if (!state.plan) state.plan = {};
-          if (!state.config) state.config = {};
-          if (!state.config.email) state.config.email = 'lvorburger@montage-welt.ch';
-          migrationTestBaustelle();
-          markFirebaseSynced();
-          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
-          renderAllIfLoggedIn();
-          // state.mitarbeiter ist jetzt geladen - Login-Bildschirm ggf. neu
-          // rendern, damit ein bereits auf diesem Gerät eingerichteter
-          // Gesichtserkennungs-Login sichtbar wird (beim allerersten Aufruf
-          // vor dem Firebase-Sync war state.mitarbeiter noch leer).
-          if (!currentLoginUser && typeof renderLoginBiometricUI === 'function') renderLoginBiometricUI();
-        }
-        setSyncStatus('ok','Verbunden');
-      } catch(e2) { console.error('[Firebase] parse error', e2); setSyncStatus('err','Fehler'); }
-    }, (err) => { console.error('[Firebase] listener error', err); setSyncStatus('err','Verbindung verloren'); });
-    setSyncStatus('ok','Verbinde…');
-  } catch(e) { setSyncStatus('err','Fehler'); }
+// Laedt nur die Daten, die dieser Monteur sehen darf. Alles kommt vom Worker.
+async function loadMonteurData() {
+  const me = currentLoginUser;
+  const mo = getMonday(new Date());
+  const from = fmtDate(addDays(mo, -14));
+  const to = fmtDate(addDays(mo, 27));
+  const [sites, plan, artikel, bst, meld] = await Promise.all([
+    MonteurApi.get('/app/monteur/sites'),
+    MonteurApi.get('/app/monteur/plan', { from, to }),
+    MonteurApi.get('/app/monteur/artikel'),
+    MonteurApi.get('/app/monteur/bestellungen'),
+    MonteurApi.get('/app/monteur/meldungen')
+  ]);
+  const neu = emptyState();
+  neu.mitarbeiter = [me];
+  neu.baustellen = sites.sites.map(siteToLocal);
+  const farbe = Object.fromEntries(neu.baustellen.map(b => [String(b.id), b.farbeHex]));
+  for (const e of plan.eintraege) {
+    if (!neu.plan[e.datum]) neu.plan[e.datum] = {};
+    neu.plan[e.datum]['ma' + me.id + '_' + e.datum] = {
+      maId: me.id, bsId: e.siteId, farbeHex: farbe[String(e.siteId)] || '#8a8f98', notiz: e.notiz || ''
+    };
+  }
+  neu.artikel = artikel.artikel.map(a => ({ id: a.id, name: a.name, einheit: a.einheit, kat: a.kategorie, bestand: a.bestand, min: a.min }));
+  neu.orders = bst.bestellungen.map(o => orderToLocal(o, me));
+  neu.monteurMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, message: m.message, type: m.type, status: m.status }));
+  state = neu;
+}
+
+// Felder, die die Oberflaeche erwartet. Sammlungen, die der Worker nicht liefert, bleiben leer.
+function siteToLocal(s) {
+  return Object.assign({ farbeHex: '#8a8f98', tasks: [], maengelListe: [], nacharbeitListe: [], leistungHistorie: [], monteure: [] }, s);
+}
+
+function orderToLocal(o, me) {
+  return {
+    id: o.id,
+    datum: o.createdAt ? new Date(o.createdAt).toLocaleString('de-CH') : '',
+    fahrzeug: '',
+    fahrzeugId: null,
+    maId: me.id,
+    monteur: (me.vorname + ' ' + (me.nachname || '')).trim(),
+    bemerkung: o.bemerkung || '',
+    status: o.status,
+    mailStatus: o.mail ? o.mail.status : 'unbekannt',
+    items: (o.items || []).map(i => ({ name: i.name, menge: i.menge, einheit: i.einheit, inStock: false }))
+  };
 }
 
 function renderAllIfLoggedIn() {
@@ -671,85 +616,50 @@ function renderAllIfLoggedIn() {
 // ════════════════════════════════════════════════════════
 // LOGIN
 // ════════════════════════════════════════════════════════
-function loginPickerOpen() {
-  const input = document.getElementById('login-name');
-  const wrap = input.parentElement;
-  wrap.classList.add('sp-wrap');
-  let dd = wrap.querySelector('.sp-dropdown');
-  if (!dd) { dd = document.createElement('div'); dd.className = 'sp-dropdown'; wrap.appendChild(dd); }
-  renderLoginPicker(dd, '');
-  dd.classList.add('open');
-}
-function loginPickerFilter() {
-  const input = document.getElementById('login-name');
-  const dd = input.parentElement.querySelector('.sp-dropdown');
-  if (!dd) return;
-  renderLoginPicker(dd, input.value.trim().toLowerCase());
-  document.getElementById('login-name-id').value = '';
-}
-function renderLoginPicker(dd, query) {
-  const list = (state.mitarbeiter||[]).slice()
-    .sort((a,b) => (a.vorname+a.nachname).localeCompare(b.vorname+b.nachname))
-    .filter(m => {
-      if (!m.vorname && !m.nachname) return false;
-      if (!query) return true;
-      const full = (m.vorname+' '+m.nachname).toLowerCase();
-      const rev = (m.nachname+' '+m.vorname).toLowerCase();
-      return full.includes(query) || rev.includes(query);
-    });
-  dd.innerHTML = list.map(m => {
-    const name = m.vorname + ' ' + (m.nachname||'');
-    return `<div class="sp-item" onclick="loginPickerSelect(${m.id},'${name.replace(/'/g,"\\'")}')">${name}</div>`;
-  }).join('') || '<div class="sp-item">Keine Treffer</div>';
-}
-function loginPickerSelect(id, name) {
-  document.getElementById('login-name').value = name;
-  document.getElementById('login-name-id').value = id;
-  const dd = document.querySelector('.sp-dropdown.open');
-  if (dd) dd.classList.remove('open');
-  document.getElementById('login-pin').focus();
-}
 document.addEventListener('click', e => {
   document.querySelectorAll('.sp-dropdown.open').forEach(dd => {
     if (!dd.parentElement.contains(e.target)) dd.classList.remove('open');
   });
 });
 
-function doLogin(fromBiometric) {
+async function doLogin() {
   const errEl = document.getElementById('login-error');
-  const id = parseInt(document.getElementById('login-name-id').value);
+  const name = document.getElementById('login-name').value.trim();
   const pin = document.getElementById('login-pin').value;
-  const m = (state.mitarbeiter||[]).find(x => x.id === id);
-  if (!m || m.pin !== pin) {
-    if (fromBiometric) {
-      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. vom Admin geändert) -
-      // veraltete Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
-      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
-      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
-      renderLoginBiometricUI();
-      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
-    } else {
-      errEl.textContent = 'Name oder PIN ungültig';
-    }
+  errEl.style.display = 'none';
+  if (!name || !/^\d{4}$/.test(pin)) {
+    errEl.textContent = 'Bitte Name und 4-stelligen PIN eingeben';
     errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
     return;
   }
-  errEl.style.display = 'none';
-  currentLoginUser = m;
-  try { sessionStorage.setItem('monteur_login', JSON.stringify({id:m.id})); } catch(e) {}
-  finishLogin();
-  // Nur nach einem manuellen PIN-Login anbieten (nicht wenn der PIN gerade
-  // erst per Gesichtserkennung automatisch eingetragen wurde).
-  if (!fromBiometric) maybeOfferWebauthnSetup(m);
+  try {
+    await MonteurApi.login(name, pin);
+    const profil = await MonteurApi.get('/app/monteur/profil');
+    currentLoginUser = {
+      id: profil.profil.id,
+      vorname: profil.profil.vorname || '',
+      nachname: profil.profil.nachname || '',
+      funktion: profil.profil.funktion || ''
+    };
+    document.getElementById('login-pin').value = '';
+    await loadMonteurData();
+    finishLogin();
+  } catch (e) {
+    currentLoginUser = null;
+    MonteurApi.endSession();
+    state = emptyState();
+    document.getElementById('login-pin').value = '';
+    errEl.textContent = MonteurApi.messageFor(e);
+    errEl.style.display = 'block';
+  }
 }
 
 function doLogout() {
   currentLoginUser = null;
-  try { sessionStorage.removeItem('monteur_login'); } catch(e) {}
+  MonteurApi.endSession();
+  state = emptyState();
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-name').value = '';
-  document.getElementById('login-name-id').value = '';
   document.getElementById('login-pin').value = '';
 }
 
@@ -760,174 +670,6 @@ function finishLogin() {
   updateMeldungenBadge();
   updateVerrechnungReminder();
 }
-
-// ════════════════════════════════════════════════════════
-// GESICHTSERKENNUNG / BIOMETRIE STATT PIN (WebAuthn)
-// ════════════════════════════════════════════════════════
-// Kein eigener Gesichtsscan - das ist die Browser-Schnittstelle (WebAuthn),
-// die Face ID / Fingerabdruck / Android-Biometrie des Geräts abfragt, rein
-// als GERÄT-SEITIGE Freischaltung. Die Anmeldung selbst läuft danach über
-// denselben PIN-Mechanismus wie immer: die Gesichtserkennung trägt den PIN
-// nur automatisch ein und meldet an - es ist KEIN separates Login-System.
-// PIN + Zugangsdaten sind GERÄTEGEBUNDEN (in diesem localStorage) - auf
-// einem neuen/anderen Gerät braucht es weiterhin die manuelle PIN-Eingabe.
-const WEBAUTHN_CRED_PREFIX = 'monteur_webauthn_cred_';
-const WEBAUTHN_PIN_PREFIX = 'monteur_webauthn_pin_';
-const WEBAUTHN_ASKED_PREFIX = 'monteur_webauthn_asked_';
-
-function bufToB64url(buf) {
-  const bytes = new Uint8Array(buf);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-}
-function b64urlToBuf(str) {
-  str = str.replace(/-/g,'+').replace(/_/g,'/');
-  while (str.length % 4) str += '=';
-  const bin = atob(str);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes.buffer;
-}
-async function webauthnPlatformAvailable() {
-  try {
-    if (!window.PublicKeyCredential || !navigator.credentials) return false;
-    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-  } catch(e) { return false; }
-}
-// Alle auf DIESEM Gerät eingerichteten Mitarbeiter-Logins (kann mehrere geben,
-// falls z.B. ein Firmen-Tablet von mehreren Monteuren genutzt wird).
-function findStoredBiometricLogins() {
-  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
-    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
-    const credB64 = safeStorage.getItem(k);
-    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
-    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
-    return (m && credB64 && pin) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
-  }).filter(Boolean);
-}
-
-async function webauthnRegister(m) {
-  try {
-    if (!m.pin) throw new Error('KEIN_PIN');
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const userId = new TextEncoder().encode('ma_'+m.id);
-    const cred = await navigator.credentials.create({ publicKey: {
-      challenge,
-      rp: { name: 'LagerTool Monteur' },
-      user: { id: userId, name: (m.vorname+' '+(m.nachname||'')).trim(), displayName: (m.vorname+' '+(m.nachname||'')).trim() },
-      pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
-      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'preferred' },
-      timeout: 60000,
-      attestation: 'none'
-    }});
-    if (!cred) throw new Error('Keine Zugangsdaten erhalten');
-    safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
-    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
-    safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
-    // Leichtes Audit-Feld in den geteilten Mitarbeiter-Daten - rein informativ,
-    // ersetzt nichts. PIN + Zugangsdaten bleiben lokal auf dem Gerät.
-    m.biometricSetupAm = new Date().toISOString();
-    save();
-    toast('Eingerichtet', 'Gesichtserkennung/Biometrie trägt den PIN jetzt automatisch ein.', '🔒');
-    renderLoginBiometricUI();
-    return true;
-  } catch(e) {
-    console.warn('WebAuthn register error', e);
-    toast('Nicht eingerichtet', e?.message==='KEIN_PIN' ? 'Bitte zuerst einen PIN hinterlegen (Admin).' : 'Gesichtserkennung konnte nicht eingerichtet werden.', '⚠️');
-    return false;
-  }
-}
-
-function webauthnRemove(maId) {
-  safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+maId);
-  safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+maId);
-  toast('Entfernt', 'Gesichtserkennung wurde für dieses Gerät deaktiviert. PIN funktioniert weiterhin.', '🔓');
-  renderLoginBiometricUI();
-  if (document.getElementById('page-profil')?.classList.contains('active')) renderProfil();
-}
-
-async function webauthnLoginAttempt(entry) {
-  try {
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const assertion = await navigator.credentials.get({ publicKey: {
-      challenge,
-      allowCredentials: [{ id: b64urlToBuf(entry.credB64), type:'public-key' }],
-      userVerification: 'required',
-      timeout: 60000
-    }});
-    if (!assertion) throw new Error('Keine Bestätigung erhalten');
-    // Gesichtserkennung bestanden - trägt den zuvor lokal hinterlegten PIN
-    // automatisch ein und meldet sich über denselben Weg an wie eine
-    // manuelle PIN-Eingabe (kein separater Login-Mechanismus).
-    document.getElementById('login-name-id').value = entry.maId;
-    document.getElementById('login-pin').value = entry.pin;
-    doLogin(true);
-    document.getElementById('login-pin').value = '';
-  } catch(e) {
-    console.warn('WebAuthn login error', e);
-    const errEl = document.getElementById('login-error');
-    showLoginPinForm();
-    if (errEl) { errEl.textContent = 'Gesichtserkennung fehlgeschlagen – bitte PIN verwenden.'; errEl.style.display = 'block'; }
-  }
-}
-
-function renderLoginBiometricUI() {
-  const area = document.getElementById('login-biometric-area');
-  if (!area) return;
-  const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
-  window._loginBiometricEntries = entries;
-  if (!entries.length) { area.innerHTML = ''; return; }
-  area.innerHTML = entries.map((e,i) => `<button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="webauthnLoginAttempt(window._loginBiometricEntries[${i}])">🆔 ${entries.length>1 ? e.name : 'Als '+e.name+' mit Gesichtserkennung anmelden'}</button>`).join('')
-    + `<div style="text-align:center;margin-bottom:14px"><a href="#" onclick="showLoginPinForm();return false" style="color:var(--muted);font-size:12px">Stattdessen PIN verwenden</a></div>`;
-  document.getElementById('login-form-fields').classList.add('hidden');
-}
-function showLoginPinForm() {
-  document.getElementById('login-form-fields').classList.remove('hidden');
-}
-
-function maybeOfferWebauthnSetup(m) {
-  if (!webauthnPlatformOk) return;
-  if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return; // auf diesem Gerät schon eingerichtet
-  if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return; // schon einmal gefragt/abgelehnt
-  document.getElementById('webauthn-modal-text').textContent =
-    'Möchtest du dich ab jetzt auf diesem Gerät mit Gesichtserkennung/Fingerabdruck statt mit PIN anmelden?';
-  window._webauthnModalUser = m;
-  document.getElementById('webauthn-modal').classList.add('open');
-}
-function webauthnModalYes() {
-  const m = window._webauthnModalUser;
-  document.getElementById('webauthn-modal').classList.remove('open');
-  if (m) webauthnRegister(m);
-}
-function webauthnModalNo() {
-  const m = window._webauthnModalUser;
-  if (m) safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
-  document.getElementById('webauthn-modal').classList.remove('open');
-}
-
-// Einmalig beim Laden prüfen, ob das Gerät Face ID/Fingerabdruck unterstützt.
-(async () => {
-  webauthnPlatformOk = await webauthnPlatformAvailable();
-  renderLoginBiometricUI();
-})();
-
-// Auto-Login bei bestehender Session
-window.addEventListener('DOMContentLoaded', () => {
-  load();
-  try {
-    const saved = JSON.parse(sessionStorage.getItem('monteur_login')||'null');
-    if (saved?.id) {
-      const tryRestore = () => {
-        const m = (state.mitarbeiter||[]).find(x => x.id === saved.id);
-        if (m) { currentLoginUser = m; finishLogin(); return; }
-        if (window._restoreAttempts === undefined) window._restoreAttempts = 0;
-        if (window._restoreAttempts++ < 30) setTimeout(tryRestore, 200);
-      };
-      tryRestore();
-    }
-  } catch(e) {}
-});
 
 // ════════════════════════════════════════════════════════
 // NAVIGATION
@@ -1045,58 +787,58 @@ function showCartModal() {
 }
 function closeCartModal() { document.getElementById('cart-modal').classList.remove('open'); }
 
-async function submitBestellung() {
-  if (!cart.length) return toast('Fehler','Warenkorb ist leer','⚠️');
-  const ma = currentLoginUser;
-  const meinFzg = getMaFahrzeug(ma);
-  let fzgName, monteurName, fahrzeugId, maId;
-  if (meinFzg) { fzgName = meinFzg.name; monteurName = meinFzg.monteur||''; fahrzeugId = meinFzg.id; maId = null; }
-  else { fzgName = '(kein Fahrzeug)'; monteurName = (ma.vorname+' '+(ma.nachname||'')).trim(); fahrzeugId = null; maId = ma.id; }
+const bestellRequestIds = {};
+function requestIdFor(key) {
+  if (!bestellRequestIds[key]) bestellRequestIds[key] = MonteurApi.newRequestId();
+  return bestellRequestIds[key];
+}
 
-  const items = [];
+async function submitBestellung() {
+  if (!cart.length) return toast('Fehler', 'Warenkorb ist leer', '⚠️');
+  const bemerkung = (document.getElementById('best-bemerkung')?.value || '').trim();
+  const heute = fmtDate(new Date());
+  const heuteEintrag = state.plan?.[heute]?.['ma' + currentLoginUser.id + '_' + heute];
+  const siteId = heuteEintrag ? heuteEintrag.bsId : null;
+  const ausLager = [];
+  const bestellen = [];
   for (const c of cart) {
     const a = state.artikel.find(x => x.id === c.artikelId);
-    if (!a) { items.push({name:'(Unbekannt)', menge:c.menge, einheit:'Stk', inStock:false}); continue; }
-    items.push({name:a.name, menge:c.menge, einheit:a.einheit||'Stk', inStock:(a.bestand||0)>=c.menge});
+    if (!a) continue;
+    if (siteId && (a.bestand || 0) >= c.menge) ausLager.push({ a, menge: c.menge });
+    else bestellen.push({ artikelId: a.id, menge: c.menge, name: a.name, einheit: a.einheit });
   }
-  const order = {
-    id: Date.now(), datum: new Date().toLocaleString('de-CH'),
-    fahrzeug: fzgName, fahrzeugId, maId, monteur: monteurName,
-    bemerkung: document.getElementById('best-bemerkung')?.value || '',
-    status: 'offen', items
-  };
-  if (!Array.isArray(state.orders)) state.orders = [];
-  state.orders.unshift(order);
-  cart.forEach(c => {
-    const a = state.artikel.find(x => x.id === c.artikelId);
-    if (a && (a.bestand||0) >= c.menge) a.bestand -= c.menge;
-  });
+  const meldungen = [];
+  try {
+    for (const { a, menge } of ausLager) {
+      const key = 'ent:' + a.id + ':' + menge;
+      await MonteurApi.post('/app/monteur/materialentnahme', { artikelId: a.id, menge, siteId, requestId: requestIdFor(key) });
+      delete bestellRequestIds[key];
+      meldungen.push('Entnommen: ' + a.name + ' ' + menge + ' ' + (a.einheit || 'Stk'));
+    }
+    if (bestellen.length) {
+      const key = 'bst:' + bestellen.map(b => b.artikelId + 'x' + b.menge).join(',') + ':' + bemerkung;
+      const r = await MonteurApi.post('/app/monteur/bestellung', {
+        items: bestellen.map(b => ({ artikelId: b.artikelId, menge: b.menge })), bemerkung, siteId: siteId || undefined, requestId: requestIdFor(key)
+      });
+      delete bestellRequestIds[key];
+      meldungen.push(r.bestellung.mail.status === 'sent'
+        ? 'Bestellung gesendet.'
+        : 'Bestellung gespeichert. E-Mail an das Büro noch nicht gesendet.');
+    }
+  } catch (e) {
+    toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+    await loadMonteurData().catch(() => {});
+    renderArtikelGrid(); renderCartBar();
+    return;
+  }
   cart = [];
-  save();
   closeCartModal();
-  renderArtikelGrid(); renderCartBar();
   document.getElementById('best-bemerkung').value = '';
-  toast('Bestellung gesendet!', items.length + ' Artikel', '📤');
-
-  try { await sendNotification(order); } catch(e) {}
+  await loadMonteurData();
+  renderArtikelGrid(); renderCartBar();
+  toast('Gespeichert', meldungen.join(' '), '📤');
 }
 
-async function sendNotification(order) {
-  const email = state.config?.email;
-  if (!email || typeof emailjs === 'undefined') return;
-  const fromStock = order.items.filter(i => i.inStock);
-  const toOrder = order.items.filter(i => !i.inStock);
-  const lager_liste = fromStock.length ? fromStock.map(i=>`• ${i.name}: ${i.menge} ${i.einheit}`).join('\n') : '(keine)';
-  const bestell_liste = toOrder.length ? toOrder.map(i=>`• ${i.name}: ${i.menge} ${i.einheit}`).join('\n') : '(keine)';
-  const params = {
-    to_email: email, subject: `[Bestellung] ${order.fahrzeug} – ${order.datum}`,
-    fahrzeug: order.fahrzeug, monteur: order.monteur, datum: order.datum,
-    lager_liste, bestell_liste, bemerkung: order.bemerkung || '—',
-    message: `Fahrzeug: ${order.fahrzeug}\nMonteur: ${order.monteur}\nDatum: ${order.datum}\n\n✅ AUS LAGER:\n${lager_liste}\n\n🛒 BESTELLEN:\n${bestell_liste}\n\nBemerkung: ${order.bemerkung||'—'}`
-  };
-  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); }
-  catch(e) { console.error('E-Mail fehlgeschlagen:', e); toast('⚠️ E-Mail fehlgeschlagen', (e?.text||e?.message||'Unbekannter Fehler'), '📧'); }
-}
 
 function renderOrderList(filter) {
   const el = document.getElementById('best-tab-'+filter);
@@ -1230,25 +972,8 @@ function wzAnfrageBestaetigen(id) {
   sendWerkzeugMail(w, 'Reparatur angefragt', info);
 }
 
-async function sendWerkzeugMail(w, aktionText, info) {
-  const email = state.config?.email;
-  if (!email || typeof emailjs === 'undefined') return;
-  const ma = currentLoginUser;
-  const monteurName = ma ? (ma.vorname+' '+(ma.nachname||'')).trim() : '';
-  const params = {
-    to_email: email,
-    subject: `[Werkzeug] ${aktionText}: ${w.name} – ${w.fahrzeugName}`,
-    fahrzeug: w.fahrzeugName,
-    monteur: monteurName,
-    datum: new Date().toLocaleDateString('de-CH'),
-    lager_liste: '',
-    bestell_liste: '',
-    bemerkung: info || '—',
-    message: `Werkzeug: ${w.name}\nFahrzeug: ${w.fahrzeugName}\nMonteur: ${monteurName}\nStatus: ${aktionText}\nDatum: ${new Date().toLocaleDateString('de-CH')}\n\nGrund/Info: ${info || '—'}`
-  };
-  try { await emailjs.send('service_qgcg2oo', 'template_4ampvbd', params); }
-  catch(e) { console.error('E-Mail fehlgeschlagen:', e); toast('⚠️ E-Mail fehlgeschlagen', (e?.text||e?.message||'Unbekannter Fehler'), '📧'); }
-}
+// Werkzeug-Mails laufen nicht mehr aus dem Browser. Die Anbindung folgt ueber den Worker.
+async function sendWerkzeugMail(w, aktionText, info) {}
 
 function closeWzModal() {
   document.getElementById('wz-modal').classList.remove('open');
@@ -1941,20 +1666,6 @@ function renderProfil() {
   ];
 
   let html = '';
-  // ── Sicherheit: Gesichtserkennung/Biometrie für dieses Gerät ──
-  if (webauthnPlatformOk) {
-    const eingerichtet = !!safeStorage.getItem(WEBAUTHN_CRED_PREFIX+ma.id);
-    html += `<div class="card">
-      <div style="font-weight:700;font-size:14px;margin-bottom:8px">🔒 Sicherheit</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-        Gesichtserkennung/Fingerabdruck auf diesem Gerät: <b style="color:${eingerichtet?'var(--green)':'var(--muted)'}">${eingerichtet?'Eingerichtet ✅':'Nicht eingerichtet'}</b>
-      </div>
-      ${eingerichtet
-        ? `<button class="btn btn-danger btn-sm" onclick="webauthnRemove(${ma.id})">Auf diesem Gerät entfernen</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="webauthnRegister(currentLoginUser)">Jetzt einrichten</button>`}
-      <div style="font-size:10px;color:var(--muted);margin-top:8px">Gilt nur für dieses Gerät. Der PIN funktioniert immer zusätzlich.</div>
-    </div>`;
-  }
   html += `<div class="card">
     <div style="font-weight:700;font-size:14px;margin-bottom:10px">⭐ Meine Bewertungen</div>`;
   if (!eintraege.length) {
