@@ -2471,7 +2471,7 @@ function migrationMitarbeiterPins() {
 
   // Fehlende Monteure aus altem Baustellen-Manager ergänzen (nur falls Name noch nicht existiert)
   if (!state._monteureNachimportiert) {
-    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter","pin":"2001"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur","pin":"2002"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur","pin":"2003"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter","pin":"2004"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur","pin":"2005"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur","pin":"2006"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur","pin":"2007"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur","pin":"2008"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur","pin":"2009"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter","pin":"2010"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur","pin":"2011"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur","pin":"2012"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur","pin":"2013"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur","pin":"2014"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur","pin":"2015"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur","pin":"2016"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur","pin":"2017"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur","pin":"2018"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter","pin":"2019"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur","pin":"2020"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur","pin":"2021"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur","pin":"2022"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur","pin":"2023"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur","pin":"2024"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter","pin":"2025"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur","pin":"2026"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter","pin":"2027"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur","pin":"2028"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur","pin":"2029"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur","pin":"2030"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur","pin":"2031"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur","pin":"2032"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur","pin":"2033"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","pin":"1234","admin":true}];
+    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","admin":true}];
     fehlendeListe.forEach(f => {
       const exists = state.mitarbeiter.some(m =>
         (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
@@ -2484,7 +2484,7 @@ function migrationMitarbeiterPins() {
           nachname: f.nachname,
           funktion: f.funktion,
           rolle: f.rolle,
-          pin: f.pin,
+          pin: '', // PIN nur ueber die Mitarbeiterverwaltung setzen
           admin: f.admin || false
         });
       } else {
@@ -2493,7 +2493,7 @@ function migrationMitarbeiterPins() {
           (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
           (m.nachname||'').trim().toLowerCase() === f.nachname.toLowerCase()
         );
-        if (m && !m.pin) { m.pin = f.pin; m.rolle = m.rolle || f.rolle; }
+        if (m && !m.rolle) { m.rolle = f.rolle; }
         if (m && f.admin && !m.admin) { m.admin = true; }
       }
     });
@@ -2516,19 +2516,18 @@ function migrationMitarbeiterPins() {
     (m.nachname||'').trim().toLowerCase() === 'vorburger'
   );
   if (!admin) {
-    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '0804', admin: true, entwickler: true };
+    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '', admin: true, entwickler: true };
     state.mitarbeiter.push(admin);
   } else {
-    if (!admin.pin) admin.pin = '0804';
     if (!admin.admin) admin.admin = true;
     admin.entwickler = true;
   }
 
-  // PINs für Zollikon-Team setzen falls noch nicht vorhanden
+  // Zollikon-Team: fehlende Rollen ergaenzen. PINs werden NIE aus dem Code gesetzt.
   // NUR für bestehende Mitarbeiter – legt KEINE neuen an (Temporäre Monteure entfernt)
   const pinMap = {
-    'Mitteregger Christian': { pin: '3885', rolle: 'leiter' },
-    'Dubs Gilles': { pin: '7883', rolle: 'monteur' }
+    'Mitteregger Christian': { rolle: 'leiter' },
+    'Dubs Gilles': { rolle: 'monteur' }
   };
   Object.entries(pinMap).forEach(([name, info]) => {
     let m = state.mitarbeiter.find(x =>
@@ -2536,7 +2535,6 @@ function migrationMitarbeiterPins() {
       (x.nachname + ' ' + x.vorname).trim() === name
     );
     if (!m) return; // Mitarbeiter existiert nicht → NICHTS tun
-    if (!m.pin) m.pin = info.pin;
     if (!m.rolle) m.rolle = info.rolle;
   });
 
