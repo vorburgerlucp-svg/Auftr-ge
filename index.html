@@ -2344,7 +2344,15 @@ function debugClick() {
 
 function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser */ }
 
+// Altbestaende aus frueheren Versionen: gespeicherte Biometrie-PINs und API-Schluessel werden entfernt.
+function bereinigeAltbestaende() {
+  try { safeStorage.keys(WEBAUTHN_PIN_PREFIX).forEach(k => safeStorage.removeItem(k)); } catch (_) {}
+  try { localStorage.removeItem('lagertool_claude_key'); } catch (_) {}
+}
+let claudeApiKeySitzung = '';
+
 function load() {
+  bereinigeAltbestaende();
   // Kein Gesamtzustand im Browser-Speicher: Daten kommen nach dem Login aus Firebase.
   try { localStorage.removeItem('lagertool'); } catch (_) {}
   // _ts zurücksetzen: Firebase soll beim Start immer gewinnen.
@@ -2980,14 +2988,9 @@ async function webauthnPlatformAvailable() {
   } catch(e) { return false; }
 }
 // Alle auf DIESEM Gerät eingerichteten Logins (i.d.R. genau einer - Lucs/Tobias' eigenes Gerät).
+// Biometrie ist deaktiviert: es werden keine gespeicherten Anmeldedaten mehr gelesen (kein PIN im Browser).
 function findStoredBiometricLogins() {
-  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
-    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
-    const credB64 = safeStorage.getItem(k);
-    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
-    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
-    return (m && credB64 && pin && istAdminUser(m)) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
-  }).filter(Boolean);
+  return [];
 }
 
 async function webauthnRegister(m) {
@@ -3008,7 +3011,6 @@ async function webauthnRegister(m) {
     }});
     if (!cred) throw new Error('Keine Zugangsdaten erhalten');
     safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
-    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
     safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
     m.biometricSetupAm = new Date().toISOString();
     save();
@@ -4181,7 +4183,7 @@ function renderEinstellungen() {
   el('cfg-fb-projectid', c.fbProjectId);
   el('cfg-fb-appid', c.fbAppId);
   // Claude API Key aus localStorage (NICHT in state/Firebase, bleibt lokal)
-  el('cfg-claude-apikey', localStorage.getItem('lagertool_claude_key') || '');
+  el('cfg-claude-apikey', claudeApiKeySitzung || '');
   // Kategorien-Manager: nur für Entwickler
   const katCard = document.getElementById('kat-manager-card');
   if (katCard) {
@@ -4196,8 +4198,9 @@ function renderEinstellungen() {
 
 function saveClaudeApiKey() {
   const key = document.getElementById('cfg-claude-apikey')?.value.trim() || '';
-  if (key) { localStorage.setItem('lagertool_claude_key', key); toast('Gespeichert', 'API Key lokal gespeichert', '✅'); }
-  else { localStorage.removeItem('lagertool_claude_key'); toast('Entfernt', 'API Key gelöscht', '🗑'); }
+  claudeApiKeySitzung = key || '';
+  if (key) toast('Gespeichert', 'API Key für diese Sitzung gespeichert', '✅');
+  else toast('Entfernt', 'API Key gelöscht', '🗑');
 }
 
 // ── KATEGORIEN-MANAGEMENT (nur Entwickler) ─────────────────────────────────
@@ -8904,7 +8907,6 @@ async function excelBestandReparieren(opts) {
     nachgelesen: r.status === 'geschrieben-verifiziert' ? true : (r.status.startsWith('geschrieben-') ? false : null) };
   if (res.sicherung) {
     window._letzteExcelReparatur = { sicherung: res.sicherung, geschrieben: r.status.startsWith('geschrieben-') || r.status === 'lokal-gespeichert', status: r.status };
-    try { safeStorage.setItem('lagertool_backup_excel_reparatur_' + Date.now(), JSON.stringify(res.sicherung)); } catch (_) {}
   }
   return out;
 }
@@ -9325,7 +9327,7 @@ async function wpPdfImport(file) {
     }
 
     // Scan-PDF → Claude Vision API
-    const apiKey = localStorage.getItem('lagertool_claude_key');
+    const apiKey = claudeApiKeySitzung;
     if (!apiKey) return toast('API Key benötigt', 'Gescanntes PDF erkannt. Bitte Claude API Key unter ⚙️ Einstellungen hinterlegen.', '🔑');
 
     toast('PDF Import', 'Scan erkannt – sende an Claude Vision…', '🤖');
@@ -12058,10 +12060,7 @@ function officeSyncExport() {
   if (!data) return toast('Fehler','Keine Daten','⚠️');
   // Speichere unter einem zweiten Key den die Monteur-App auch lesen kann
   // Versuche alle möglichen Storage-Keys
-  try {
-    safeStorage.setItem('lagertool_sync', data);
-    safeStorage.setItem('lagertool_sync_ts', Date.now().toString());
-  } catch(e) {}
+  // Kein Schreiben in den Browser-Speicher (vertrauliche Daten bleiben im Worker bzw. im Speicher der Sitzung).
   // Download als JSON-Datei für manuellen Import
   const blob = new Blob([data], {type:'application/json'});
   const url = URL.createObjectURL(blob);
