@@ -290,7 +290,7 @@
 <!-- PAGE: MELDUNGEN -->
 <div id="page-meldungen" class="page">
   <h1>🔔 Meldungen</h1>
-  <p class="subtitle">Quittieren um zu schliessen</p>
+  <p class="subtitle">Rapporte und Baustellenmeldungen</p>
   <div id="meldungen-liste"></div>
 </div>
 
@@ -452,7 +452,7 @@ function load() {
 }
 
 function emptyState() {
-  return { mitarbeiter: [], fahrzeuge: [], artikel: [], orders: [], baustellen: [], plan: {}, monteurMeldungen: [], kategorien: [], werkzeug: [], meineRetouren: [], meineArbeit: [], config: {} };
+  return { mitarbeiter: [], fahrzeuge: [], artikel: [], orders: [], baustellen: [], plan: {}, monteurMeldungen: [], kategorien: [], werkzeug: [], meineRetouren: [], meineArbeit: [], meineRapporte: [], meineMeldungen: [], config: {} };
 }
 
 function stripLargeData(s) {
@@ -556,7 +556,7 @@ async function loadMonteurData() {
   const mo = getMonday(new Date());
   const from = fmtDate(addDays(mo, -14));
   const to = fmtDate(addDays(mo, 27));
-  const [sites, plan, artikel, bst, meld, werk, ret, arb] = await Promise.all([
+  const [sites, plan, artikel, bst, meld, werk, ret, arb, rap] = await Promise.all([
     MonteurApi.get('/app/monteur/sites'),
     MonteurApi.get('/app/monteur/plan', { from, to }),
     MonteurApi.get('/app/monteur/artikel'),
@@ -564,7 +564,8 @@ async function loadMonteurData() {
     MonteurApi.get('/app/monteur/meldungen'),
     MonteurApi.get('/app/monteur/werkzeuge'),
     MonteurApi.get('/app/monteur/retouren'),
-    MonteurApi.get('/app/monteur/arbeitsleistungen')
+    MonteurApi.get('/app/monteur/arbeitsleistungen'),
+    MonteurApi.get('/app/monteur/rapporte')
   ]);
   const neu = emptyState();
   neu.mitarbeiter = [me];
@@ -578,7 +579,10 @@ async function loadMonteurData() {
   }
   neu.artikel = artikel.artikel.map(a => ({ id: a.id, name: a.name, einheit: a.einheit, kat: a.kategorie, bestand: a.bestand, min: a.min }));
   neu.orders = bst.bestellungen.map(o => orderToLocal(o, me));
-  neu.monteurMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, message: m.message, type: m.type, status: m.status }));
+  // Buero-Nachrichten (alte Meldungsliste) sind hier nicht angebunden und bleiben leer.
+  neu.monteurMeldungen = [];
+  neu.meineMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, siteName: (sites.sites.find(x => String(x.id) === String(m.siteId)) || {}).name || '', type: m.type, message: m.message, status: m.status }));
+  neu.meineRapporte = rap.rapporte;
   neu.meineRetouren = ret.retouren.map(r => ({ id: r.id, datum: r.createdAt, artikelName: r.artikelName, menge: r.menge, beschreibung: r.beschreibung, status: r.status, siteName: r.siteName }));
   neu.meineArbeit = arb.eintraege.map(a => ({ id: a.id, datum: a.datum, stunden: a.stunden, taetigkeit: a.taetigkeit, siteName: a.siteName }));
   neu.werkzeug = werk.werkzeuge.map(w => ({ id: w.id, name: w.name, kat: w.kategorie, status: w.status, standort: w.standort, verantwortlich: w.verantwortlich }));
@@ -1576,34 +1580,198 @@ function wpZeigeBaustelle(bauId) {
 // ════════════════════════════════════════════════════════
 // MELDUNGEN
 // ════════════════════════════════════════════════════════
+// ── ARBEITSRAPPORTE UND BAUSTELLENMELDUNGEN ──
+// Fehlende Angaben werden nie geraten. Vor dem Senden steht eine Vorschau mit ausdruecklicher Bestaetigung.
+const MELDUNG_ARTEN = { mangel: 'Mangel', nacharbeit: 'Nacharbeit', material: 'Material', fortschritt: 'Fortschritt', information: 'Information' };
+let rapportSendeStand = null; // { inhalt, requestId } der aktuellen Vorschau
+
+function rapportFormular() {
+  const v = id => (document.getElementById(id)?.value ?? '').trim();
+  const pauseRoh = v('rp-pause');
+  const pause = pauseRoh === '' ? null : Number(pauseRoh);
+  const f = {
+    siteId: v('rp-site') || null,
+    siteName: (document.getElementById('rp-site')?.selectedOptions[0]?.textContent || '').trim(),
+    rapportDate: v('rp-datum') || null,
+    timeStart: v('rp-start') || null,
+    timeEnd: v('rp-ende') || null,
+    breakMinutes: pause,
+    workPerformed: v('rp-arbeit') || null,
+    materialUsed: v('rp-material'),
+    issues: v('rp-probleme'),
+    extraWork: v('rp-extra'),
+    notes: v('rp-notiz')
+  };
+  const fehlend = [];
+  if (!f.siteId) fehlend.push('Baustelle');
+  if (!f.rapportDate) fehlend.push('Datum');
+  if (!f.timeStart) fehlend.push('Arbeitsbeginn');
+  if (!f.timeEnd) fehlend.push('Arbeitsende');
+  if (f.breakMinutes === null || !Number.isInteger(f.breakMinutes)) fehlend.push('Pause');
+  if (!f.workPerformed) fehlend.push('ausgeführte Arbeiten');
+  f.fehlend = fehlend;
+  f.stunden = null;
+  if (!fehlend.length && f.timeEnd > f.timeStart) {
+    const [h1, m1] = f.timeStart.split(':').map(Number);
+    const [h2, m2] = f.timeEnd.split(':').map(Number);
+    const netto = (h2 * 60 + m2) - (h1 * 60 + m1) - f.breakMinutes;
+    if (netto > 0) f.stunden = Math.round(netto / 6) / 10;
+  }
+  return f;
+}
+
+function rapportInhaltSchluessel(f) {
+  return JSON.stringify([f.siteId, f.rapportDate, f.timeStart, f.timeEnd, f.breakMinutes, f.workPerformed, f.materialUsed, f.issues, f.extraWork, f.notes]);
+}
+
+function rapportVorschau() {
+  const f = rapportFormular();
+  if (f.fehlend.length) return toast('Fehlende Angaben', f.fehlend.join(', '), '⚠️');
+  if (f.timeEnd <= f.timeStart) return toast('Fehler', 'Arbeitsende muss nach dem Arbeitsbeginn liegen', '⚠️');
+  if (f.breakMinutes < 0 || f.breakMinutes > 600) return toast('Fehler', 'Pause muss zwischen 0 und 600 Minuten liegen', '⚠️');
+  const inhalt = rapportInhaltSchluessel(f);
+  // Gleicher Inhalt behaelt die Anfrage-ID (Wiederholen ist sicher), geaenderter Inhalt bekommt eine neue.
+  if (!rapportSendeStand || rapportSendeStand.inhalt !== inhalt) rapportSendeStand = { inhalt, requestId: MonteurApi.newRequestId() };
+  const zeile = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">${k}</span><span style="text-align:right">${escapeHtml(v)}</span></div>`;
+  document.getElementById('wz-modal-title').textContent = '📝 Rapport prüfen';
+  document.getElementById('wz-modal-content').innerHTML = `
+    ${zeile('Baustelle', f.siteName)}
+    ${zeile('Datum', f.rapportDate)}
+    ${zeile('Arbeitsbeginn', f.timeStart)}
+    ${zeile('Arbeitsende', f.timeEnd)}
+    ${zeile('Pause', f.breakMinutes + ' min')}
+    ${zeile('Arbeitszeit', f.stunden !== null ? f.stunden.toFixed(1).replace('.', ',') + ' h' : '–')}
+    ${zeile('Ausgeführte Arbeiten', f.workPerformed)}
+    ${f.materialUsed ? zeile('Material', f.materialUsed) : ''}
+    ${f.issues ? zeile('Probleme / Mängel', f.issues) : ''}
+    ${f.extraWork ? zeile('Extraarbeiten', f.extraWork) : ''}
+    ${f.notes ? zeile('Notizen', f.notes) : ''}
+    <p style="font-size:12px;color:var(--muted);margin-top:10px">Nach dem Senden ist der Rapport gespeichert und für das Büro sichtbar.</p>`;
+  const confirmBtn = document.getElementById('wz-modal-confirm');
+  confirmBtn.textContent = 'Bestätigen und senden';
+  confirmBtn.onclick = () => rapportSenden(f);
+  document.getElementById('wz-modal').classList.add('open');
+}
+
+async function rapportSenden(f) {
+  const confirmBtn = document.getElementById('wz-modal-confirm');
+  if (confirmBtn.disabled) return;
+  confirmBtn.disabled = true;
+  const { siteName, fehlend, stunden, ...daten } = f;
+  // Ohne aktuelle Vorschau gibt es nichts zu senden (veralteter Bestaetigen-Knopf).
+  if (!rapportSendeStand) return;
+  try {
+    await MonteurApi.post('/app/monteur/rapport', { ...daten, confirmation: true, requestId: rapportSendeStand.requestId });
+    rapportSendeStand = null;
+    confirmBtn.onclick = null;
+    closeWzModal();
+    ['rp-site', 'rp-start', 'rp-ende', 'rp-pause', 'rp-arbeit', 'rp-material', 'rp-probleme', 'rp-extra', 'rp-notiz'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    await loadMonteurData();
+    renderMeldungen();
+    toast('Rapport gespeichert', siteName || '', '📝');
+  } catch (e) {
+    // Anfrage-ID bleibt erhalten: ein erneutes Bestaetigen sendet denselben Rapport.
+    closeWzModal();
+    toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Bestätigen';
+  }
+}
+
+function meldungFormular() {
+  const v = id => (document.getElementById(id)?.value ?? '').trim();
+  return { siteId: v('bm-site') || null, art: v('bm-art') || null, message: v('bm-text') };
+}
+
+async function meldungSenden() {
+  const f = meldungFormular();
+  if (!f.siteId) return toast('Fehlende Angaben', 'Baustelle', '⚠️');
+  if (!f.art || !MELDUNG_ARTEN[f.art]) return toast('Fehlende Angaben', 'Art der Meldung', '⚠️');
+  if (f.message.length < 5) return toast('Fehlende Angaben', 'Beschreibung (mind. 5 Zeichen)', '⚠️');
+  const key = 'meld:' + f.siteId + ':' + f.art + ':' + f.message;
+  try {
+    await MonteurApi.post('/app/monteur/meldung', { siteId: f.siteId, type: f.art, message: f.message, requestId: requestIdFor(key) });
+    delete bestellRequestIds[key];
+    document.getElementById('bm-text').value = '';
+    await loadMonteurData();
+    renderMeldungen();
+    toast('Meldung gespeichert', MELDUNG_ARTEN[f.art], '🔧');
+  } catch (e) {
+    toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+  }
+}
+
 function renderMeldungen() {
   const el = document.getElementById('meldungen-liste');
-  const ma = currentLoginUser;
-  const alle = (state.monteurMeldungen||[]).filter(m => !m.quittiert && m.maId === ma.id).sort((a,b)=>b.datum.localeCompare(a.datum));
-  updateMeldungenBadge();
-  if (!alle.length) { el.innerHTML = '<div class="card"><div class="empty">✅ Keine offenen Meldungen</div></div>'; return; }
-
-  el.innerHTML = alle.map(m => {
-    const d = new Date(m.datum).toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    const order = m.orderId ? (state.orders||[]).find(o => o.id === m.orderId) : null;
-    let statusBadges = '';
-    if (order) {
-      const alleVerr = (order.items||[]).length && (order.items||[]).every(i=>i.verrechnet);
-      const teilVerr = (order.items||[]).some(i=>i.verrechnet) && !alleVerr;
-      const verrLabel = alleVerr ? '💰 Verrechnet' : teilVerr ? '💰 Teilweise' : '';
-      statusBadges = `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${order.status==='geliefert'?'var(--green)':'var(--accent)'}">${order.status==='geliefert'?'✅ Geliefert':'⏳ Offen'}</span>
-        ${verrLabel ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--surface2);color:${alleVerr?'var(--green)':'var(--accent)'}">${verrLabel}</span>` : ''}
-      </div>`;
-    }
-    return `<div class="card">
-      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${m.titel}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${d}</div>
-      <div style="font-size:13px;white-space:pre-line">${m.text}</div>
-      ${statusBadges}
-      <button class="btn btn-primary btn-sm btn-block" style="margin-top:10px" onclick="meldungQuittieren(${m.id})">✓ Erledigt</button>
+  if (!el) return;
+  const sites = state.baustellen || [];
+  const siteOpts = sites.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+  const artOpts = Object.entries(MELDUNG_ARTEN).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  const heute = fmtDate(new Date());
+  const rapporte = (state.meineRapporte || []).slice().sort((a, b) => String(b.rapportDate).localeCompare(String(a.rapportDate)));
+  const meldungen = (state.meineMeldungen || []).slice().sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  el.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px">📝 Arbeitsrapport</div>
+      <label>Baustelle *</label>
+      <select id="rp-site"><option value="">– wählen –</option>${siteOpts}</select>
+      <label>Datum *</label>
+      <input type="date" id="rp-datum" value="${heute}">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label>Arbeitsbeginn *</label><input type="time" id="rp-start"></div>
+        <div style="flex:1"><label>Arbeitsende *</label><input type="time" id="rp-ende"></div>
+      </div>
+      <label>Pause (Minuten) *</label>
+      <input type="number" id="rp-pause" min="0" max="600" step="1" inputmode="numeric">
+      <label>Ausgeführte Arbeiten *</label>
+      <textarea id="rp-arbeit" rows="3" placeholder="Was wurde gemacht?"></textarea>
+      <label>Material verwendet (optional)</label>
+      <input type="text" id="rp-material">
+      <label>Probleme / Mängel (optional)</label>
+      <input type="text" id="rp-probleme">
+      <label>Extraarbeiten (optional)</label>
+      <input type="text" id="rp-extra">
+      <label>Notizen (optional)</label>
+      <input type="text" id="rp-notiz">
+      <button class="btn btn-primary btn-block" onclick="rapportVorschau()">Vorschau anzeigen</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Meine Rapporte</div>
+      ${rapporte.length ? rapporte.map(r => `
+        <div class="wz-item">
+          <div style="flex:1;min-width:160px">
+            <div class="wz-name">${escapeHtml(r.siteName || '')} · ${escapeHtml(r.rapportDate)}</div>
+            <div class="wz-meta">${escapeHtml(r.timeStart)}–${escapeHtml(r.timeEnd)} · Pause ${escapeHtml(r.breakMinutes)} min${r.totalHours != null ? ' · ' + escapeHtml(String(r.totalHours).replace('.', ',')) + ' h' : ''}</div>
+            <div class="wz-meta">${escapeHtml(r.workPerformed || '')}</div>
+          </div>
+          <span class="badge badge-blue">📨 Eingereicht</span>
+        </div>`).join('') : '<div style="color:var(--muted);font-size:13px">Noch keine Rapporte eingereicht</div>'}
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">🔧 Baustellenmeldung</div>
+      <label>Baustelle *</label>
+      <select id="bm-site"><option value="">– wählen –</option>${siteOpts}</select>
+      <label>Art *</label>
+      <select id="bm-art">${artOpts}</select>
+      <label>Beschreibung *</label>
+      <textarea id="bm-text" rows="3" placeholder="Was ist festgestellt worden?"></textarea>
+      <button class="btn btn-block" onclick="meldungSenden()">Meldung senden</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Meine Baustellenmeldungen</div>
+      ${meldungen.length ? meldungen.map(m => `
+        <div class="wz-item">
+          <div style="flex:1;min-width:160px">
+            <div class="wz-name">${escapeHtml(MELDUNG_ARTEN[m.type] || m.type)} · ${escapeHtml(m.siteName || '')}</div>
+            <div class="wz-meta">${escapeHtml(String(m.datum || '').slice(0, 10))} · ${escapeHtml(m.message || '')}</div>
+          </div>
+          <span class="badge badge-blue">📨 Eingereicht</span>
+        </div>`).join('') : '<div style="color:var(--muted);font-size:13px">Noch keine Meldungen erfasst</div>'}
+    </div>
+    <div class="card" style="font-size:12px;color:var(--muted)">
+      Nachrichten aus dem Büro werden in dieser Ansicht noch nicht angezeigt.
     </div>`;
-  }).join('');
 }
 function meldungQuittieren(id) {
   const m = (state.monteurMeldungen||[]).find(x => x.id === id);
