@@ -232,6 +232,7 @@
     <button class="btn btn-sm" id="best-tab-bestellen-btn" onclick="switchBestTab('bestellen')">Bestellen</button>
     <button class="btn btn-sm" id="best-tab-offen-btn" onclick="switchBestTab('offen')">Offen <span id="best-offen-badge"></span></button>
     <button class="btn btn-sm" id="best-tab-geliefert-btn" onclick="switchBestTab('geliefert')">Geliefert</button>
+    <button class="btn btn-sm" id="best-tab-retouren-btn" onclick="switchBestTab('retouren')">↩️ Retouren</button>
     <button class="btn btn-sm" id="best-tab-jahresbericht-btn" onclick="switchBestTab('jahresbericht')">💰 Kontrolle</button>
   </div>
 
@@ -243,6 +244,7 @@
 
   <div id="best-tab-offen" class="hidden"></div>
   <div id="best-tab-geliefert" class="hidden"></div>
+  <div id="best-tab-retouren" class="hidden"></div>
   <div id="best-tab-jahresbericht" class="hidden"></div>
 </div>
 
@@ -450,7 +452,7 @@ function load() {
 }
 
 function emptyState() {
-  return { mitarbeiter: [], fahrzeuge: [], artikel: [], orders: [], baustellen: [], plan: {}, monteurMeldungen: [], kategorien: [], werkzeug: [], config: {} };
+  return { mitarbeiter: [], fahrzeuge: [], artikel: [], orders: [], baustellen: [], plan: {}, monteurMeldungen: [], kategorien: [], werkzeug: [], meineRetouren: [], meineArbeit: [], config: {} };
 }
 
 function stripLargeData(s) {
@@ -554,13 +556,15 @@ async function loadMonteurData() {
   const mo = getMonday(new Date());
   const from = fmtDate(addDays(mo, -14));
   const to = fmtDate(addDays(mo, 27));
-  const [sites, plan, artikel, bst, meld, werk] = await Promise.all([
+  const [sites, plan, artikel, bst, meld, werk, ret, arb] = await Promise.all([
     MonteurApi.get('/app/monteur/sites'),
     MonteurApi.get('/app/monteur/plan', { from, to }),
     MonteurApi.get('/app/monteur/artikel'),
     MonteurApi.get('/app/monteur/bestellungen'),
     MonteurApi.get('/app/monteur/meldungen'),
-    MonteurApi.get('/app/monteur/werkzeuge')
+    MonteurApi.get('/app/monteur/werkzeuge'),
+    MonteurApi.get('/app/monteur/retouren'),
+    MonteurApi.get('/app/monteur/arbeitsleistungen')
   ]);
   const neu = emptyState();
   neu.mitarbeiter = [me];
@@ -575,6 +579,8 @@ async function loadMonteurData() {
   neu.artikel = artikel.artikel.map(a => ({ id: a.id, name: a.name, einheit: a.einheit, kat: a.kategorie, bestand: a.bestand, min: a.min }));
   neu.orders = bst.bestellungen.map(o => orderToLocal(o, me));
   neu.monteurMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, message: m.message, type: m.type, status: m.status }));
+  neu.meineRetouren = ret.retouren.map(r => ({ id: r.id, datum: r.createdAt, artikelName: r.artikelName, menge: r.menge, beschreibung: r.beschreibung, status: r.status, siteName: r.siteName }));
+  neu.meineArbeit = arb.eintraege.map(a => ({ id: a.id, datum: a.datum, stunden: a.stunden, taetigkeit: a.taetigkeit, siteName: a.siteName }));
   neu.werkzeug = werk.werkzeuge.map(w => ({ id: w.id, name: w.name, kat: w.kategorie, status: w.status, standort: w.standort, verantwortlich: w.verantwortlich }));
   state = neu;
 }
@@ -689,7 +695,7 @@ function showPage(id, silent) {
 // ════════════════════════════════════════════════════════
 function switchBestTab(tab) {
   bestTab = tab;
-  ['bestellen','offen','geliefert','jahresbericht'].forEach(t => {
+  ['bestellen','offen','geliefert','retouren','jahresbericht'].forEach(t => {
     document.getElementById('best-tab-'+t).classList.toggle('hidden', t !== tab);
     const btn = document.getElementById('best-tab-'+t+'-btn');
     if (btn) btn.className = 'btn btn-sm' + (t===tab ? ' btn-primary' : '');
@@ -697,6 +703,7 @@ function switchBestTab(tab) {
   document.getElementById('cart-bar').classList.toggle('show', tab === 'bestellen' && cart.length > 0);
   if (tab === 'offen') renderOrderList('offen');
   if (tab === 'geliefert') renderOrderList('geliefert');
+  if (tab === 'retouren') renderRetouren();
   if (tab === 'jahresbericht') renderMonteurKontrolle();
 }
 
@@ -833,6 +840,71 @@ async function submitBestellung() {
   toast('Gespeichert', meldungen.join(' '), '📤');
 }
 
+
+// ── RETOUREN ──
+// Erfassen und eigene Retouren anzeigen. Keine Preisfelder: der Server uebernimmt nur Artikel, Menge und Text.
+const RETOUR_STATUS = { eingegangen: '📥 Eingegangen' };
+
+function renderRetouren() {
+  const el = document.getElementById('best-tab-retouren');
+  if (!el) return;
+  const artikelOptionen = (state.artikel || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+    .map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
+  const liste = (state.meineRetouren || []).slice().sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  el.innerHTML = `
+    <div class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">+ Retoure melden</div>
+      <label>Artikel (optional)</label>
+      <select id="ret-artikel"><option value="">– kein Artikel –</option>${artikelOptionen}</select>
+      <label>Menge (optional)</label>
+      <input type="number" id="ret-menge" min="1" max="10000" step="1" inputmode="numeric">
+      <label>Was ist passiert? *</label>
+      <textarea id="ret-text" rows="3" placeholder="z.B. Lieferung falsch, Artikel beschädigt"></textarea>
+      <button class="btn btn-primary btn-block" onclick="submitRetoure()">📥 Retoure senden</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">Meine Retouren</div>
+      ${liste.length ? liste.map(r => `
+        <div class="wz-item">
+          <div style="flex:1;min-width:160px">
+            <div class="wz-name">${escapeHtml(r.artikelName || 'Ohne Artikel')}${r.menge ? ' · ' + escapeHtml(r.menge) + ' Stk' : ''}</div>
+            <div class="wz-meta">${escapeHtml(String(r.datum || '').slice(0, 10))} · ${escapeHtml(r.beschreibung || '')}</div>
+          </div>
+          <span class="badge badge-blue">${RETOUR_STATUS[r.status] || escapeHtml(r.status)}</span>
+        </div>`).join('') : '<div class="empty">Noch keine Retouren gemeldet</div>'}
+    </div>`;
+}
+
+async function submitRetoure() {
+  const text = (document.getElementById('ret-text')?.value || '').trim();
+  if (text.length < 5) return toast('Fehler', 'Bitte beschreiben, was passiert ist (mind. 5 Zeichen)', '⚠️');
+  const artikelId = document.getElementById('ret-artikel')?.value || '';
+  const mengeRaw = (document.getElementById('ret-menge')?.value || '').trim();
+  const menge = mengeRaw === '' ? undefined : Number(mengeRaw);
+  if (menge !== undefined && (!Number.isInteger(menge) || menge < 1)) return toast('Fehler', 'Menge muss eine ganze Zahl ab 1 sein', '⚠️');
+  const heute = fmtDate(new Date());
+  const heuteEintrag = state.plan?.[heute]?.['ma' + currentLoginUser.id + '_' + heute];
+  // Anfrage-ID je Inhalt: ein Wiederholen desselben Formulars bucht nicht doppelt.
+  const key = 'ret:' + artikelId + ':' + (menge ?? '') + ':' + text;
+  try {
+    await MonteurApi.post('/app/monteur/retoure', {
+      artikelId: artikelId || undefined,
+      menge,
+      beschreibung: text,
+      siteId: heuteEintrag ? heuteEintrag.bsId : undefined,
+      requestId: requestIdFor(key)
+    });
+    delete bestellRequestIds[key];
+    document.getElementById('ret-text').value = '';
+    document.getElementById('ret-menge').value = '';
+    document.getElementById('ret-artikel').value = '';
+    await loadMonteurData();
+    renderRetouren();
+    toast('Retoure gesendet', '', '📥');
+  } catch (e) {
+    toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+  }
+}
 
 function renderOrderList(filter) {
   const el = document.getElementById('best-tab-'+filter);
@@ -1686,6 +1758,58 @@ function updateMeldungenBadge() {
 // ════════════════════════════════════════════════════════
 // MEIN PROFIL
 // ════════════════════════════════════════════════════════
+// ── ARBEITSLEISTUNG ──
+// Eigene Arbeitsstunden erfassen und anzeigen. Keine Preise, Saetze oder Rechnungsfelder.
+function renderArbeitCard() {
+  const liste = (state.meineArbeit || []).slice().sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  const heute = fmtDate(new Date());
+  const stundenOptionen = [];
+  for (let v = 0.25; v <= 16; v += 0.25) stundenOptionen.push(`<option value="${v}"${v === 8 ? ' selected' : ''}>${v.toFixed(2).replace('.', ',')} h</option>`);
+  return `
+    <div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px">⏱ Arbeitsleistung erfassen</div>
+      <label>Datum</label>
+      <input type="date" id="arb-datum" value="${heute}">
+      <label>Stunden</label>
+      <select id="arb-stunden">${stundenOptionen.join('')}</select>
+      <label>Tätigkeit *</label>
+      <input type="text" id="arb-taetigkeit" placeholder="z.B. Montage Fenster, Demontage">
+      <button class="btn btn-primary btn-block" onclick="submitArbeitsleistung()">Erfassen</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:10px">Meine Leistungshistorie</div>
+      ${liste.length ? liste.map(a => `
+        <div class="wz-item">
+          <div style="flex:1;min-width:160px">
+            <div class="wz-name">${escapeHtml(a.taetigkeit)}</div>
+            <div class="wz-meta">${escapeHtml(a.datum)} · ${escapeHtml(String(a.stunden).replace('.', ','))} h${a.siteName ? ' · ' + escapeHtml(a.siteName) : ''}</div>
+          </div>
+        </div>`).join('') : '<div style="color:var(--muted);font-size:13px">Noch keine Arbeitsleistung erfasst.</div>'}
+    </div>`;
+}
+
+async function submitArbeitsleistung() {
+  const datum = document.getElementById('arb-datum')?.value || '';
+  const stunden = Number(document.getElementById('arb-stunden')?.value);
+  const taetigkeit = (document.getElementById('arb-taetigkeit')?.value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return toast('Fehler', 'Bitte ein gültiges Datum wählen', '⚠️');
+  if (taetigkeit.length < 3) return toast('Fehler', 'Bitte die Tätigkeit beschreiben (mind. 3 Zeichen)', '⚠️');
+  const heuteEintrag = state.plan?.[datum]?.['ma' + currentLoginUser.id + '_' + datum];
+  const key = 'arb:' + datum + ':' + stunden + ':' + taetigkeit;
+  try {
+    await MonteurApi.post('/app/monteur/arbeitsleistung', {
+      datum, stunden, taetigkeit, siteId: heuteEintrag ? heuteEintrag.bsId : undefined, requestId: requestIdFor(key)
+    });
+    delete bestellRequestIds[key];
+    document.getElementById('arb-taetigkeit').value = '';
+    await loadMonteurData();
+    renderProfil();
+    toast('Erfasst', stunden.toFixed(2).replace('.', ',') + ' h', '⏱');
+  } catch (e) {
+    toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+  }
+}
+
 function renderProfil() {
   const el = document.getElementById('profil-content');
   const ma = currentLoginUser;
@@ -1709,7 +1833,7 @@ function renderProfil() {
   html += `<div class="card">
     <div style="font-weight:700;font-size:14px;margin-bottom:10px">⭐ Meine Bewertungen</div>`;
   if (!eintraege.length) {
-    html += '<div style="color:var(--muted);font-size:13px">Noch keine Bewertungen vorhanden.</div>';
+    html += '<div style="color:var(--muted);font-size:12px">Bewertungen werden im Büro geführt und hier nicht angezeigt.</div>';
   } else {
     html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">';
     bsKriterien.forEach(kr => {
@@ -1848,6 +1972,7 @@ function renderProfil() {
     html += '</div>';
   }
 
+  html += renderArbeitCard();
   el.innerHTML = html;
 }
 
