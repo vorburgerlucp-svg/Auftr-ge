@@ -581,7 +581,7 @@ async function loadMonteurData() {
   neu.orders = bst.bestellungen.map(o => orderToLocal(o, me));
   // Buero-Nachrichten (alte Meldungsliste) sind hier nicht angebunden und bleiben leer.
   neu.monteurMeldungen = [];
-  neu.meineMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, siteName: (sites.sites.find(x => String(x.id) === String(m.siteId)) || {}).name || '', type: m.type, message: m.message, status: m.status }));
+  neu.meineMeldungen = meld.meldungen.map(m => ({ id: m.id, datum: m.createdAt, siteId: m.siteId, siteName: (sites.sites.find(x => String(x.id) === String(m.siteId)) || {}).name || '', type: m.type, message: m.message, status: m.status, quittierbar: m.quittierbar, verlauf: m.verlauf || [] }));
   neu.meineRapporte = rap.rapporte;
   neu.meineRetouren = ret.retouren.map(r => ({ id: r.id, datum: r.createdAt, artikelName: r.artikelName, menge: r.menge, beschreibung: r.beschreibung, status: r.status, siteName: r.siteName }));
   neu.meineArbeit = arb.eintraege.map(a => ({ id: a.id, datum: a.datum, stunden: a.stunden, taetigkeit: a.taetigkeit, siteName: a.siteName }));
@@ -1583,6 +1583,26 @@ function wpZeigeBaustelle(bauId) {
 // ── ARBEITSRAPPORTE UND BAUSTELLENMELDUNGEN ──
 // Fehlende Angaben werden nie geraten. Vor dem Senden steht eine Vorschau mit ausdruecklicher Bestaetigung.
 const MELDUNG_ARTEN = { mangel: 'Mangel', nacharbeit: 'Nacharbeit', material: 'Material', fortschritt: 'Fortschritt', information: 'Information' };
+const MELDUNG_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Vom Büro abgeschlossen' };
+
+// Monteur quittiert die Ausfuehrung. Der erwartete Status wird mitgesendet: ein veralteter Stand wird abgewiesen.
+async function meldungQuittieren(id) {
+  const m = (state.meineMeldungen || []).find(x => String(x.id) === String(id));
+  if (!m || !m.quittierbar) return toast('Nicht möglich', 'Diese Meldung kann nicht quittiert werden', '⚠️');
+  const key = 'quitt:' + id;
+  try {
+    await MonteurApi.post('/app/monteur/meldung/' + encodeURIComponent(String(id)) + '/quittieren', { expectedStatus: m.status, requestId: requestIdFor(key) });
+    delete bestellRequestIds[key];
+    toast('Quittiert', 'Das Büro prüft und schließt ab', '✅');
+  } catch (e) {
+    if (e.code === 'already_quittiert') toast('Bereits quittiert', 'Diese Meldung wurde schon quittiert', 'ℹ️');
+    else if (e.code === 'status_conflict') toast('Geändert', 'Die Meldung wurde inzwischen verändert. Liste wird aktualisiert.', '⚠️');
+    else toast('Fehler', MonteurApi.messageFor(e), '⚠️');
+  }
+  await loadMonteurData().catch(() => {});
+  renderMeldungen();
+}
+
 let rapportSendeStand = null; // { inhalt, requestId } der aktuellen Vorschau
 
 function rapportFormular() {
@@ -1766,19 +1786,15 @@ function renderMeldungen() {
             <div class="wz-name">${escapeHtml(MELDUNG_ARTEN[m.type] || m.type)} · ${escapeHtml(m.siteName || '')}</div>
             <div class="wz-meta">${escapeHtml(String(m.datum || '').slice(0, 10))} · ${escapeHtml(m.message || '')}</div>
           </div>
-          <span class="badge badge-blue">📨 Eingereicht</span>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <span class="badge badge-blue">${MELDUNG_STATUS[m.status] || escapeHtml(m.status)}</span>
+            ${m.quittierbar ? `<button class="btn btn-primary btn-sm" onclick='meldungQuittieren(${JSON.stringify(String(m.id))})'>✓ Ausführung quittieren</button>` : ''}
+          </div>
         </div>`).join('') : '<div style="color:var(--muted);font-size:13px">Noch keine Meldungen erfasst</div>'}
     </div>
     <div class="card" style="font-size:12px;color:var(--muted)">
       Nachrichten aus dem Büro werden in dieser Ansicht noch nicht angezeigt.
     </div>`;
-}
-function meldungQuittieren(id) {
-  const m = (state.monteurMeldungen||[]).find(x => x.id === id);
-  if (!m) return;
-  m.quittiert = true; m.quittiert_datum = new Date().toISOString();
-  save(); renderMeldungen();
-  toast('Erledigt','Meldung geschlossen','✅');
 }
 function updateVerrechnungReminder() {
   const banner = document.getElementById('verrechnung-reminder');
