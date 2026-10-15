@@ -1570,7 +1570,7 @@
     <div class="card-title">👤 Ansprechperson</div>
     <div class="form-row cols-2">
       <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Thomas Fust"></div>
-      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"></div>
+      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"><label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:normal"><input type="checkbox" id="bs-ap-tel-freigabe"> Telefonnummer für Monteure freigeben</label></div>
     </div>
     <div class="form-row cols-1">
       <div><label>E-Mail</label><input type="email" id="bs-ap-email" placeholder="t.fust@fust.ch"></div>
@@ -10230,6 +10230,7 @@ function showBsModal(id) {
   if (mtEl) mtEl.value = bs?.montageTyp||'';
   document.getElementById('bs-ap-name').value = bs?.apName||'';
   document.getElementById('bs-ap-tel').value = bs?.apTel||'';
+  document.getElementById('bs-ap-tel-freigabe').checked = bs?.apTelFreigegeben===true;
   document.getElementById('bs-ap-email').value = bs?.apEmail||'';
   document.getElementById('bs-hotel-name').value = bs?.hotelName||'';
   document.getElementById('bs-hotel-adresse').value = bs?.hotelAdresse||'';
@@ -10802,6 +10803,7 @@ function bsFormAlsDaten() {
     montageDetail: document.getElementById('bs-montageDetail').value.trim(),
     apName: document.getElementById('bs-ap-name').value.trim(),
     apTel: document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben: document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail: document.getElementById('bs-ap-email').value.trim(),
     material: document.getElementById('bs-material').value.trim(),
     werkzeug: document.getElementById('bs-werkzeug').value.trim(),
@@ -11082,6 +11084,7 @@ async function saveBsModal() {
     montageTyp:document.getElementById('bs-montageArt').value,
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben:document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail:document.getElementById('bs-ap-email').value.trim(),
     parkplatz:document.getElementById('bs-parkplatz').value.trim(),
     zufahrt:document.getElementById('bs-zufahrt').value.trim(),
