@@ -29,6 +29,7 @@
   let hasReceivedFirebaseSync = false;
   let pendingSaveBeforeSync = false;
   function markFirebaseSynced() {
+  if (typeof officeAnmeldungNachSync === 'function') officeAnmeldungNachSync();
     hasReceivedFirebaseSync = true;
     if (pendingSaveBeforeSync) {
       pendingSaveBeforeSync = false;
@@ -454,8 +455,7 @@
           <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
             style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
             data-hidden-id="login-name-id"
-            onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
-            oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
+            autocomplete="username">
           <input type="hidden" id="login-name-id" value="">
         </div>
       </div>
@@ -876,6 +876,7 @@
 <div id="page-meldungen" class="page">
   <h2>🔔 Meldungen</h2>
   <p class="subtitle">Benachrichtigungen von Monteuren — quittieren um zu schliessen</p>
+  <div id="bz-section" class="card" style="margin-bottom:14px"></div>
   <div id="meldungen-liste"></div>
 </div>
 
@@ -1569,7 +1570,7 @@
     <div class="card-title">👤 Ansprechperson</div>
     <div class="form-row cols-2">
       <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Thomas Fust"></div>
-      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"></div>
+      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"><label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:normal"><input type="checkbox" id="bs-ap-tel-freigabe"> Telefonnummer für Monteure freigeben</label></div>
     </div>
     <div class="form-row cols-1">
       <div><label>E-Mail</label><input type="email" id="bs-ap-email" placeholder="t.fust@fust.ch"></div>
@@ -2341,9 +2342,20 @@ function debugClick() {
   console.log('Debug aktiv - jetzt auf den Button klicken (einmalig)');
 }
 
+function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser */ }
+
+// Altbestaende aus frueheren Versionen: gespeicherte Biometrie-PINs und API-Schluessel werden entfernt.
+function bereinigeAltbestaende() {
+  try { indexedDB.deleteDatabase('lagertool_docs'); } catch (_) {}
+  try { safeStorage.keys(WEBAUTHN_PIN_PREFIX).forEach(k => safeStorage.removeItem(k)); } catch (_) {}
+  try { localStorage.removeItem('lagertool_claude_key'); } catch (_) {}
+}
+let claudeApiKeySitzung = '';
+
 function load() {
-  const s = safeStorage.getItem('lagertool');
-  if (s) state = JSON.parse(s);
+  bereinigeAltbestaende();
+  // Kein Gesamtzustand im Browser-Speicher: Daten kommen nach dem Login aus Firebase.
+  try { localStorage.removeItem('lagertool'); } catch (_) {}
   // _ts zurücksetzen: Firebase soll beim Start immer gewinnen.
   // Nach eigenem Save wird _ts neu gesetzt und suppressListener schützt den Write.
   state._ts = 0;
@@ -2468,7 +2480,7 @@ function migrationMitarbeiterPins() {
 
   // Fehlende Monteure aus altem Baustellen-Manager ergänzen (nur falls Name noch nicht existiert)
   if (!state._monteureNachimportiert) {
-    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter","pin":"2001"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur","pin":"2002"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur","pin":"2003"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter","pin":"2004"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur","pin":"2005"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur","pin":"2006"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur","pin":"2007"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur","pin":"2008"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur","pin":"2009"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter","pin":"2010"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur","pin":"2011"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur","pin":"2012"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur","pin":"2013"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur","pin":"2014"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur","pin":"2015"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur","pin":"2016"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur","pin":"2017"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur","pin":"2018"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter","pin":"2019"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur","pin":"2020"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur","pin":"2021"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur","pin":"2022"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur","pin":"2023"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur","pin":"2024"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter","pin":"2025"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur","pin":"2026"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter","pin":"2027"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur","pin":"2028"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur","pin":"2029"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur","pin":"2030"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur","pin":"2031"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur","pin":"2032"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur","pin":"2033"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","pin":"1234","admin":true}];
+    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","admin":true}];
     fehlendeListe.forEach(f => {
       const exists = state.mitarbeiter.some(m =>
         (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
@@ -2481,7 +2493,7 @@ function migrationMitarbeiterPins() {
           nachname: f.nachname,
           funktion: f.funktion,
           rolle: f.rolle,
-          pin: f.pin,
+          pin: '', // PIN nur ueber die Mitarbeiterverwaltung setzen
           admin: f.admin || false
         });
       } else {
@@ -2490,7 +2502,7 @@ function migrationMitarbeiterPins() {
           (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
           (m.nachname||'').trim().toLowerCase() === f.nachname.toLowerCase()
         );
-        if (m && !m.pin) { m.pin = f.pin; m.rolle = m.rolle || f.rolle; }
+        if (m && !m.rolle) { m.rolle = f.rolle; }
         if (m && f.admin && !m.admin) { m.admin = true; }
       }
     });
@@ -2513,19 +2525,18 @@ function migrationMitarbeiterPins() {
     (m.nachname||'').trim().toLowerCase() === 'vorburger'
   );
   if (!admin) {
-    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '0804', admin: true, entwickler: true };
+    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '', admin: true, entwickler: true };
     state.mitarbeiter.push(admin);
   } else {
-    if (!admin.pin) admin.pin = '0804';
     if (!admin.admin) admin.admin = true;
     admin.entwickler = true;
   }
 
-  // PINs für Zollikon-Team setzen falls noch nicht vorhanden
+  // Zollikon-Team: fehlende Rollen ergaenzen. PINs werden NIE aus dem Code gesetzt.
   // NUR für bestehende Mitarbeiter – legt KEINE neuen an (Temporäre Monteure entfernt)
   const pinMap = {
-    'Mitteregger Christian': { pin: '3885', rolle: 'leiter' },
-    'Dubs Gilles': { pin: '7883', rolle: 'monteur' }
+    'Mitteregger Christian': { rolle: 'leiter' },
+    'Dubs Gilles': { rolle: 'monteur' }
   };
   Object.entries(pinMap).forEach(([name, info]) => {
     let m = state.mitarbeiter.find(x =>
@@ -2533,7 +2544,6 @@ function migrationMitarbeiterPins() {
       (x.nachname + ' ' + x.vorname).trim() === name
     );
     if (!m) return; // Mitarbeiter existiert nicht → NICHTS tun
-    if (!m.pin) m.pin = info.pin;
     if (!m.rolle) m.rolle = info.rolle;
   });
 
@@ -2749,46 +2759,106 @@ function fzgMonteurPickerOpen() {
   }, { excludeFzgId: fzgId });
 }
 
-function doLogin(fromBiometric) {
-  const id = maIdValue(document.getElementById('login-name-id').value);
-  const pin = document.getElementById('login-pin').value.trim();
+// Büro-Anmeldung: Name und PIN gehen an den Worker. Der Browser prueft nichts selbst.
+// Erst mit dem Firebase-Custom-Token wird Firebase angemeldet, danach werden die Daten geladen.
+const LT_WORKER_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+let officeAnmeldungLaeuft = false;
+let officeWartetAufSync = null;
+
+async function doLogin() {
   const errEl = document.getElementById('login-error');
-
-  if (!id) { errEl.textContent = 'Bitte Name wählen'; errEl.style.display = 'block'; return; }
-  if (pin.length !== 4) { errEl.textContent = 'PIN muss 4 Ziffern sein'; errEl.style.display = 'block'; return; }
-
-  const m = state.mitarbeiter.find(x => x.id === id);
-  if (!m || m.pin !== pin) {
-    if (fromBiometric) {
-      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. geändert) - veraltete
-      // Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
-      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
-      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
-      renderLoginBiometricUI();
-      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
-    } else {
-      errEl.textContent = 'Name oder PIN ungültig';
-    }
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
-  // Zugriff auf dieses Tool nur für Entwickler/Administratoren - alle anderen
-  // (Leiter, Monteur, Chef-Monteur) nutzen die Monteur-App.
-  if (!istAdminUser(m)) {
-    errEl.textContent = 'Kein Zugriff — dieses Tool ist nur für Entwickler und Administratoren. Bitte die Monteur-App verwenden.';
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
+  const name = (document.getElementById('login-name')?.value || '').trim();
+  const pin = (document.getElementById('login-pin')?.value || '').trim();
   errEl.style.display = 'none';
+  if (!name || !/^\d{4}$/.test(pin)) {
+    errEl.textContent = 'Bitte Name und 4-stelligen PIN eingeben';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (officeAnmeldungLaeuft) return;
+  officeAnmeldungLaeuft = true;
+  let r;
+  try {
+    const res = await fetch(LT_WORKER_URL + '/app/office/anmelden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, pin }),
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+    let data = null;
+    try { data = await res.json(); } catch (x) { data = null; }
+    if (!res.ok || !data || !data.firebaseToken || !data.officeSession) {
+      throw new Error(res.status === 0 ? 'netz' : 'abgelehnt');
+    }
+    r = data;
+  } catch (e) {
+    officeAnmeldungLaeuft = false;
+    document.getElementById('login-pin').value = '';
+    errEl.textContent = e.message === 'netz'
+      ? 'Keine Verbindung zum Server. Bitte erneut versuchen.'
+      : 'Name oder PIN ungültig';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server.
+  bzSession = { token: r.officeSession, name };
+  lagertoolSitzungMaId = String(r.employeeId);
+  officeWartetAufSync = String(r.employeeId);
+  document.getElementById('login-pin').value = '';
+  officeFirebaseAnmelden(r.firebaseToken);
+}
+
+// Firebase ausschliesslich mit dem Custom-Token. Keine anonyme Anmeldung.
+function officeFirebaseAnmelden(token) {
+  try {
+    if (typeof firebase === 'undefined') throw new Error('sdk');
+    firebase.auth().signInWithCustomToken(token)
+      .then(() => {
+        startFirebaseListener();
+      })
+      .catch(err => {
+        console.error('[Firebase] Anmeldung mit Token fehlgeschlagen');
+        officeAnmeldungFehlgeschlagen('Firebase-Anmeldung fehlgeschlagen. Bitte erneut anmelden.');
+      });
+  } catch (e) {
+    officeAnmeldungFehlgeschlagen('Firebase ist nicht verfügbar.');
+  }
+}
+
+function officeAnmeldungFehlgeschlagen(text) {
+  officeAnmeldungLaeuft = false;
+  officeWartetAufSync = null;
+  bzSession = null;
+  lagertoolSitzungMaId = null;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = text;
+  errEl.style.display = 'block';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+// Nach der ersten Synchronisation: Büro-Berechtigung im geladenen Datenbestand bestaetigen.
+function officeAnmeldungNachSync() {
+  if (!officeWartetAufSync) return;
+  const id = officeWartetAufSync;
+  officeWartetAufSync = null;
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  if (!m || !istAdminUser(m)) {
+    officeAnmeldungFehlgeschlagen('Kein Zugang: dieses Konto hat keine Büro-Berechtigung.');
+    firebase.auth().signOut().catch(() => {});
+    return;
+  }
   currentLoginUser = m;
-  lagertoolSitzungMaId = m.id;
-  try { sessionStorage.setItem('lagertool_login', JSON.stringify({id: m.id})); } catch(e) {}
+  lagertoolSitzungMaId = String(m.id);
+  officeAnmeldungLaeuft = false;
   finishLogin();
-  if (!fromBiometric) maybeOfferWebauthnSetup(m);
+}
+
+// Ablauf der Firebase-Sitzung (nach ca. einer Stunde): sauber zur Anmeldung zurueck.
+function officeSitzungAbgelaufen() {
+  if (!currentLoginUser) return;
+  toast('Sitzung abgelaufen', 'Bitte erneut anmelden.', '⏱');
+  setTimeout(() => location.reload(), 1500);
 }
 
 function finishLogin() {
@@ -2919,17 +2989,13 @@ async function webauthnPlatformAvailable() {
   } catch(e) { return false; }
 }
 // Alle auf DIESEM Gerät eingerichteten Logins (i.d.R. genau einer - Lucs/Tobias' eigenes Gerät).
+// Biometrie ist deaktiviert: es werden keine gespeicherten Anmeldedaten mehr gelesen (kein PIN im Browser).
 function findStoredBiometricLogins() {
-  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
-    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
-    const credB64 = safeStorage.getItem(k);
-    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
-    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
-    return (m && credB64 && pin && istAdminUser(m)) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
-  }).filter(Boolean);
+  return [];
 }
 
 async function webauthnRegister(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   try {
     if (!istAdminUser(m)) throw new Error('KEIN_ZUGRIFF');
     if (!m.pin) throw new Error('KEIN_PIN');
@@ -2946,7 +3012,6 @@ async function webauthnRegister(m) {
     }});
     if (!cred) throw new Error('Keine Zugangsdaten erhalten');
     safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
-    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
     safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
     m.biometricSetupAm = new Date().toISOString();
     save();
@@ -2990,6 +3055,7 @@ async function webauthnLoginAttempt(entry) {
 }
 
 function renderLoginBiometricUI() {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   const area = document.getElementById('login-biometric-area');
   if (!area) return;
   const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
@@ -3006,6 +3072,7 @@ function showLoginPinForm() {
 }
 
 function maybeOfferWebauthnSetup(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   if (!webauthnPlatformOk || !istAdminUser(m)) return;
   if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return;
   if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return;
@@ -3057,6 +3124,8 @@ async function doLogout() {
     }
   } catch(e) {}
   try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
+  try { await firebase.auth().signOut(); } catch(e) {}
+  try { indexedDB.deleteDatabase('lagertool_docs'); } catch(e) {}
   location.reload();
 }
 // save() bleibt für alle bestehenden Aufrufer 100% wie bisher nutzbar
@@ -3164,7 +3233,7 @@ function syncStandUebernehmen(neu) {
   (state.fahrzeuge || []).forEach(f => { const l = (lokalVor.fahrzeuge || []).find(x => x.id === f.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) f.docs = l.docs; });
   (state.mitarbeiter || []).forEach(m => { const l = (lokalVor.mitarbeiter || []).find(x => x.id === m.id); if (l) { if (l.foto && l.foto !== '_localOnly') m.foto = l.foto; if (Array.isArray(l.docs) && l.docs.some(d => d.data)) m.docs = l.docs; } });
   (state.baustellen || []).forEach(b => { const l = (lokalVor.baustellen || []).find(x => x.id === b.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) b.docs = l.docs; });
-  try { safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state))); } catch (_) {}
+  try { lagertoolKeinCache( JSON.stringify(stripLargeData(state))); } catch (_) {}
 }
 let saveKette = Promise.resolve();
 // Ein Speichervorgang (läuft seriell hinter save()): frischer lokaler Schnappschuss → Transaktion mit Merge.
@@ -3231,7 +3300,7 @@ function save(opts) {
   // die Docs allein sind ~29MB. Docs werden separat in IndexedDB gespeichert.
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   // Firebase: Merge-Transaktion (siehe oben), seriell – jeder Lauf nimmt den dann aktuellen lokalen Stand.
   if (dbRef && hasReceivedFirebaseSync) {
@@ -3258,73 +3327,10 @@ function save(opts) {
     error:new Error('Keine Serververbindung – Änderung nur auf diesem Gerät vorgemerkt')});
 }
 
-// ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
-function openDocsDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('lagertool_docs', 1);
-    req.onupgradeneeded = e => { e.target.result.createObjectStore('docs'); };
-    req.onsuccess = e => resolve(e.target.result);
-    req.onerror = e => reject(e.target.error);
-  });
-}
-
-async function saveDocsToIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readwrite');
-    const store = tx.objectStore('docs');
-    // Fahrzeug-Docs
-    (s.fahrzeuge||[]).forEach(f => {
-      if (f.docs?.some(d => d.data)) store.put(f.docs, 'fzg_' + f.id);
-    });
-    // Mitarbeiter-Docs + Fotos
-    (s.mitarbeiter||[]).forEach(m => {
-      if (m.foto && m.foto !== '_localOnly') store.put(m.foto, 'foto_' + m.id);
-      if (m.docs?.some(d => d.data)) store.put(m.docs, 'ma_' + m.id);
-    });
-    // Baustellen-Docs
-    (s.baustellen||[]).forEach(b => {
-      if (b.docs?.some(d => d.data)) store.put(b.docs, 'bs_' + b.id);
-    });
-  } catch(e) { console.warn('IndexedDB write error:', e); }
-}
-
-async function loadDocsFromIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readonly');
-    const store = tx.objectStore('docs');
-    const get = key => new Promise(r => { const req = store.get(key); req.onsuccess = () => r(req.result); req.onerror = () => r(null); });
-    for (const f of (s.fahrzeuge||[])) {
-      const docs = await get('fzg_' + f.id);
-      if (docs) f.docs = docs;
-    }
-    for (const m of (s.mitarbeiter||[])) {
-      const foto = await get('foto_' + m.id);
-      if (foto) m.foto = foto;
-      const docs = await get('ma_' + m.id);
-      if (docs) m.docs = docs;
-    }
-    for (const b of (s.baustellen||[])) {
-      const docs = await get('bs_' + b.id);
-      if (docs && Array.isArray(b.docs)) {
-        // NICHT das ganze Array überschreiben (das würde auf einem anderen
-        // Gerät hochgeladene Server-Dokumente wieder verschwinden lassen,
-        // da diese nie in die lokale IndexedDB dieses Geräts gelangen).
-        // Nur bei _localOnly-Einträgen die lokal zwischengespeicherten Bytes
-        // wieder anhängen; Server-Dokumente (storage:'site-document') bleiben
-        // exakt so, wie sie aus Firebase kamen.
-        b.docs = b.docs.map(d => {
-          if (!d._localOnly) return d;
-          const match = docs.find(x => x.name === d.name && x.type === d.type);
-          return match || d;
-        });
-      } else if (docs && !b.docs) {
-        b.docs = docs;
-      }
-    }
-  } catch(e) { console.warn('IndexedDB read error:', e); }
-}
+// Dokumente (Fotos, PDFs) werden NICHT dauerhaft im Browser gespeichert. Sie liegen nur im Speicher der Sitzung
+// bzw. im Worker. Altbestaende aus frueheren Versionen werden beim Start geloescht (bereinigeAltbestaende).
+function saveDocsToIDB(s) { /* bewusst leer: kein dauerhafter Dokumentcache im Browser */ }
+function loadDocsFromIDB(s) { return Promise.resolve(); }
 
 // Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
 // Firebase bekommt nur die schlanken Nutzdaten (~72 KB statt ~29 MB).
@@ -3391,6 +3397,212 @@ function fahrzeugManuelleResetPruefen() {
 function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdowns(); renderHistory(); renderFzgSettings(); renderWerkzeugDropdowns(); renderFahrzeugePage(); renderKatSelects(); }
 
 // ── NAVIGATION ─────────────────────────────────────────
+// ── BÜRO: RAPPORTE UND BAUSTELLENMELDUNGEN (Worker) ──
+// Die Daten liegen auf dem Server (R2). Die Büro-Sitzung wird nur im Speicher dieser Seite gehalten.
+const BZ_WORKER = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+const BZ_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Abgeschlossen' };
+const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittiert: 'Quittiert', abgeschlossen: 'Abgeschlossen', zurueckgegeben: 'Zur Bearbeitung zurück', wieder_geoeffnet: 'Wieder geöffnet' };
+let bzSession = null;          // { token, name }
+let bzDaten = { meldungen: [], rapporte: [] };
+let bzSiteId = '';
+let bzBusy = {};               // verhindert Doppelklicks je Vorgang
+let bzMeldung = null;          // Fehler- oder Hinweistext
+
+function bzEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function bzName(id) {
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : ('ID ' + id);
+}
+
+function bzFehlertext(e) {
+  if (e.code === 'status_conflict') return 'Der Vorgang wurde inzwischen von jemand anderem geändert. Die Liste wird aktualisiert.';
+  if (e.code === 'already_quittiert') return 'Dieser Vorgang wurde bereits quittiert.';
+  if (e.code === 'forbidden') return 'Dafür fehlt die Berechtigung.';
+  if (e.code === 'invalid_transition') return 'Dieser Statuswechsel ist nicht erlaubt.';
+  if (e.code === 'zuweisung_required') return 'Bitte einen Monteur auswählen.';
+  if (e.status === 0) return 'Keine Verbindung zum Server. Nichts wurde geändert. Bitte erneut versuchen.';
+  if (e.code === 'unauthorized') return 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.';
+  return 'Der Vorgang konnte nicht abgeschlossen werden.';
+}
+
+async function bzCall(method, path, body) {
+  let res;
+  try {
+    res = await fetch(BZ_WORKER + path, {
+      method,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, bzSession ? { Authorization: 'Bearer ' + bzSession.token } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+  } catch (netz) {
+    const e = new Error('network'); e.status = 0; e.code = 'network'; throw e;
+  }
+  let data = null;
+  try { data = await res.json(); } catch (x) { data = null; }
+  if (!res.ok) {
+    const e = new Error(data && data.error ? data.error : 'http_' + res.status);
+    e.status = res.status; e.code = data && data.error; e.aktuell = data && data.aktuell;
+    if (res.status === 401 && bzSession) { bzSession = null; }
+    throw e;
+  }
+  return data;
+}
+
+async function bzAnmelden() {
+  const name = (document.getElementById('bz-login-name')?.value || '').trim();
+  const pin = document.getElementById('bz-login-pin')?.value || '';
+  if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
+  try {
+    const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
+    bzSession = { token: r.officeSession, name };
+    bzMeldung = null;
+    await bzLaden();
+  } catch (e) {
+    bzSession = null;
+    bzMeldung = e.status === 0 ? bzFehlertext(e) : 'Name oder PIN ist ungültig.';
+    bzRender();
+  }
+}
+
+function bzAbmelden() {
+  bzSession = null;
+  bzDaten = { meldungen: [], rapporte: [] };
+  bzMeldung = null;
+  bzRender();
+}
+
+// Laedt alle Vorgaenge vom Server. Ein Fehler laesst die alte Anzeige stehen und sagt es.
+async function bzLaden() {
+  if (!bzSession) return bzRender();
+  try {
+    const [m, r] = await Promise.all([bzCall('GET', '/app/admin/meldungen'), bzCall('GET', '/app/admin/rapporte')]);
+    bzDaten = { meldungen: m.meldungen || [], rapporte: r.rapporte || [] };
+    bzMeldung = null;
+  } catch (e) {
+    if (e.code === 'unauthorized' || e.status === 401) { bzSession = null; bzMeldung = 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.'; }
+    else bzMeldung = bzFehlertext(e);
+  }
+  bzRender();
+}
+
+// Statuswechsel. expectedStatus ist der Stand, den das Büro gerade sieht.
+async function bzStatus(id, nach, zugewiesenId) {
+  const m = bzDaten.meldungen.find(x => String(x.id) === String(id));
+  if (!m || bzBusy[id]) return;
+  bzBusy[id] = true;
+  try {
+    const body = { nach, expectedStatus: m.status };
+    if (zugewiesenId) body.zugewiesenId = String(zugewiesenId);
+    await bzCall('POST', '/app/admin/meldungen/' + encodeURIComponent(String(id)) + '/status', body);
+    toast('Gespeichert', BZ_STATUS[nach] || '', '✅');
+  } catch (e) {
+    toast('Nicht gespeichert', bzFehlertext(e), '⚠️');
+  } finally {
+    delete bzBusy[id];
+  }
+  await bzLaden();
+}
+
+function bzMonteurOptionen(aktuell) {
+  const monteure = (state.mitarbeiter || []).filter(x => (x.rolle || '').toLowerCase() === 'monteur');
+  return '<option value="">– wählen –</option>' + monteure.map(x => {
+    const sel = String(x.id) === String(aktuell) ? ' selected' : '';
+    return `<option value="${bzEsc(x.id)}"${sel}>${bzEsc(((x.vorname || '') + ' ' + (x.nachname || '')).trim())}</option>`;
+  }).join('');
+}
+
+function bzAktionen(m) {
+  const id = JSON.stringify(String(m.id));
+  if (m.status === 'eingereicht') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen('')}</select>
+      <button class="btn btn-primary btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>In Bearbeitung setzen</button>`;
+  }
+  if (m.status === 'in_bearbeitung') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen(m.zugewiesenId)}</select>
+      <button class="btn btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>Zuweisung speichern</button>`;
+  }
+  if (m.status === 'quittiert') {
+    return `<button class="btn btn-primary btn-sm" onclick='bzStatus(${id}, "abgeschlossen")'>Abschließen</button>
+      <button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Zur Bearbeitung öffnen</button>`;
+  }
+  if (m.status === 'abgeschlossen') {
+    return `<button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Wieder öffnen</button>`;
+  }
+  return '';
+}
+
+// Zuweisung kommt aus dem Auswahlfeld derselben Karte.
+function bzStatusAusSelect(id, nach) {
+  const sel = document.getElementById('bz-z-' + id);
+  const wert = sel ? sel.value : '';
+  if (nach === 'in_bearbeitung' && !wert) { toast('Fehlende Angaben', 'Bitte einen Monteur auswählen', '⚠️'); return; }
+  bzStatus(id, nach, wert);
+}
+
+function bzVerlauf(v) {
+  if (!v || !v.length) return '<div style="font-size:12px;color:var(--muted)">Noch kein Verlauf</div>';
+  return v.map(e => {
+    const art = BZ_AKTION[e.aktion] || e.aktion;
+    return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${bzEsc(String(e.at || '').slice(0, 16).replace('T', ' '))} · ${bzEsc(art)} · ${bzEsc(BZ_STATUS[e.von] || e.von)} → ${bzEsc(BZ_STATUS[e.nach] || e.nach)} · durch ${bzEsc(bzName(e.durchId))}${e.kommentar ? ' · ' + bzEsc(e.kommentar) : ''}</div>`;
+  }).join('');
+}
+
+function bzRender() {
+  const el = document.getElementById('bz-section');
+  if (!el) return;
+  if (!bzSession) {
+    el.innerHTML = `
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Büro-Anmeldung für Rapporte und Meldungen</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Name und PIN wie bei der Anmeldung. Die Prüfung erfolgt auf dem Server.</div>
+      <input type="text" id="bz-login-name" placeholder="Name" style="margin-bottom:6px">
+      <input type="password" id="bz-login-pin" maxlength="4" inputmode="numeric" placeholder="PIN" style="margin-bottom:6px">
+      <button class="btn btn-primary" onclick="bzAnmelden()">Anmelden</button>
+      ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin-top:8px">${bzEsc(bzMeldung)}</div>` : ''}`;
+    return;
+  }
+  const baustellen = state.baustellen || [];
+  if (!bzSiteId && baustellen.length) bzSiteId = String(baustellen[0].id);
+  const siteOpts = baustellen.map(b => `<option value="${bzEsc(b.id)}"${String(b.id) === bzSiteId ? ' selected' : ''}>${bzEsc(b.name)}</option>`).join('');
+  const rapporte = bzDaten.rapporte.filter(r => String(r.siteId) === bzSiteId).sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
+  const meldungen = bzDaten.meldungen.filter(m => String(m.siteId) === bzSiteId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div><b>Angemeldet als ${bzEsc(bzSession.name)}</b></div>
+      <button class="btn btn-sm" onclick="bzAbmelden()">Abmelden</button>
+    </div>
+    <label>Baustelle</label>
+    <select id="bz-site" onchange="bzSiteId=this.value;bzRender()">${siteOpts}</select>
+    ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin:8px 0">${bzEsc(bzMeldung)}</div>` : ''}
+    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Eingereichte Arbeitsrapporte (${rapporte.length})</div>
+    ${rapporte.length ? rapporte.map(r => `
+      <div style="border-top:1px solid var(--border);padding:8px 0;font-size:13px">
+        <div><b>${bzEsc(r.datum)}</b> · ${bzEsc(r.timeStart)}–${bzEsc(r.timeEnd)} · Pause ${bzEsc(r.breakMinutes)} min${r.totalHours != null ? ' · ' + bzEsc(String(r.totalHours).replace('.', ',')) + ' h' : ''}</div>
+        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(r.autorId))} · eingereicht ${bzEsc(String(r.createdAt || '').slice(0, 16).replace('T', ' '))}</div>
+        <div style="white-space:pre-line">${bzEsc(r.workPerformed)}</div>
+        ${r.materialUsed ? `<div style="font-size:12px">Material: ${bzEsc(r.materialUsed)}</div>` : ''}
+        ${r.issues ? `<div style="font-size:12px">Probleme: ${bzEsc(r.issues)}</div>` : ''}
+        ${r.extraWork ? `<div style="font-size:12px">Extra: ${bzEsc(r.extraWork)}</div>` : ''}
+        ${r.notes ? `<div style="font-size:12px">Notizen: ${bzEsc(r.notes)}</div>` : ''}
+      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Rapporte für diese Baustelle</div>'}
+    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Baustellenmeldungen (${meldungen.length})</div>
+    ${meldungen.length ? meldungen.map(m => `
+      <div style="border-top:1px solid var(--border);padding:8px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div><b>${bzEsc(m.type)}</b> · ${bzEsc(m.message)}</div>
+          <span style="font-size:12px;font-weight:700">${bzEsc(BZ_STATUS[m.status] || m.status)}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(m.autorId))} · ${bzEsc(String(m.createdAt || '').slice(0, 16).replace('T', ' '))}${m.zugewiesenId ? ' · zugewiesen an ' + bzEsc(bzName(m.zugewiesenId)) : ''}</div>
+        ${m.quittiertAt ? `<div style="font-size:12px">Quittiert: ${bzEsc(String(m.quittiertAt).slice(0, 16).replace('T', ' '))}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${bzAktionen(m)}</div>
+        <details style="margin-top:6px"><summary style="font-size:12px;cursor:pointer">Verlauf (${(m.verlauf || []).length})</summary>${bzVerlauf(m.verlauf)}</details>
+      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Meldungen für diese Baustelle</div>'}
+    <div style="margin-top:10px"><button class="btn btn-sm" onclick="bzLaden()">↻ Aktualisieren</button></div>`;
+}
+
 function showPage(id) {
   // Admin-only Bereiche (Priorität 13): Lagerverwaltung und Fahrzeug-Inventar.
   // Gleiches Muster wie bei "einstellungen" weiter unten - verhindert auch
@@ -3417,7 +3629,7 @@ function showPage(id) {
   if (id === 'mitarbeiter') renderMitarbeiterPage();
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
-  if (id === 'meldungen') renderMeldungen();
+  if (id === 'meldungen') { renderMeldungen(); if (bzSession) bzLaden(); else bzRender(); }
   if (id === 'meinprofil') renderMeinProfil();
   if (id === 'einstellungen') {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
@@ -3642,7 +3854,7 @@ async function todoPersistMutation(mutator, opts={}) {
       try { if(typeof persisted==='string') persisted=JSON.parse(persisted); } catch(_){ persisted=null; }
       if(persisted && Array.isArray(persisted.todos)) {
         state.todos=persisted.todos; state._ts=persisted._ts||state._ts;
-        safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+        lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
       }
       renderTodoPage();
       todoPopupPruefen();
@@ -3909,7 +4121,7 @@ function renderEinstellungen() {
   el('cfg-fb-projectid', c.fbProjectId);
   el('cfg-fb-appid', c.fbAppId);
   // Claude API Key aus localStorage (NICHT in state/Firebase, bleibt lokal)
-  el('cfg-claude-apikey', localStorage.getItem('lagertool_claude_key') || '');
+  el('cfg-claude-apikey', claudeApiKeySitzung || '');
   // Kategorien-Manager: nur für Entwickler
   const katCard = document.getElementById('kat-manager-card');
   if (katCard) {
@@ -3924,8 +4136,9 @@ function renderEinstellungen() {
 
 function saveClaudeApiKey() {
   const key = document.getElementById('cfg-claude-apikey')?.value.trim() || '';
-  if (key) { localStorage.setItem('lagertool_claude_key', key); toast('Gespeichert', 'API Key lokal gespeichert', '✅'); }
-  else { localStorage.removeItem('lagertool_claude_key'); toast('Entfernt', 'API Key gelöscht', '🗑'); }
+  claudeApiKeySitzung = key || '';
+  if (key) toast('Gespeichert', 'API Key für diese Sitzung gespeichert', '✅');
+  else toast('Entfernt', 'API Key gelöscht', '🗑');
 }
 
 // ── KATEGORIEN-MANAGEMENT (nur Entwickler) ─────────────────────────────────
@@ -8632,7 +8845,6 @@ async function excelBestandReparieren(opts) {
     nachgelesen: r.status === 'geschrieben-verifiziert' ? true : (r.status.startsWith('geschrieben-') ? false : null) };
   if (res.sicherung) {
     window._letzteExcelReparatur = { sicherung: res.sicherung, geschrieben: r.status.startsWith('geschrieben-') || r.status === 'lokal-gespeichert', status: r.status };
-    try { safeStorage.setItem('lagertool_backup_excel_reparatur_' + Date.now(), JSON.stringify(res.sicherung)); } catch (_) {}
   }
   return out;
 }
@@ -9053,7 +9265,7 @@ async function wpPdfImport(file) {
     }
 
     // Scan-PDF → Claude Vision API
-    const apiKey = localStorage.getItem('lagertool_claude_key');
+    const apiKey = claudeApiKeySitzung;
     if (!apiKey) return toast('API Key benötigt', 'Gescanntes PDF erkannt. Bitte Claude API Key unter ⚙️ Einstellungen hinterlegen.', '🔑');
 
     toast('PDF Import', 'Scan erkannt – sende an Claude Vision…', '🤖');
@@ -10018,6 +10230,7 @@ function showBsModal(id) {
   if (mtEl) mtEl.value = bs?.montageTyp||'';
   document.getElementById('bs-ap-name').value = bs?.apName||'';
   document.getElementById('bs-ap-tel').value = bs?.apTel||'';
+  document.getElementById('bs-ap-tel-freigabe').checked = bs?.apTelFreigegeben===true;
   document.getElementById('bs-ap-email').value = bs?.apEmail||'';
   document.getElementById('bs-hotel-name').value = bs?.hotelName||'';
   document.getElementById('bs-hotel-adresse').value = bs?.hotelAdresse||'';
@@ -10590,6 +10803,7 @@ function bsFormAlsDaten() {
     montageDetail: document.getElementById('bs-montageDetail').value.trim(),
     apName: document.getElementById('bs-ap-name').value.trim(),
     apTel: document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben: document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail: document.getElementById('bs-ap-email').value.trim(),
     material: document.getElementById('bs-material').value.trim(),
     werkzeug: document.getElementById('bs-werkzeug').value.trim(),
@@ -10870,6 +11084,7 @@ async function saveBsModal() {
     montageTyp:document.getElementById('bs-montageArt').value,
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben:document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail:document.getElementById('bs-ap-email').value.trim(),
     parkplatz:document.getElementById('bs-parkplatz').value.trim(),
     zufahrt:document.getElementById('bs-zufahrt').value.trim(),
@@ -11500,7 +11715,7 @@ function saveFirebaseConfig() {
   if (k) state.config.fbApiKey    = k.value.trim();
   if (p) state.config.fbProjectId = p.value.trim();
   if (a) state.config.fbAppId     = a.value.trim();
-  safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+  lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
 }
 
 function applyFirebaseConfig() {
@@ -11525,16 +11740,7 @@ function initFirebase(url, key, pid, appid) {
   window._fbPid = pid;
   try {
     firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
-    console.log('[Firebase] app initialized');
-    firebase.auth().signInAnonymously()
-      .then(() => {
-        console.log('[Firebase] anonym angemeldet');
-        startFirebaseListener();
-      })
-      .catch((err) => {
-        console.error('[Firebase] Anmeldung fehlgeschlagen', err);
-        toast('Firebase Anmeldung fehlgeschlagen', err.message || '', '⚠️');
-      });
+    console.log('[Firebase] app initialized (ohne Anmeldung, wartet auf Büro-Login)');
   } catch (e) {
     console.error('[Firebase] init error', e);
   }
@@ -11626,7 +11832,7 @@ function startFirebaseListener() {
           migrationMeldungenMaIdReparatur();
           migrationTodoNotizMerge();
           markFirebaseSynced();
-          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+          lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
           renderAll();
           try { todoNachRemoteSync(); } catch (_) {}
           setTimeout(updateMeldungenBadge, 100);
@@ -11655,7 +11861,8 @@ function startFirebaseListener() {
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
     }, (err) => {
-      console.error('[Firebase] listener error', err);
+      console.error('[Firebase] listener error');
+      if (currentLoginUser) officeSitzungAbgelaufen();
       showSyncIndicator('❌ ' + err.message);
     });
     const statusEl = document.getElementById('fb-status');
@@ -11672,7 +11879,7 @@ function startFirebaseListener() {
 // ── FAHRZEUGHISTORIE EXPORT ─────────────────────────────
 // NOTFALL: zeigt den aktuellen localStorage-Inhalt zur Rettung/Diagnose an
 function notfallDatenAnzeigen() {
-  const raw = safeStorage.getItem('lagertool');
+  const raw = null;
   if (!raw) { alert('Kein lokaler Datenbestand gefunden.'); return; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch(e) { alert('Daten beschädigt: ' + e.message); return; }
@@ -11790,14 +11997,11 @@ function exportFzgHistorie() {
 // ── SYNC FÜR MONTEUR-APP ────────────────────────────────
 function officeSyncExport() {
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
-  const data = safeStorage.getItem('lagertool');
+  const data = null;
   if (!data) return toast('Fehler','Keine Daten','⚠️');
   // Speichere unter einem zweiten Key den die Monteur-App auch lesen kann
   // Versuche alle möglichen Storage-Keys
-  try {
-    safeStorage.setItem('lagertool_sync', data);
-    safeStorage.setItem('lagertool_sync_ts', Date.now().toString());
-  } catch(e) {}
+  // Kein Schreiben in den Browser-Speicher (vertrauliche Daten bleiben im Worker bzw. im Speicher der Sitzung).
   // Download als JSON-Datei für manuellen Import
   const blob = new Blob([data], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -11996,7 +12200,7 @@ function importData(e) {
       markFirebaseSynced();
       // Schlanke Daten nach localStorage (72KB statt 29MB), Docs nach IndexedDB
       const slimJson = JSON.stringify(stripLargeData(state));
-      safeStorage.setItem('lagertool', slimJson);
+      lagertoolKeinCache( slimJson);
       saveDocsToIDB(state);
       renderAll();
 
@@ -13389,7 +13593,7 @@ function forceSave() {
   state._ts = Date.now();
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   if (dbRef) {
     const btn = document.getElementById('btn-force-save');
