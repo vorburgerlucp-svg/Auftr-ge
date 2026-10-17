@@ -1,4 +1,4 @@
-const SW_VERSION = 'lagertool-todo-push-2026-09-29';
+const SW_VERSION = 'lagertool-monteur-assistant-2026-10-17';
 self.addEventListener('install', event => { self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(self.clients.claim()); });
 

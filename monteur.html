@@ -540,6 +540,7 @@ window.addEventListener('load', function () {
 });
 
 function onSessionEnded() {
+  window.MonteurAssistant?.reset();
   if (!currentLoginUser) return;
   currentLoginUser = null;
   state = emptyState();
@@ -659,6 +660,7 @@ async function doLogin() {
 }
 
 function doLogout() {
+  window.MonteurAssistant?.reset();
   currentLoginUser = null;
   MonteurApi.endSession();
   state = emptyState();
@@ -668,6 +670,7 @@ function doLogout() {
 }
 
 function finishLogin() {
+  window.MonteurAssistant?.show();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('header-name').textContent = currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'');
   showPage('bestellung');
@@ -2161,5 +2164,6 @@ function renderProfil() {
 }
 
 </script>
+<script src="monteur-assistant.js"></script>
 </body>
 </html>
