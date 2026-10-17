@@ -22,7 +22,13 @@
     wrong_site: 'Die Baustelle ist nicht bekannt.',
     not_found: 'Nicht gefunden.',
     conflict: 'Dieser Vorgang wurde bereits mit anderen Daten gesendet.',
-    incomplete: 'Bitte alle Pflichtfelder ausfüllen.'
+    incomplete: 'Bitte alle Pflichtfelder ausfüllen.',
+    assistant_unavailable: 'Der Assistent ist vorübergehend nicht erreichbar. Bitte erneut versuchen.',
+    invalid_preview: 'Die Berichtvorschau ist abgelaufen oder ungültig. Bitte erneut prüfen.',
+    save_failed: 'Der Bericht wurde nicht als gespeichert bestätigt. Bitte erneut versuchen.',
+    verification_failed: 'Die Speicherung konnte nicht bestätigt werden. Bitte den Bericht prüfen.',
+    document_not_found: 'Das Dokument fehlt oder ist nicht mehr freigegeben.',
+    invalid_date: 'Bitte ein gültiges Datum angeben.'
   };
 
   class ApiError extends Error {
@@ -50,7 +56,7 @@
     return 'req-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  async function send(path, method, body, query, { retryNetwork = false, keepSessionOn401 = false } = {}) {
+  async function send(path, method, body, query, { retryNetwork = false, keepSessionOn401 = false, binary = false } = {}) {
     const url = baseUrl + path + (query ? '?' + new URLSearchParams(query).toString() : '');
     const headers = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -60,9 +66,10 @@
     try {
       res = await global.fetch(url, init);
     } catch (e) {
-      if (retryNetwork) return send(path, method, body, query, { retryNetwork: false, keepSessionOn401 });
+      if (retryNetwork) return send(path, method, body, query, { retryNetwork: false, keepSessionOn401, binary });
       throw new ApiError(0, 'network', null);
     }
+    if (res.ok && binary) return res.blob();
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
     if (res.status === 401 && !keepSessionOn401 && token) {
@@ -93,6 +100,7 @@
       return { expiresIn: data.expiresIn };
     },
 
+    downloadDocument(siteId, documentId) { return send('/app/monteur/dokument', 'GET', undefined, { siteId, documentId }, { binary: true }); },
     get(path, query) { return send(path, 'GET', undefined, query); },
     post(path, body) { return send(path, 'POST', body, null, { retryNetwork: true }); }
   };
