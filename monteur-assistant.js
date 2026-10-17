@@ -64,9 +64,9 @@
       result.append(button('Pläne',()=>ask({tool:'site_documents',args:{siteId:data.siteId}})));
     }
     if(data.kind==='ride')for(const ride of data.carpools||[]){
-      const card=el('article');line(card,'Fahrer',ride.driver||'nicht hinterlegt');
-      line(card,'Mitfahrer',(ride.companions||[]).map(c=>c.name).join(', ')||'keine weiteren Teilnehmer hinterlegt');
-      line(card,'Fahrzeug',[ride.vehicle?.name,ride.vehicle?.plate].filter(Boolean).join(' · ')||'nicht hinterlegt');point(card,ride.meetingPoint);
+      const card=el('article');card.append(el('h3',ride.siteName||'Baustelle'));
+      line(card,'Mit dir zugeordnet',(ride.companions||[]).map(c=>c.name).join(', ')||'kein weiterer Monteur zugeordnet');
+      line(card,'Dein zugeordnetes Fahrzeug',[ride.vehicle?.name,ride.vehicle?.plate].filter(Boolean).join(' · ')||'nicht hinterlegt');point(card,ride.meetingPoint);
       for(const w of ride.warnings||[])card.append(el('p',w));result.append(card);
     }
     if(data.kind==='choose_site')for(const s of data.choices)result.append(button(s.name,()=>ask({tool:data.tool,args:{...data.args,siteId:s.id}})));
