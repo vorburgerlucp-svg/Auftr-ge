@@ -32,6 +32,25 @@ function jsonRes(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+test('document download uses the existing session and returns binary data', async () => {
+  let seen;
+  const api=load(async(url,init)=>{
+    if(url.endsWith('/anmelden'))return jsonRes(200,{sessionToken:'document-session'});
+    seen={url,init};return new Response('PDF bytes',{headers:{'Content-Type':'application/pdf'}});
+  });
+  api.configure({baseUrl:'https://w.test'});await api.login('x','1234');
+  assert.equal(typeof api.downloadDocument,'function');
+  const blob=await api.downloadDocument('site a','doc/1');
+  assert.equal(await blob.text(),'PDF bytes');assert.equal(seen.init.headers.Authorization,'Bearer document-session');
+  assert.equal(seen.url,'https://w.test/app/monteur/dokument?siteId=site+a&documentId=doc%2F1');
+});
+
+test('denied document download never produces a blob',async()=>{
+  const api=load(async url=>url.endsWith('/anmelden')?jsonRes(200,{sessionToken:'t'}):jsonRes(404,{error:'document_not_found'}));
+  await api.login('x','1234');assert.equal(typeof api.downloadDocument,'function');
+  await assert.rejects(api.downloadDocument('a','private'),e=>e.code==='document_not_found');
+});
+
 test('login keeps the session only in memory and never touches browser storage', async () => {
   const api = load(async () => jsonRes(200, { ok: true, sessionToken: 'tok-1', expiresIn: 28800 }));
   const r = await api.login('Patrick Härter', '4821');
