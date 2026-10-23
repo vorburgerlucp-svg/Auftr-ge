@@ -8,7 +8,22 @@
   function line(parent,label,value){if(value!==null&&value!==undefined&&value!=='')parent.append(el('p',label+': '+value));}
   function fields(parent,data,keys){for(const k of keys)line(parent,labels[k]||k,data[k]);}
   function point(parent,p){line(parent,'Treffpunkt',p?.place||'nicht hinterlegt');line(parent,'Treffpunktzeit',p?.time||'nicht hinterlegt');}
-  function contacts(parent,list){for(const c of list||[])line(parent,'Ansprechpartner',[c.name,c.telefon].filter(Boolean).join(' · '));}
+  function contacts(parent,list){
+    for(const c of list||[]){
+      const row=el('p');
+      const who=[c.name,c.rolle].filter(Boolean).join(' · ');
+      row.append(document.createTextNode('Ansprechpartner: '+who));
+      // Nur Telefonnummern, die der Server ausdrücklich für den Monteur freigegeben hat.
+      if(c.telefon){
+        const number=String(c.telefon);
+        const dial=el('a',' · '+number);
+        dial.href='tel:'+number.replace(/[^0-9+]/g,'');
+        dial.style.marginLeft='4px';
+        row.append(dial);
+      }
+      parent.append(row);
+    }
+  }
   function failure(e){errorBox.replaceChildren(el('p',global.MonteurApi.messageFor(e)));}
   function setBusy(value){busy=value;for(const b of controls){if(b.isConnected===false)controls.delete(b);else b.disabled=value;}input.disabled=value;}
   function reportForm(data){
@@ -99,11 +114,19 @@
     launcher=button('Assistent',()=>{panel.hidden=!panel.hidden;if(!panel.hidden)input.focus();});launcher.id='monteur-assistant-launch';launcher.hidden=true;
     panel=el('section');panel.id='monteur-assistant';panel.hidden=true;panel.setAttribute('aria-label','Monteur-Assistent');
     panel.append(el('h2','Dein Assistent'),button('Schliessen',()=>{panel.hidden=true;}));
-    panel.append(el('p','Deine Einsätze, Pläne und Berichte.'));
+    panel.append(el('p','Frage mich nach deinen Baustellen, Adressen, Kontakten, Arbeitsbeginn, Plänen oder Berichten. Die Antworten kommen aus dem LagerTool – ohne zusätzliche KI.'));
     const shortcuts=el('div');shortcuts.style.display='grid';shortcuts.style.gridTemplateColumns='repeat(2,minmax(0,1fr))';
-    for(const [label,command] of [['Wo bin ich morgen?',{tool:'my_assignments',args:{date:'morgen'}}],['Baustelleninformationen',{tool:'site_info',args:{}}],['Zeige mir die Pläne',{tool:'site_documents',args:{}}],['Mit wem fahre ich morgen?',{tool:'my_ride',args:{date:'morgen'}}],['Bericht ablegen',{tool:'report_draft',args:{}}]])shortcuts.append(button(label,()=>ask(command)));
+    for(const [label,command] of [
+      ['Mein Einsatz morgen',{tool:'my_assignments',args:{date:'morgen'}}],
+      ['Adresse meiner Baustelle',{tool:'site_info',args:{focus:'address'}}],
+      ['Projektleitung / Telefon',{tool:'site_info',args:{focus:'contacts'}}],
+      ['Montageinformationen',{tool:'site_info',args:{focus:'work'}}],
+      ['Pläne anzeigen',{tool:'site_documents',args:{}}],
+      ['Mit wem fahre ich?',{tool:'my_ride',args:{date:'morgen'}}],
+      ['Bericht erfassen',{tool:'report_draft',args:{}}]
+    ])shortcuts.append(button(label,()=>ask(command)));
     panel.append(shortcuts);
-    const label=el('label','Deine Anfrage');input=el('textarea');input.id='assistant-message';input.maxLength=4000;label.append(input);panel.append(label);
+    const label=el('label','Deine Anfrage');input=el('textarea');input.id='assistant-message';input.maxLength=4000;input.placeholder='z. B. Adresse Mercedes Schlieren oder Wer ist die Projektleitung?';input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const message=input.value.trim();if(message)ask({message});}});label.append(input);panel.append(label);
     panel.append(button('Senden',()=>{const message=input.value.trim();if(message)return ask({message});}));
     errorBox=el('div');errorBox.id='assistant-errors';errorBox.setAttribute('role','alert');result=el('div');result.id='assistant-result';result.setAttribute('aria-live','polite');panel.append(errorBox,result);
     document.body.append(launcher,panel);
