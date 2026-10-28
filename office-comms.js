@@ -3,7 +3,7 @@
 'use strict';
 const kinds={vehicle_service:'Fahrzeug-Service',vehicle_repair:'Fahrzeug-Reparatur',
   tool_repair:'Werkzeug-Reparatur',material_request:'Materialanfrage',
-  site_issue:'Baustellenproblem',general:'Nachricht'};
+  site_issue:'Baustellenproblem',general:'Nachricht',document_upload:'Dokument zur Prüfung'};
 const statusValues=['neu','in_bearbeitung','terminiert','bereit','erledigt','abgelehnt'];
 let requests=[],seen=new Set(),ready=false,loading=false,loginError='',viewVersion=0;
 const node=(tag,text)=>{const e=document.createElement(tag);if(text!=null)e.textContent=String(text);return e;};
@@ -56,6 +56,23 @@ function render(){
     card.append(node('h3',(kinds[item.kind]||item.kind)+' · '+(item.targetLabel||'Allgemein')));
     const meta=node('small','Von: '+(item.authorName||item.employeeId)+' · '+item.createdAt+' · '+item.status);
     card.append(meta,row('Anfrage',item.message));
+    if(item.kind==='document_upload'&&item.attachment){
+      const attachment=btn('📎 '+(item.attachment.fileName||'Datei')+' herunterladen',async()=>{
+        try{
+          if(!active())throw Error('not_authorized');
+          const response=await fetch(BZ_WORKER+'/app/admin/upload/'+encodeURIComponent(item.id),{
+            method:'GET',headers:{Authorization:'Bearer '+bzSession.token},
+            credentials:'omit',cache:'no-store'});
+          if(!response.ok)throw Error('download_failed');
+          const data=await response.blob(),url=URL.createObjectURL(data);
+          const a=node('a');a.href=url;a.download=String(item.attachment.fileName||'Dokument')
+            .replace(/[\\/<>:"|?*]/g,'_');
+          document.body.append(a);a.click();a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url),120000);
+        }catch{if(typeof toast==='function')toast('Download fehlgeschlagen','Büro-Berechtigung und Datei prüfen','⚠️');}
+      });
+      card.append(attachment);
+    }
     if(item.reply)card.append(row('Letzte Rückmeldung',item.reply));
     if(['erledigt','abgelehnt'].includes(item.status)){
       card.append(node('p','Abgeschlossen – Original bleibt gespeichert.'));root.append(card);continue;
