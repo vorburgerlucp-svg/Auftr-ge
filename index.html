@@ -504,6 +504,7 @@
     <button class="nav-btn" onclick="officeSyncExport()" title="Daten für Monteur-App exportieren">📱 Sync</button>
     <button class="nav-btn" onclick="showPage('einstellungen')">⚙️</button>
     <button class="nav-btn" onclick="showPage('rapporte')">📋 Rapporte</button>
+    <button class="nav-btn" id="nav-anfragen" onclick="showPage('anfragen')">📬 Anfragen <span id="bz-anfragen-count"></span></button>
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
       Meldungen<span id="meldungen-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center">0</span>
     </button>
@@ -879,6 +880,12 @@
   <h2>📋 Arbeitsrapporte der Monteure</h2>
   <p class="subtitle">Eigene Rubrik: Rapporte, Einreicher und Zeitpunkt – für gezielte Rückfragen</p>
   <div id="bz-rapporte-section" class="card" style="margin-bottom:14px"></div>
+</div>
+
+<div id="page-anfragen" class="page">
+  <h2>📬 Monteur-Anfragen</h2>
+  <p class="subtitle">Service, Reparatur, Material und Rückmeldungen – nach Person und Auftrag nachvollziehbar.</p>
+  <div id="bz-anfragen-section" class="card"></div>
 </div>
 
 <div id="page-meldungen" class="page">
@@ -14591,6 +14598,6 @@ function gptToggleSpeech(){
 // PWA/Push-Grundregistrierung: keine Berechtigungsabfrage ohne Benutzeraktion.
 window.addEventListener('load',()=>{ todoServiceWorker().then(()=>todoPushStatusAktualisieren()).catch(()=>{}); todoHandleDeepLink(); setTimeout(todoPopupPruefen,500); });
 </script>
-
+<script src="office-comms.js"></script>
 
 </body></html>
