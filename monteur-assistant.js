@@ -117,10 +117,10 @@
       if(['materialUsed','issues','extraWork','notes'].includes(k))n.maxLength=3000;
       if(k==='workPerformed')n.maxLength=5000;
       if(k==='rapportDate')n.type='date';if(k==='timeStart'||k==='timeEnd')n.type='time';if(k==='breakMinutes'){n.type='number';n.min='0';n.max='600';}
-      label.append(n);
-      if(k==='workPerformed'||k==='notes')addDictation(label,n,'assistant-voice-report-'+k,
+      label.append(n);result.append(label);
+      if(k==='workPerformed'||k==='notes')addDictation(result,n,'assistant-voice-report-'+k,
         k==='workPerformed'?'Arbeiten diktieren':'Notizen diktieren');
-      result.append(label);values[k]=n;
+      values[k]=n;
     }
     if(data.missingFields?.length)result.append(el('p','Noch erforderlich: '+data.missingFields.map(k=>labels[k]||k).join(', ')));
     if(data.errors?.length){
