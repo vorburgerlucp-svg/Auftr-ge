@@ -18,7 +18,7 @@ test('no Firebase, Realtime Database or EmailJS in the monteur app', () => {
 
 test('monteur app loads only its own worker client, no other remote scripts', () => {
   const srcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(srcs, ['monteur-api.js', 'monteur-assistant.js']);
+  assert.deepEqual(srcs, ['monteur-api.js', 'pilot-config.js', 'monteur-assistant.js']);
 });
 
 test('no whole-state persistence and no PIN storage', () => {
