@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LagerTool Pilot – Büro-Kommunikation</title>
+<style>
+:root{font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#213b33;background:#eef4f0}
+*{box-sizing:border-box}body{margin:0;padding:20px}main{max-width:920px;margin:0 auto}
+header{background:#fff;padding:22px;border-radius:16px;box-shadow:0 3px 20px #143b2520;margin-bottom:16px}
+h1{font-size:1.65rem;margin:0 0 6px}h2{font-size:1.25rem;margin:0 0 6px}h3{margin:0 0 8px;font-size:1.08rem}
+.subtitle{color:#586c64;margin:0 0 14px}.card{background:#fff;padding:22px;border-radius:16px;box-shadow:0 3px 20px #143b2515}
+input,textarea,select{display:block;width:100%;min-height:42px;padding:9px 11px;border:1px solid #adc7b9;border-radius:8px;margin:4px 0 10px;font:inherit}
+textarea{resize:vertical}label{font-size:.92rem;font-weight:600}
+button,.btn{border:1px solid #a6c1b1;border-radius:9px;padding:10px 15px;background:#eaf4ee;color:#184732;font-weight:600;cursor:pointer}
+.btn-primary{background:#23694e;border-color:#23694e;color:#fff}.btn-sm{font-size:.91rem;margin:4px 6px 4px 0}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+#notifications{position:fixed;right:16px;top:16px;z-index:100;max-width:350px}
+#notifications>div{background:#fff;border:2px solid #27875c;box-shadow:0 8px 30px #0003;padding:15px;border-radius:12px;margin-bottom:6px}
+.notice{font-size:.9rem;color:#51685c}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>📬 LagerTool – Büro-Kommunikation</h1>
+  <p class="subtitle">Isolierte Testversion · Nur Monteur-Anfragen und Rückmeldungen · Keine Verbindung zur produktiven LagerTool-Datenbank</p>
+  <nav>
+    <button id="nav-anfragen" type="button">Anfragen <span id="bz-anfragen-count"></span></button>
+    <button type="button" onclick="window.location.reload()">Abmelden / neu starten</button>
+  </nav>
+</header>
+<div id="page-anfragen" class="active">
+  <h2>Neue Meldungen, Reparaturen und Material</h2>
+  <p class="subtitle">Büroantworten erscheinen automatisch im Postfach des jeweiligen Monteurs.</p>
+  <div id="bz-anfragen-section" class="card"></div>
+</div>
+</main>
+<div id="notifications" aria-live="polite"></div>
+<script>
+const BZ_WORKER='https://auftragstool-ai-monteur-pilot.vorburgerluc-p.workers.dev';
+let bzSession=null;
+async function bzCall(method,path,body){
+  const result=await fetch(BZ_WORKER+path,{
+    method,credentials:'omit',cache:'no-store',
+    headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),
+      ...(bzSession?{Authorization:'Bearer '+bzSession.token}:{})},
+    body:body!==undefined?JSON.stringify(body):undefined
+  });
+  let data={};try{data=await result.json();}catch{}
+  if(!result.ok){
+    if(result.status===401)bzSession=null;
+    throw {code:data.error||'http_error',status:result.status};
+  }
+  return data;
+}
+async function bzLaden(){return;}
+function toast(title,message){
+  const box=document.getElementById('notifications'),n=document.createElement('div');
+  const strong=document.createElement('strong'),p=document.createElement('p');
+  strong.textContent=title;p.textContent=message;n.append(strong,p);box.append(n);
+  setTimeout(()=>n.remove(),12000);
+}
+</script>
+<script src="office-comms.js"></script>
+</body>
+</html>
