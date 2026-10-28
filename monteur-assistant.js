@@ -231,14 +231,267 @@
     }catch(e){if(generation===epoch)failure(e);}
     finally{if(generation===epoch)setBusy(false);}
   }
+
+  // Einfache Monteur-Navigation: grosse Auswahl statt Kommandos eintippen.
+  const SECTIONS={
+    baustellen:[['Mein Einsatz heute',()=>ask({tool:'my_assignments',args:{date:'heute'}})],
+      ['Mein Einsatz morgen',()=>ask({tool:'my_assignments',args:{date:'morgen'}})],
+      ['Baustellenadresse',()=>ask({tool:'site_info',args:{focus:'address'}})],
+      ['Tagesrapport',()=>ask({tool:'report_draft',args:{}})],
+      ['Mangel / Problem melden',()=>requestForm('site_issue')]],
+    fahrzeuge:[['Service anfragen',()=>requestForm('vehicle_service')],
+      ['Reparatur melden',()=>requestForm('vehicle_repair')],
+      ['Fahrzeug-Services',()=>fleetOverview()]],
+    werkzeuge:[['Werkzeug defekt',()=>requestForm('tool_repair')],
+      ['Werkzeug zurückgeben',()=>toolReturn()],
+      ['Werkzeugübersicht',()=>toolOverview()]],
+    bestellungen:[['Material bestellen',()=>materialOrder()],
+      ['Material anfragen',()=>requestForm('material_request')],
+      ['Meine Bestellungen',()=>ownOrders()]],
+    dokumente:[['Pläne anzeigen',()=>ask({tool:'site_documents',args:{}})],
+      ['Dokument hochladen',()=>uploadInformation()]],
+    postfach:[['Meine Nachrichten',()=>showInbox()],
+      ['Allgemeine Anfrage',()=>requestForm('general')]]
+  };
+  let sectionMenu=null, inboxTimer=null, noticeBox=null, lastNotified=new Set();
+  function header(content){
+    result.replaceChildren(el('h3',content));
+    const back=button('← Zur Übersicht',()=>showHome());
+    back.className='assistant-back';result.append(back);
+    return result;
+  }
+  function showHome(){
+    sectionMenu.hidden=false;
+    result.replaceChildren(el('p','Wähle oben einen Bereich. Du musst keine Befehle schreiben.'));
+  }
+  function showSection(section){
+    sectionMenu.hidden=true;header(({baustellen:'Baustellen',fahrzeuge:'Fahrzeuge',
+      werkzeuge:'Werkzeuge',bestellungen:'Bestellungen',dokumente:'Dokumente',postfach:'Nachrichten'})[section]||section);
+    const grid=el('div');grid.className='assistant-actions';
+    for(const [name,action] of SECTIONS[section])grid.append(button(name,action));
+    result.append(grid);
+  }
+  function formField(parent,title,tag='input'){
+    const label=el('label',title);
+    const control=el(tag);if(tag==='textarea'){control.rows=4;control.maxLength=1500;}
+    label.append(control);parent.append(label);return control;
+  }
+  function populate(parent,items,title){
+    const label=el('label',title),select=el('select');
+    for(const item of items){const opt=el('option',item.label);opt.value=String(item.id);select.append(opt);}
+    label.append(select);parent.append(label);return select;
+  }
+  async function requestForm(kind){
+    sectionMenu.hidden=true;
+    header(({vehicle_service:'Fahrzeug-Service anfragen',vehicle_repair:'Fahrzeug-Reparatur',
+      tool_repair:'Werkzeug-Reparatur',material_request:'Material anfragen',
+      site_issue:'Baustellenproblem melden',general:'Nachricht ans Büro'})[kind]);
+    const generation=epoch;
+    try{
+      let targets=[],sites=[];
+      if(kind.startsWith('vehicle_')){
+        const data=await global.MonteurApi.get('/app/monteur/fleet');
+        targets=(data.fahrzeuge||[]).map(v=>({id:v.id,label:[v.name,v.schild].filter(Boolean).join(' · ')}));
+      }else if(kind==='tool_repair'){
+        const data=await global.MonteurApi.get('/app/monteur/werkzeuge');
+        targets=(data.werkzeuge||[]).filter(w=>w.verantwortlich!=='andere')
+          .map(w=>({id:w.id,label:w.name+(w.status&&w.status!=='ok'?' ('+w.status+')':'')}));
+      }
+      if(kind==='site_issue'){
+        const data=await global.MonteurApi.get('/app/monteur/sites');
+        sites=(data.sites||[]).map(v=>({id:v.id,label:v.name}));
+      }
+      if(generation!==epoch)return;
+      if((kind.startsWith('vehicle_')||kind==='tool_repair')&&!targets.length){
+        result.append(el('p','Keine passenden Fahrzeuge oder Werkzeuge im Testbestand.'));return;
+      }
+      if(kind==='site_issue'&&!sites.length){
+        result.append(el('p','Keine zugewiesene Baustelle vorhanden.'));return;
+      }
+      const form=el('div');
+      const select=targets.length?populate(form,targets,kind==='tool_repair'?'Welches Werkzeug?':'Welches Fahrzeug?'):null;
+      const siteSelect=sites.length?populate(form,sites,'Welche Baustelle?'):null;
+      const details=formField(form,'Kurze Nachricht ans Büro','textarea');
+      const defaults={vehicle_service:'Service nötig. Bitte Termin bestätigen.',
+        vehicle_repair:'Fahrzeug benötigt eine Reparatur.',
+        tool_repair:'Werkzeug defekt, bitte Reparatur organisieren.',
+        material_request:'Ich benötige folgendes Material: ',
+        site_issue:'Auf der Baustelle ist Folgendes passiert: ',
+        general:''};
+      details.value=defaults[kind]||'';
+      const submit=button('Anfrage senden',async()=>{
+        if(details.value.trim().length<3){failure(new Error('Bitte kurz beschreiben, was benötigt wird.'));return;}
+        setBusy(true);
+        try{
+          const body={requestId:global.MonteurApi.newRequestId(),kind,message:details.value.trim()};
+          if(select)body.targetId=select.value;
+          if(siteSelect)body.siteId=siteSelect.value;
+          const data=await global.MonteurApi.post('/app/monteur/requests',body);
+          if(!data.ok)throw Error('Anfrage nicht bestätigt');
+          await showInbox('Anfrage ans Büro gesendet. Die Antwort erscheint hier im Postfach.');
+        }catch(e){failure(e);}
+        finally{setBusy(false);}
+      });
+      form.append(submit);
+      result.append(form);
+    }catch(e){failure(e);}
+  }
+  function requestCard(parent,record){
+    const card=el('article');
+    card.append(el('h3',record.targetLabel||record.kind));
+    line(card,'Anfrage',record.message);
+    line(card,'Status',record.status);
+    line(card,'Antwort Büro',record.reply);
+    if(record.appointmentDate)line(card,'Termin',[record.appointmentDate,record.appointmentTime].filter(Boolean).join(' · '));
+    line(card,'Bereit im Fach / Standort',record.pickupLocation);
+    line(card,'Aktualisiert',record.updatedAt);
+    if(record.version>record.ackVersion)card.append(button('✓ Gelesen',async()=>{
+      try{
+        await global.MonteurApi.post('/app/monteur/requests/'+encodeURIComponent(record.id)+'/ack',{version:record.version});
+        await showInbox();
+      }catch(e){failure(e);}
+    }));
+    parent.append(card);
+  }
+  async function showInbox(message=''){
+    sectionMenu.hidden=true;header('Meine Nachrichten');
+    if(message)result.append(el('p',message));
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/requests');
+      const own=data.requests||[];
+      if(!own.length)result.append(el('p','Noch keine Anfragen oder Antworten vorhanden.'));
+      for(const r of own)requestCard(result,r);
+    }catch(e){failure(e);}
+  }
+  async function checkMessages(){
+    if(!global.MonteurApi?.hasSession())return;
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/requests');
+      const unread=(data.requests||[]).filter(r=>r.version>r.ackVersion&&!lastNotified.has(r.id+':'+r.version));
+      if(!unread.length)return;
+      for(const r of unread)lastNotified.add(r.id+':'+r.version);
+      noticeBox?.remove();
+      noticeBox=el('div');
+      noticeBox.className='assistant-notice';
+      noticeBox.setAttribute('role','status');
+      noticeBox.append(el('strong','📬 Neue Antwort vom Büro'));
+      const r=unread[0];noticeBox.append(el('p',[r.targetLabel||r.kind,r.reply||r.status].join(' · ')));
+      noticeBox.append(button('Nachricht ansehen',()=>{noticeBox.remove();noticeBox=null;panel.hidden=false;showInbox();}));
+      noticeBox.append(button('Später',()=>{noticeBox.remove();noticeBox=null;}));
+      document.body.append(noticeBox);
+    }catch{/* connection errors should not interrupt the Monteur's current work */}
+  }
+  function startInboxPolling(){
+    if(inboxTimer)global.clearInterval(inboxTimer);
+    lastNotified=new Set();
+    checkMessages();
+    inboxTimer=global.setInterval(checkMessages,60000);
+  }
+  function stopInboxPolling(){
+    if(inboxTimer)global.clearInterval(inboxTimer);
+    inboxTimer=null;noticeBox?.remove();noticeBox=null;lastNotified.clear();
+  }
+  async function fleetOverview(){
+    sectionMenu.hidden=true;header('Fahrzeuge und Services');
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/fleet');
+      for(const v of data.fahrzeuge||[]){
+        const card=el('article');card.append(el('h3',[v.name,v.schild].filter(Boolean).join(' · ')));
+        const next=(v.services||[]).filter(s=>s.typ==='reminder'&&s.reminderDate).sort((a,b)=>a.reminderDate.localeCompare(b.reminderDate));
+        if(next.length)for(const service of next.slice(0,3))line(card,'Service-Erinnerung',service.reminderDate+' – '+service.beschreibung);
+        card.append(button('Service anfragen',()=>requestForm('vehicle_service')));
+        result.append(card);
+      }
+    }catch(e){failure(e);}
+  }
+  async function toolOverview(){
+    sectionMenu.hidden=true;header('Werkzeuge');
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/werkzeuge');
+      for(const tool of data.werkzeuge||[]){
+        const card=el('article');card.append(el('strong',tool.name));
+        line(card,'Status',tool.status);line(card,'Verantwortlich',tool.verantwortlich||'noch nicht zugeteilt');
+        result.append(card);
+      }
+    }catch(e){failure(e);}
+  }
+  async function toolReturn(){
+    sectionMenu.hidden=true;header('Werkzeug zurückgeben');
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/werkzeuge');
+      const list=(data.werkzeuge||[]).filter(w=>w.verantwortlich==='ich');
+      if(!list.length){result.append(el('p','Du hast kein Werkzeug als ausgegeben hinterlegt.'));return;}
+      const form=el('div'),select=populate(form,list.map(w=>({id:w.id,label:w.name})),'Werkzeug');
+      const shelf=formField(form,'Rückgabeort (optional)');shelf.placeholder='z. B. Lager Allschwil';
+      form.append(button('Rückgabe bestätigen',async()=>{
+        try{
+          const out=await global.MonteurApi.post('/app/monteur/werkzeug/bewegung',{
+            werkzeugId:select.value,aktion:'rueckgabe',lagerort:shelf.value,requestId:global.MonteurApi.newRequestId()
+          });
+          if(out.ok){header('Rückgabe bestätigt');result.append(el('p','Werkzeug wurde als zurückgegeben verbucht.'));}
+        }catch(e){failure(e);}
+      }));
+      result.append(form);
+    }catch(e){failure(e);}
+  }
+  async function materialOrder(){
+    sectionMenu.hidden=true;header('Material bestellen');
+    try{
+      const [products,sites]=await Promise.all([global.MonteurApi.get('/app/monteur/artikel'),
+        global.MonteurApi.get('/app/monteur/sites')]);
+      if(!products.artikel?.length){result.append(el('p','Kein Artikelkatalog hinterlegt. Material kannst du als freie Anfrage senden.'));result.append(button('Material anfragen',()=>requestForm('material_request')));return;}
+      const form=el('div'),article=populate(form,products.artikel.map(x=>({id:x.id,label:x.name+' · '+x.einheit})),'Artikel');
+      const qty=formField(form,'Menge');qty.type='number';qty.min='1';qty.max='10000';qty.value='1';
+      const site=populate(form,[{id:'',label:'Ohne Baustellenbezug'},...(sites.sites||[]).map(x=>({id:x.id,label:x.name}))],'Baustelle');
+      const note=formField(form,'Bemerkung (optional)');note.placeholder='z. B. dringend für morgen';
+      form.append(button('Bestellung absenden',async()=>{
+        const menge=Number(qty.value);
+        if(!Number.isInteger(menge)||menge<1||menge>10000){failure(new Error('Bitte gültige Stückzahl eingeben.'));return;}
+        try{
+          const r=await global.MonteurApi.post('/app/monteur/bestellung',{
+            requestId:global.MonteurApi.newRequestId(),items:[{artikelId:article.value,menge}],
+            siteId:site.value||null,bemerkung:note.value
+          });
+          if(r.ok){header('Bestellung erfasst');result.append(el('p','Bestellung wurde im LagerTool registriert.'));
+            line(result,'Versandstatus',r.bestellung?.mail?.status||'noch offen');}
+        }catch(e){failure(e);}
+      }));
+      result.append(form);
+    }catch(e){failure(e);}
+  }
+  async function ownOrders(){
+    sectionMenu.hidden=true;header('Meine Bestellungen');
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/bestellungen');
+      if(!data.bestellungen?.length)result.append(el('p','Noch keine Bestellung erfasst.'));
+      for(const o of data.bestellungen||[]){
+        const card=el('article');card.append(el('h3',o.siteName||'Materialbestellung'));
+        line(card,'Status',o.status);line(card,'Artikel',(o.items||[]).map(i=>i.menge+' × '+i.name).join(', '));
+        line(card,'Bemerkung',o.bemerkung);result.append(card);
+      }
+    }catch(e){failure(e);}
+  }
+  function uploadInformation(){
+    sectionMenu.hidden=true;header('Dokument hochladen');
+    result.append(el('p','Der sichere Datei-Upload wird separat geprüft. Pläne und Rapporte sind weiterhin lesbar. Bitte keine vertraulichen Dateien in das Chat-Textfeld kopieren.'));
+    result.append(button('Pläne anzeigen',()=>ask({tool:'site_documents',args:{}})));
+  }
+
   function mount(){
     if(panel)return;
-    const style=el('style',`#monteur-assistant-launch{position:fixed;right:16px;bottom:85px;z-index:2000;padding:12px 18px;border-radius:24px;background:#155e4b;color:white;border:0;font-weight:700}#monteur-assistant{position:fixed;right:12px;bottom:85px;z-index:2100;width:min(430px,calc(100vw - 24px));max-height:78vh;overflow:auto;background:#fff;color:#152820;border:1px solid #cad7d0;border-radius:16px;box-shadow:0 12px 48px #0003;padding:18px;font:14px system-ui}#monteur-assistant[hidden],#monteur-assistant-launch[hidden]{display:none}#monteur-assistant button{padding:10px;margin:4px;border:1px solid #b4c8bc;border-radius:8px;background:#eef5ef;color:#183b2b;cursor:pointer}#monteur-assistant button:disabled{opacity:.5;cursor:wait}#monteur-assistant textarea,#monteur-assistant input{display:block;width:100%;box-sizing:border-box;margin:6px 0 12px;padding:10px;border:1px solid #a4b9ae;border-radius:7px}#monteur-assistant label{display:block;margin-top:10px}#monteur-assistant article{border-top:1px solid #dce5df;margin-top:12px;padding-top:8px}#monteur-assistant p{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}#assistant-errors{color:#a22525}`);
+    const style=el('style',`#monteur-assistant-launch{position:fixed;right:16px;bottom:85px;z-index:2000;padding:12px 18px;border-radius:24px;background:#155e4b;color:white;border:0;font-weight:700}#monteur-assistant{position:fixed;right:12px;bottom:85px;z-index:2100;width:min(660px,calc(100vw - 16px));max-height:92vh;overflow:auto;background:#fff;color:#152820;border:1px solid #cad7d0;border-radius:16px;box-shadow:0 12px 48px #0003;padding:18px;font:14px system-ui}#monteur-assistant[hidden],#monteur-assistant-launch[hidden]{display:none}#monteur-assistant button{padding:10px;margin:4px;border:1px solid #b4c8bc;border-radius:8px;background:#eef5ef;color:#183b2b;cursor:pointer}#monteur-assistant .assistant-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:8px 0 16px}#monteur-assistant .assistant-actions button{min-height:55px;padding:12px;font-weight:650}#monteur-assistant .assistant-back{background:#e0ebe4}#monteur-assistant button:disabled{opacity:.5;cursor:wait}#monteur-assistant textarea,#monteur-assistant input{display:block;width:100%;box-sizing:border-box;margin:6px 0 12px;padding:10px;border:1px solid #a4b9ae;border-radius:7px}#monteur-assistant label{display:block;margin-top:10px}#monteur-assistant article{border-top:1px solid #dce5df;margin-top:12px;padding-top:8px}#monteur-assistant p{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}#assistant-errors{color:#a22525}`);
+    style.textContent += '.assistant-notice{position:fixed;right:16px;top:16px;z-index:9999;background:#fff;color:#17372b;border:2px solid #337e61;box-shadow:0 12px 38px #0003;padding:16px;border-radius:12px;max-width:min(420px,calc(100vw - 32px));font:15px system-ui}.assistant-notice button{padding:9px;margin:4px;background:#e9f5ee;border:1px solid #a1c1ae;border-radius:8px;cursor:pointer}';
     document.body.append(style);
     launcher=button('Assistent',()=>{if(!panel.hidden)stopVoice();panel.hidden=!panel.hidden;if(!panel.hidden)input.focus();});launcher.id='monteur-assistant-launch';launcher.hidden=true;
     panel=el('section');panel.id='monteur-assistant';panel.hidden=true;panel.setAttribute('aria-label','Monteur-Assistent');
     panel.append(el('h2','Dein Assistent'),button('Schliessen',()=>{stopVoice();panel.hidden=true;}));
     panel.append(el('p','Frage mich nach deinen Baustellen, Adressen, Kontakten, Arbeitsbeginn, Plänen oder Berichten. Die Antworten kommen aus dem LagerTool – ohne zusätzliche KI.'));
+    sectionMenu=el('div');sectionMenu.className='assistant-actions';
+    for(const [id,title] of [['baustellen','🏗️ Baustellen'],['fahrzeuge','🚐 Fahrzeuge'],
+      ['werkzeuge','🧰 Werkzeuge'],['bestellungen','📦 Bestellungen'],['dokumente','📁 Dokumente'],
+      ['postfach','📬 Nachrichten']])sectionMenu.append(button(title,()=>showSection(id)));
+    panel.append(sectionMenu);
+    const shortcutDetails=el('details');const quickSummary=el('summary','Schnellfragen (optional)');shortcutDetails.append(quickSummary);
     const shortcuts=el('div');shortcuts.style.display='grid';shortcuts.style.gridTemplateColumns='repeat(2,minmax(0,1fr))';
     for(const [label,command] of [
       ['Mein Einsatz morgen',{tool:'my_assignments',args:{date:'morgen'}}],
@@ -249,7 +502,7 @@
       ['Mit wem fahre ich?',{tool:'my_ride',args:{date:'morgen'}}],
       ['Bericht erfassen',{tool:'report_draft',args:{}}]
     ])shortcuts.append(button(label,()=>ask(command)));
-    panel.append(shortcuts);
+    shortcutDetails.append(shortcuts);panel.append(shortcutDetails);
     const label=el('label','Deine Anfrage');input=el('textarea');input.id='assistant-message';input.maxLength=4000;input.placeholder='z. B. Adresse Mercedes Schlieren oder Wer ist die Projektleitung?';input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const message=input.value.trim();if(message)ask({message});}});label.append(input);panel.append(label);
     addDictation(panel,input,'assistant-voice-question','Frage diktieren');
     if(speechAvailable()){
@@ -263,7 +516,7 @@
     errorBox=el('div');errorBox.id='assistant-errors';errorBox.setAttribute('role','alert');result=el('div');result.id='assistant-result';result.setAttribute('aria-live','polite');panel.append(errorBox,result);
     document.body.append(launcher,panel);
   }
-  function reset(){stopVoice();epoch++;busy=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;setBusy(false);}
-  global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;},reset};
+  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;setBusy(false);}
+  global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;startInboxPolling();showHome();},reset};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(typeof window!=='undefined'?window:globalThis);
