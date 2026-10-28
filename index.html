@@ -1,5 +1,6 @@
 ﻿<!DOCTYPE html>
 <html lang="de"><head>
+<script src="pilot-config.js"></script>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -3406,7 +3407,10 @@ function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdo
 // ── NAVIGATION ─────────────────────────────────────────
 // ── BÜRO: RAPPORTE UND BAUSTELLENMELDUNGEN (Worker) ──
 // Die Daten liegen auf dem Server (R2). Die Büro-Sitzung wird nur im Speicher dieser Seite gehalten.
-const BZ_WORKER = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+// Die Pilot-Büroansicht darf niemals unbemerkt den produktiven Worker kontaktieren.
+const BZ_WORKER = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
+const BZ_PILOT_WORKER_OK = /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(BZ_WORKER)
+  && BZ_WORKER !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
 const BZ_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Abgeschlossen' };
 const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittiert: 'Quittiert', abgeschlossen: 'Abgeschlossen', zurueckgegeben: 'Zur Bearbeitung zurück', wieder_geoeffnet: 'Wieder geöffnet' };
 let bzSession = null;          // { token, name }
@@ -3430,6 +3434,7 @@ function bzFehlertext(e) {
   if (e.code === 'status_conflict') return 'Der Vorgang wurde inzwischen von jemand anderem geändert. Die Liste wird aktualisiert.';
   if (e.code === 'already_quittiert') return 'Dieser Vorgang wurde bereits quittiert.';
   if (e.code === 'forbidden') return 'Dafür fehlt die Berechtigung.';
+  if (e.code === 'pilot_not_configured') return 'Pilotserver nicht konfiguriert. Es wurde keine Verbindung zum Produktivserver aufgebaut.';
   if (e.code === 'invalid_transition') return 'Dieser Statuswechsel ist nicht erlaubt.';
   if (e.code === 'zuweisung_required') return 'Bitte einen Monteur auswählen.';
   if (e.status === 0) return 'Keine Verbindung zum Server. Nichts wurde geändert. Bitte erneut versuchen.';
@@ -3438,6 +3443,9 @@ function bzFehlertext(e) {
 }
 
 async function bzCall(method, path, body) {
+  if (!BZ_PILOT_WORKER_OK) {
+    const e = new Error('pilot_not_configured');e.status = 0;e.code = 'pilot_not_configured';throw e;
+  }
   let res;
   try {
     res = await fetch(BZ_WORKER + path, {
