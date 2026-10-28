@@ -22,6 +22,7 @@ function notify(text){
 function row(label,value){const p=node('p');const b=node('strong',label+': ');p.append(b,node('span',value||'—'));return p;}
 function render(){
   const root=section();if(!root)return;
+  if(!active()){requests=[];seen.clear();ready=false;}
   const badge=document.getElementById('bz-anfragen-count');
   const neu=requests.filter(r=>r.status==='neu').length;
   if(badge)badge.textContent=neu?'('+neu+')':'';
@@ -121,6 +122,15 @@ async function load(silent=true){
 }
 function init(){
   render();
+  // Clear the inbox immediately after the common LagerTool office logout, not merely on the next poll.
+  if(typeof bzAbmelden==='function'){
+    const previousLogout=bzAbmelden;
+    globalThis.bzAbmelden=function(...args){
+      const value=previousLogout(...args);
+      requests=[];seen.clear();ready=false;render();
+      return value;
+    };
+  }
   const nav=document.getElementById('nav-anfragen');
   nav?.addEventListener('click',()=>load(false));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&active())load(true);});
