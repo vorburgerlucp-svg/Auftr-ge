@@ -502,6 +502,7 @@
     <button class="nav-btn" onclick="showPage('todo')">✅ To-Do</button>
     <button class="nav-btn" onclick="officeSyncExport()" title="Daten für Monteur-App exportieren">📱 Sync</button>
     <button class="nav-btn" onclick="showPage('einstellungen')">⚙️</button>
+    <button class="nav-btn" onclick="showPage('rapporte')">📋 Rapporte</button>
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
       Meldungen<span id="meldungen-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center">0</span>
     </button>
@@ -871,6 +872,12 @@
     <div class="todo-alert-meta" id="todo-alert-meta"></div>
     <div class="todo-wf-actions" id="todo-alert-actions"></div>
   </div>
+</div>
+
+<div id="page-rapporte" class="page">
+  <h2>📋 Arbeitsrapporte der Monteure</h2>
+  <p class="subtitle">Eigene Rubrik: Rapporte, Einreicher und Zeitpunkt – für gezielte Rückfragen</p>
+  <div id="bz-rapporte-section" class="card" style="margin-bottom:14px"></div>
 </div>
 
 <div id="page-meldungen" class="page">
@@ -3405,6 +3412,8 @@ const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittier
 let bzSession = null;          // { token, name }
 let bzDaten = { meldungen: [], rapporte: [] };
 let bzSiteId = '';
+let bzRapportSiteId = 'all';    // Separate Filter, damit Meldungen und Rapporte sich nicht beeinflussen
+let bzRapportAutorId = 'all';
 let bzBusy = {};               // verhindert Doppelklicks je Vorgang
 let bzMeldung = null;          // Fehler- oder Hinweistext
 
@@ -3452,9 +3461,10 @@ async function bzCall(method, path, body) {
   return data;
 }
 
-async function bzAnmelden() {
-  const name = (document.getElementById('bz-login-name')?.value || '').trim();
-  const pin = document.getElementById('bz-login-pin')?.value || '';
+async function bzAnmelden(source = 'meldungen') {
+  const suffix = source === 'rapporte' ? '-rapport' : '';
+  const name = (document.getElementById('bz' + suffix + '-login-name')?.value || '').trim();
+  const pin = document.getElementById('bz' + suffix + '-login-pin')?.value || '';
   if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
   try {
     const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
@@ -3551,7 +3561,82 @@ function bzVerlauf(v) {
   }).join('');
 }
 
+function bzRapportDatum(value) {
+  if (!value) return 'Zeitpunkt nicht hinterlegt';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Zeitpunkt nicht hinterlegt'
+    : date.toLocaleString('de-CH', { timeZone: 'Europe/Zurich', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function bzRenderRapporte() {
+  const el = document.getElementById('bz-rapporte-section');
+  if (!el) return;
+  if (!bzSession) {
+    el.innerHTML = `
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Büro-Anmeldung für Arbeitsrapporte</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Nur berechtigte Büromitarbeiter können Rapporte sehen.</div>
+      <input type="text" id="bz-rapport-login-name" autocomplete="username" placeholder="Name" style="margin-bottom:6px">
+      <input type="password" id="bz-rapport-login-pin" autocomplete="current-password" maxlength="4" inputmode="numeric" placeholder="PIN" style="margin-bottom:6px">
+      <button class="btn btn-primary" onclick="bzAnmelden('rapporte')">Anmelden</button>
+      ${bzMeldung ? '<div style="font-size:12px;color:var(--red);margin-top:8px">' + bzEsc(bzMeldung) + '</div>' : ''}`;
+    return;
+  }
+  const rapporte = Array.isArray(bzDaten.rapporte) ? bzDaten.rapporte : [];
+  const baustellen = state.baustellen || [];
+  // Alte Rapporte bleiben auch sichtbar, wenn die Baustelle nicht mehr im Stamm geführt wird.
+  const sites = new Map(baustellen.map(b => [String(b.id), String(b.name || b.id)]));
+  for (const r of rapporte) if (!sites.has(String(r.siteId))) sites.set(String(r.siteId), String(r.siteName || r.siteId));
+  const siteOptions = [...sites.entries()].sort((a,b) => a[1].localeCompare(b[1], 'de'))
+    .map(([id,name]) => `<option value="${bzEsc(id)}"${bzRapportSiteId === id ? ' selected' : ''}>${bzEsc(name)}</option>`).join('');
+  const people = new Map();
+  for (const r of rapporte) {
+    if (r.autorId == null) continue;
+    const id = String(r.autorId), name = String(r.autorName || bzName(id));
+    if (!people.has(id)) people.set(id, name);
+  }
+  const personOptions = [...people.entries()].sort((a,b) => a[1].localeCompare(b[1], 'de'))
+    .map(([id,name]) => `<option value="${bzEsc(id)}"${bzRapportAutorId === id ? ' selected' : ''}>${bzEsc(name)}</option>`).join('');
+  const selection = rapporte.filter(r =>
+    (bzRapportSiteId === 'all' || String(r.siteId) === bzRapportSiteId) &&
+    (bzRapportAutorId === 'all' || String(r.autorId) === bzRapportAutorId)
+  ).sort((a,b) => String(b.submittedAt || b.createdAt || b.datum || '').localeCompare(String(a.submittedAt || a.createdAt || a.datum || '')));
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <div><b>Angemeldet als ${bzEsc(bzSession.name)}</b></div>
+      <div><button class="btn btn-sm" onclick="bzLaden()">↻ Aktualisieren</button>
+      <button class="btn btn-sm" onclick="bzAbmelden()">Abmelden</button></div>
+    </div>
+    ${bzMeldung ? '<p style="color:var(--red)">' + bzEsc(bzMeldung) + '</p>' : ''}
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <label style="flex:1;min-width:170px">Baustelle
+        <select id="bz-rapport-site" onchange="bzRapportSiteId=this.value;bzRenderRapporte()">
+          <option value="all">Alle Baustellen</option>${siteOptions}
+        </select>
+      </label>
+      <label style="flex:1;min-width:170px">Eingereicht von
+        <select id="bz-rapport-autor" onchange="bzRapportAutorId=this.value;bzRenderRapporte()">
+          <option value="all">Alle Monteure</option>${personOptions}
+        </select>
+      </label>
+    </div>
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">Eingereichte Rapporte (${selection.length})</div>
+    ${selection.length ? selection.map(r => `
+      <article style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-weight:700;font-size:13px">${bzEsc(r.siteName || sites.get(String(r.siteId)) || r.siteId)} · ${bzEsc(r.datum)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Arbeitszeit: ${bzEsc(r.timeStart)}–${bzEsc(r.timeEnd)} · Pause ${bzEsc(r.breakMinutes)} Min.${r.totalHours == null ? '' : ' · ' + bzEsc(r.totalHours) + ' Std.'}</div>
+        <div style="font-size:13px;margin-top:8px"><b>Eingereicht von: ${bzEsc(r.autorName || bzName(r.autorId))}</b> (Mitarbeiter-ID: ${bzEsc(r.autorId)})</div>
+        <div style="font-size:12px;color:var(--muted)">Abgegeben am: ${bzEsc(bzRapportDatum(r.submittedAt || r.createdAt))} · Rapport-ID: ${bzEsc(r.id)}</div>
+        <div style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:9px">${bzEsc(r.workPerformed)}</div>
+        ${r.materialUsed ? '<div style="margin-top:6px;font-size:12px">Material: ' + bzEsc(r.materialUsed) + '</div>' : ''}
+        ${r.issues ? '<div style="margin-top:6px;font-size:12px">Probleme: ' + bzEsc(r.issues) + '</div>' : ''}
+        ${r.extraWork ? '<div style="margin-top:6px;font-size:12px">Zusatzarbeiten: ' + bzEsc(r.extraWork) + '</div>' : ''}
+        ${r.notes ? '<div style="margin-top:6px;font-size:12px">Notizen: ' + bzEsc(r.notes) + '</div>' : ''}
+        <div style="margin-top:8px;font-size:12px;color:var(--muted)">Für Rückfragen: ${bzEsc(r.autorName || bzName(r.autorId))}</div>
+      </article>`).join('') : '<p style="color:var(--muted)">Keine Arbeitsrapporte für diese Auswahl vorhanden.</p>'}`;
+}
+
 function bzRender() {
+  bzRenderRapporte();
   const el = document.getElementById('bz-section');
   if (!el) return;
   if (!bzSession) {
@@ -3567,7 +3652,6 @@ function bzRender() {
   const baustellen = state.baustellen || [];
   if (!bzSiteId && baustellen.length) bzSiteId = String(baustellen[0].id);
   const siteOpts = baustellen.map(b => `<option value="${bzEsc(b.id)}"${String(b.id) === bzSiteId ? ' selected' : ''}>${bzEsc(b.name)}</option>`).join('');
-  const rapporte = bzDaten.rapporte.filter(r => String(r.siteId) === bzSiteId).sort((a, b) => String(b.datum).localeCompare(String(a.datum)));
   const meldungen = bzDaten.meldungen.filter(m => String(m.siteId) === bzSiteId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -3577,17 +3661,6 @@ function bzRender() {
     <label>Baustelle</label>
     <select id="bz-site" onchange="bzSiteId=this.value;bzRender()">${siteOpts}</select>
     ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin:8px 0">${bzEsc(bzMeldung)}</div>` : ''}
-    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Eingereichte Arbeitsrapporte (${rapporte.length})</div>
-    ${rapporte.length ? rapporte.map(r => `
-      <div style="border-top:1px solid var(--border);padding:8px 0;font-size:13px">
-        <div><b>${bzEsc(r.datum)}</b> · ${bzEsc(r.timeStart)}–${bzEsc(r.timeEnd)} · Pause ${bzEsc(r.breakMinutes)} min${r.totalHours != null ? ' · ' + bzEsc(String(r.totalHours).replace('.', ',')) + ' h' : ''}</div>
-        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(r.autorId))} · eingereicht ${bzEsc(String(r.createdAt || '').slice(0, 16).replace('T', ' '))}</div>
-        <div style="white-space:pre-line">${bzEsc(r.workPerformed)}</div>
-        ${r.materialUsed ? `<div style="font-size:12px">Material: ${bzEsc(r.materialUsed)}</div>` : ''}
-        ${r.issues ? `<div style="font-size:12px">Probleme: ${bzEsc(r.issues)}</div>` : ''}
-        ${r.extraWork ? `<div style="font-size:12px">Extra: ${bzEsc(r.extraWork)}</div>` : ''}
-        ${r.notes ? `<div style="font-size:12px">Notizen: ${bzEsc(r.notes)}</div>` : ''}
-      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Rapporte für diese Baustelle</div>'}
     <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Baustellenmeldungen (${meldungen.length})</div>
     ${meldungen.length ? meldungen.map(m => `
       <div style="border-top:1px solid var(--border);padding:8px 0">
@@ -3630,6 +3703,7 @@ function showPage(id) {
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
   if (id === 'meldungen') { renderMeldungen(); if (bzSession) bzLaden(); else bzRender(); }
+  if (id === 'rapporte') { if (bzSession) bzLaden(); else bzRenderRapporte(); }
   if (id === 'meinprofil') renderMeinProfil();
   if (id === 'einstellungen') {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
