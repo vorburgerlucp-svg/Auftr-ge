@@ -41,6 +41,9 @@ test('eigener Büro-Menüpunkt und eigene Seite, getrennt von Meldungen',()=>{
   assert.match(html,/id="page-rapporte"/);
   assert.match(html,/id="bz-rapporte-section"/);
   assert.match(html,/id="page-meldungen"/);
+  assert.match(html,/src="pilot-config.js"/);
+  assert.match(html,/const BZ_WORKER = String\(window\.MONTEUR_TEST_WORKER_URL/);
+  assert.match(html,/const BZ_PILOT_WORKER_OK/);
   assert.match(html,/if \(id === 'rapporte'\)/);
 });
 test('Rapporte zeigen den originalen Einreicher und Abgabezeit – auch ohne aktiven Mitarbeitereintrag',()=>{
