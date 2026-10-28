@@ -23,3 +23,12 @@ für diese gewöhnlichen Fragen.
 gleichnamige fremde Baustelle, Datumsgrenzen, telefonische Freigaben,
 unfreigegebene Dokumente, Logout, eindeutige Auftrags-IDs,
 kein Schreiben in Produktion. Nach jeder Änderung CI erneut laufen lassen.
+
+## Ergänzung 28.10.2026: Rapporte als eigene Büro-Rubrik
+
+- Eigener Menüpunkt **📋 Rapporte** im Büro-Frontend; Baustellenmeldungen verbleiben getrennt unter **Meldungen**.
+- Alle Rapporte können nach Baustelle oder Verfasser gefiltert werden. Pro Rapport: Baustelle, Arbeitstag, Arbeitszeit, Tätigkeiten, optionale Material-/Problemfelder, **Einreicher mit Mitarbeiter-ID**, **Abgabezeitpunkt** und **Rapport-ID**.
+- Der Name wird bei der Einreichung serverseitig aus dem authentifizierten Mitarbeiterdatensatz übernommen und als unveränderliche Momentaufnahme gespeichert. So bleibt der Einreicher nach späteren Namens-/Personalstammänderungen erkennbar. Für Altberichte ohne Namens-Snapshot wird die Mitarbeiter-ID gegen den aktuellen Mitarbeiterstamm aufgelöst (sonst ID als Kennzeichnung).
+- Berichte liegen bereits unabhängig von Baustellenmeldungen unter `monteurReports` in R2; kein Schreiben in den gemeinsamen Firebase-Wochenplan. Die Büroansicht ist nur mit gültiger Büro-Sitzung abrufbar.
+- Rückfragen gehen an den eindeutig angezeigten Monteur; kein automatischer Versand von Nachrichten oder private Telefonnummern in dieser Erweiterung.
+- Bis zum Cloud-Pilot und dessen Abnahme nur im Branch `pilot/monteur-chatbot-test-20261023`; die laufende Produktion bleibt unverändert.
