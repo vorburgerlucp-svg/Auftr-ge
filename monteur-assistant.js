@@ -107,7 +107,31 @@
     control.id=id;control.dataset.voiceLabel=label;control.setAttribute('aria-pressed','false');
     parent.append(control);
   }
+  function simpleReportForm(data){
+    const r=data.report||{};
+    result.append(el('h3','Tagesrapport'));
+    line(result,'Datum (automatisch)',r.rapportDate);
+    line(result,'Baustelle',r.siteName);
+    line(result,'Monteur (aus Anmeldung)',r.authorName||'Angemeldeter Monteur');
+    result.append(el('p','Notiere kurz die ausgeführten Arbeiten. Bei Problemen zusätzlich: was ist passiert, warum, wann, mit wem besprochen und was wurde vereinbart? Alles in einem Text.'));
+    const label=el('label','Meine Arbeiten und Feststellungen');
+    const work=el('textarea');
+    work.id='assistant-report-workPerformed';
+    work.rows=8;
+    work.maxLength=5000;
+    work.placeholder='Beispiel:\\nPaneele montiert.\\n14:10 Uhr: Beschädigung festgestellt. Ursache noch unklar.\\n14:20 Uhr mit Bauleiter XY vor Ort besprochen; Fotos gemacht.\\nVereinbart: Ersatzteil bestellen, vorerst nicht weiter montieren.';
+    work.value=r.workPerformed||'';
+    label.append(work);
+    result.append(label);
+    addDictation(result,work,'assistant-voice-report-workPerformed','Text diktieren');
+    if(data.errors?.includes('description_too_long'))result.append(el('p','Text zu lang (maximal 5000 Zeichen).'));
+    result.append(button('Rapport prüfen',()=>ask({
+      tool:'report_draft',args:{siteId:data.siteId,report:{mode:'simple',workPerformed:work.value}}
+    })));
+    result.append(el('p','Es wird noch nichts gespeichert. Datum, Monteur und Einreichungszeitpunkt setzt der Server.'));
+  }
   function reportForm(data){
+    if(data.report?.mode==='simple')return simpleReportForm(data);
     const values={};
     line(result,'Baustelle',data.report.siteName);
     const keys=['rapportDate','timeStart','timeEnd','breakMinutes','workPerformed','materialUsed','issues','extraWork','notes'];
@@ -175,8 +199,23 @@
     }
     if(data.kind==='report_form')reportForm(data);
     if(data.kind==='report_preview'){
-      fields(result,data.report,['siteName','rapportDate','timeStart','timeEnd','breakMinutes','totalHours','workPerformed','materialUsed','issues','extraWork','notes']);
-      result.append(button('Bericht verbindlich speichern',()=>ask({confirmation:true,draftToken:data.draftToken})),button('Bearbeiten',()=>render({...data,kind:'report_form',missingFields:[],errors:[]})));
+      if(data.report?.mode==='simple'){
+        result.append(el('h3','Rapportvorschau'));
+        line(result,'Datum',data.report.rapportDate);
+        line(result,'Baustelle',data.report.siteName);
+        line(result,'Monteur',data.report.authorName||'Angemeldeter Monteur');
+        const detail=el('p',data.report.workPerformed);
+        detail.style.whiteSpace='pre-wrap';result.append(detail);
+      }else{
+        fields(result,data.report,['siteName','rapportDate','timeStart','timeEnd','breakMinutes','totalHours','workPerformed','materialUsed','issues','extraWork','notes']);
+      }
+      result.append(button('Rapport verbindlich speichern',()=>ask({confirmation:true,draftToken:data.draftToken})),
+        button('Zurück bearbeiten',()=>render({...data,kind:'report_form',missingFields:[],errors:[]})));
+    }
+    if(data.kind==='report_saved'){
+      line(result,'Monteur',data.authorName);
+      line(result,'Gespeichert um',data.submittedAt);
+      line(result,'Rapport-ID',data.reportId);
     }
   }
   async function ask(body){
