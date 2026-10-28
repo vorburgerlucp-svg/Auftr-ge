@@ -268,6 +268,7 @@
   </div>
 </div>
 
+<script src="pilot-config.js"></script>
 <!-- PAGE: BAUSTELLEN-STATUS -->
 <div id="page-baustatus" class="page">
   <h1>📊 Baustellen-Status</h1>
@@ -532,7 +533,10 @@ function setSyncStatus(state, label) {
 }
 
 // ── START ──
-const MONTEUR_WORKER_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+// Pilot-App: niemals automatisch auf den produktiven Worker ausweichen.
+const MONTEUR_WORKER_URL = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
+const MONTEUR_TEST_HOST_OK = /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(MONTEUR_WORKER_URL)
+  && MONTEUR_WORKER_URL !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
 window.addEventListener('load', function () {
   MonteurApi.configure({ baseUrl: MONTEUR_WORKER_URL, onSessionEnd: onSessionEnded });
   load();
@@ -632,6 +636,7 @@ async function doLogin() {
   const name = document.getElementById('login-name').value.trim();
   const pin = document.getElementById('login-pin').value;
   errEl.style.display = 'none';
+  if (!MONTEUR_TEST_HOST_OK) {errEl.textContent='Testserver nicht eingerichtet – Anmeldung gesperrt.';errEl.style.display='block';return;}
   if (!name || !/^\d{4}$/.test(pin)) {
     errEl.textContent = 'Bitte Name und 4-stelligen PIN eingeben';
     errEl.style.display = 'block';

@@ -80,6 +80,27 @@
     return data;
   }
 
+  async function uploadDocument(siteId, file){
+    if(!token)throw new ApiError(401,'unauthorized',null);
+    if(!file||file.size<1||file.size>8*1024*1024)throw new ApiError(400,'invalid_file_size',null);
+    const allowed=new Set(['application/pdf','image/jpeg','image/png','image/webp']);
+    if(!allowed.has(file.type))throw new ApiError(415,'unsupported_file_type',null);
+    const form=new FormData();
+    form.append('siteId',String(siteId||''));
+    form.append('file',file,file.name);
+    form.append('requestId',newRequestId());
+    let res;
+    try{
+      res=await global.fetch(baseUrl+'/app/monteur/upload',{
+        method:'POST',headers:{Authorization:'Bearer '+token},body:form,credentials:'omit',cache:'no-store'
+      });
+    }catch{throw new ApiError(0,'network',null);}
+    const data=await res.json().catch(()=>null);
+    if(res.status===401){token=null;if(onSessionEnd)onSessionEnd();}
+    if(!res.ok)throw new ApiError(res.status,data?.error||'upload_failed',data);
+    return data;
+  }
+
   const api = {
     configure,
     ApiError,
@@ -101,6 +122,7 @@
     },
 
     downloadDocument(siteId, documentId) { return send('/app/monteur/dokument', 'GET', undefined, { siteId, documentId }, { binary: true }); },
+    uploadDocument,
     get(path, query) { return send(path, 'GET', undefined, query); },
     post(path, body) { return send(path, 'POST', body, null, { retryNetwork: true }); }
   };
