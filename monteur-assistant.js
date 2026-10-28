@@ -471,10 +471,32 @@
       }
     }catch(e){failure(e);}
   }
-  function uploadInformation(){
-    sectionMenu.hidden=true;header('Dokument hochladen');
-    result.append(el('p','Der sichere Datei-Upload wird separat geprüft. Pläne und Rapporte sind weiterhin lesbar. Bitte keine vertraulichen Dateien in das Chat-Textfeld kopieren.'));
-    result.append(button('Pläne anzeigen',()=>ask({tool:'site_documents',args:{}})));
+  async function uploadInformation(){
+    sectionMenu.hidden=true;header('Foto oder PDF hochladen');
+    result.append(el('p','Dateien landen privat zur Prüfung beim Büro. Sie werden nicht automatisch für andere Monteure freigegeben.'));
+    try{
+      const data=await global.MonteurApi.get('/app/monteur/sites');
+      const sites=data.sites||[];
+      if(!sites.length){result.append(el('p','Keine zugewiesene Baustelle.'));return;}
+      const form=el('div');
+      const site=populate(form,sites.map(x=>({id:x.id,label:x.name})),'Baustelle');
+      const label=el('label','Foto oder PDF (max. 8 MB)');
+      const file=el('input');file.type='file';file.accept='.pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp';
+      label.append(file);form.append(label);
+      form.append(button('Datei ans Büro senden',async()=>{
+        const selected=file.files?.[0];
+        if(!selected){failure(new Error('Bitte zuerst ein Foto oder PDF auswählen.'));return;}
+        if(selected.size>8*1024*1024){failure(new Error('Die Datei darf maximal 8 MB gross sein.'));return;}
+        setBusy(true);
+        try{
+          const done=await global.MonteurApi.uploadDocument(site.value,selected);
+          if(done.ok){header('Upload erfolgreich');
+            result.append(el('p','Die Datei '+done.fileName+' ist privat für das Büro hinterlegt.'));
+            result.append(el('p','Sie erscheint in der Büro-Rubrik Anfragen und muss erst geprüft werden.'));}
+        }catch(e){failure(e);}finally{setBusy(false);}
+      }));
+      result.append(form);
+    }catch(e){failure(e);}
   }
 
   function mount(){
