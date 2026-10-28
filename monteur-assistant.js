@@ -394,11 +394,21 @@
   async function fleetOverview(){
     sectionMenu.hidden=true;header('Fahrzeuge und Services');
     try{
-      const data=await global.MonteurApi.get('/app/monteur/fleet');
+      const [data,inbox]=await Promise.all([
+        global.MonteurApi.get('/app/monteur/fleet'),
+        global.MonteurApi.get('/app/monteur/requests')
+      ]);
       for(const v of data.fahrzeuge||[]){
         const card=el('article');card.append(el('h3',[v.name,v.schild].filter(Boolean).join(' · ')));
-        const next=(v.services||[]).filter(s=>s.typ==='reminder'&&s.reminderDate).sort((a,b)=>a.reminderDate.localeCompare(b.reminderDate));
-        if(next.length)for(const service of next.slice(0,3))line(card,'Service-Erinnerung',service.reminderDate+' – '+service.beschreibung);
+        const next=(v.services||[]).filter(s=>s.typ==='reminder'&&s.reminderDate)
+          .sort((a,b)=>a.reminderDate.localeCompare(b.reminderDate));
+        if(next.length)for(const service of next.slice(0,3))
+          line(card,'Service-Erinnerung',service.reminderDate+' – '+service.beschreibung);
+        const appointments=(inbox.requests||[]).filter(r=>r.targetId===v.id &&
+          (r.kind==='vehicle_service'||r.kind==='vehicle_repair') &&
+          r.status==='terminiert'&&r.appointmentDate);
+        for(const appointment of appointments)line(card,'Vom Büro bestätigter Termin',
+          appointment.appointmentDate+(appointment.appointmentTime?' · '+appointment.appointmentTime:''));
         card.append(button('Service anfragen',()=>requestForm('vehicle_service')));
         result.append(card);
       }
@@ -453,7 +463,8 @@
             siteId:site.value||null,bemerkung:note.value
           });
           if(r.ok){header('Bestellung erfasst');result.append(el('p','Bestellung wurde im LagerTool registriert.'));
-            line(result,'Versandstatus',r.bestellung?.mail?.status||'noch offen');}
+            line(result,'Versandstatus',r.bestellung?.mail?.status||'noch offen');
+            if(!r.officeNotified)result.append(el('p','Die Zustellung ins Büro-Postfach ist noch nicht bestätigt. Bitte im Büro nachfragen.'));}
         }catch(e){failure(e);}
       }));
       result.append(form);
