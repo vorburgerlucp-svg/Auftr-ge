@@ -18,3 +18,6 @@ test('both protected surfaces load shared inbox, without introducing cloud scrip
  for(const f of ['monteur.html','office-pilot.html'])assert.match(readFileSync(new URL('../'+f,import.meta.url),'utf8'),/src="monteur-documents.js"/);
  assert.doesNotMatch(source,/innerHTML|mailto:|localStorage|https:\/\//);
 });
+test('ordinary API logout synchronously clears shared private UI without waiting for polling',()=>{
+ let cleared=0;const w={PilotDocuments:{resetSession(){cleared++;}}};vm.runInNewContext(readFileSync(new URL('../monteur-api.js',import.meta.url),'utf8'),{window:w});w.MonteurApi.endSession();assert.equal(cleared,1);
+});
