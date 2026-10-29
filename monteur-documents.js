@@ -59,6 +59,15 @@ async function showInbox(){
  };
  filters.append(btn('Filtern',load));await load();
 }
+async function compose(){
+ const a=adapter();if(!a||!enabled)return;const v=++generation;root.hidden=false;root.replaceChildren(node('h2','Neue interne Nachricht'));
+ const subject=field(root,'Betreff'),message=field(root,'Nachricht','textarea'),site=field(root,'Baustellen-ID (optional)');subject.maxLength=160;message.maxLength=3000;
+ const recipient=a.prefix==='/app/admin'?field(root,'Empfänger-Monteur-ID'):null;root.append(node('p',recipient?'Empfänger muss ein aktiver Testmonteur dieses Mandanten sein.':'Empfänger: zuständige Büro-Administration im eigenen Mandanten.'));
+ const label=node('label','Dokumentation anhängen (optional)'),select=node('select');select.multiple=true;label.append(select);root.append(label);
+ try{const list=await a.get(a.prefix+'/batches');if(!current(a,v))return;for(const r of list.batches.filter(r=>r.status==='FERTIG')){const option=node('option',r.pdf.fileName+' · '+r.authorName);option.value=r.id;select.append(option);}}catch(e){if(!current(a,v))return;error(e);}
+ let requestId=null;const send=btn('Intern senden',async()=>{send.disabled=true;requestId=requestId||a.newRequestId();try{await a.post(a.prefix+'/messages/send',{requestId,subject:subject.value,message:message.value,siteId:site.value,...(recipient?{employeeId:recipient.value}:{}),attachments:Array.from(select.selectedOptions,o=>({batchId:o.value,index:'pdf'}))});if(current(a,v))await showInbox();}catch(e){if(current(a,v))error(e);}finally{if(current(a,v))send.disabled=false;}});
+ root.append(send,btn('Zurück',showInbox));
+}
 function renderBatch(parent,r,a,v){
  parent.append(node('p','Batch: '+r.id+' · '+r.files.filter(f=>f.checksum).length+'/'+r.files.length+' Dateien'));
  for(const f of r.files)if(f.checksum)parent.append(btn('Original: '+f.name,()=>download(a,a.prefix+'/batches/download?'+new URLSearchParams({id:r.id,index:f.index}),f.name)));
