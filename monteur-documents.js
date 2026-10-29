@@ -9,7 +9,7 @@ class UploadQueue{
   files=Array.from(files);if(!files.length||files.length>40)throw Error('Bitte 1 bis 40 Dateien auswählen.');
   for(const f of files){if(!['image/jpeg','image/png','application/pdf'].includes(f.type))throw Error('JPG, PNG oder PDF wählen. HEIC wird derzeit nicht sicher unterstützt.');if(f.size<1||f.size>MAX)throw Error('Maximal 8 MB pro Datei.');}
   if(files.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error('Maximal 16 MB pro Sitzung.');
-  if(batch&&(batch.files.length!==files.length||batch.files.some((f,i)=>f.name!==files[i].name||f.size!==files[i].size||f.mime!==files[i].type)))throw Error('Für Wiederaufnahme dieselben Dateien in derselben Reihenfolge auswählen.');
+  if(batch&&(batch.files.length!==files.length||batch.files.some((f,i)=>f.name!==String(files[i].name||'Dokument').replace(/[\\/\x00-\x1f<>:"|?*]/g,'_').slice(0,120)||f.size!==files[i].size||f.mime!==files[i].type)))throw Error('Für Wiederaufnahme dieselben Dateien in derselben Reihenfolge auswählen.');
   this.files=files;this.batch=batch;this.index=0;this.requestId=null;this.paused=false;
  }
  pause(){this.paused=true;}
@@ -69,6 +69,7 @@ async function compose(){
  root.append(send,btn('Zurück',showInbox));
 }
 function renderBatch(parent,r,a,v){
+ if(r.summary){const labels={foto:'Fotos',plan:'Pläne',deckblatt:'Deckblätter',abnahme:'Abnahmeprotokolle',rapport:'Rapporte',weitere:'Weitere Dokumente'};parent.append(node('p',Object.entries(r.summary).map(([kind,count])=>count+' '+(labels[kind]||kind)).join(' · ')));}
  parent.append(node('p','Batch: '+r.id+' · '+r.files.filter(f=>f.checksum).length+'/'+r.files.length+' Dateien'));
  for(const f of r.files)if(f.checksum)parent.append(btn('Original: '+f.name,()=>download(a,a.prefix+'/batches/download?'+new URLSearchParams({id:r.id,index:f.index}),f.name)));
  if(r.status==='FERTIG')parent.append(btn('PDF: '+r.pdf.fileName,()=>download(a,a.prefix+'/batches/download?'+new URLSearchParams({id:r.id,index:'pdf'}),r.pdf.fileName)));
