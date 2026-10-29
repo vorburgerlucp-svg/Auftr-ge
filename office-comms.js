@@ -36,9 +36,13 @@ function render(){
     root.append(btn('Anmelden',async()=>{
       if(!name.value.trim()||!/^\d{4}$/.test(pin.value)){loginError='Bitte Namen und vierstellige PIN eingeben.';render();return;}
       try{
+        const version=viewVersion;
         const auth=await bzCall('POST','/app/office/anmelden',{name:name.value.trim(),pin:pin.value});
+        if(version!==viewVersion)return;
         if(!auth.officeSession)throw Error('login_failed');
+        if(typeof bzGeneration!=='undefined')bzGeneration++;
         bzSession={token:auth.officeSession,name:name.value.trim()};
+        if(auth.pinWechselPflicht){if(typeof bzPinWechsel==='function')bzPinWechsel();else {bzSession=null;loginError='Bitte PIN zuerst in der Büro-App ändern.';render();}return;}
         loginError='';seen.clear();ready=false;
         pin.value='';
         await bzLaden();await load(false);
@@ -108,7 +112,10 @@ async function load(silent=true){
   if(!active()){if(!silent)render();return;}
   if(loading)return;loading=true;
   try{
+    const version=viewVersion;
+    const session=bzSession;
     const data=await bzCall('GET','/app/admin/requests');
+    if(version!==viewVersion||session!==bzSession||!active())return;
     const items=data.requests||[];
     const fresh=ready?items.filter(i=>i.status==='neu'&&!seen.has(i.id)):[];
     items.forEach(i=>seen.add(i.id));
@@ -127,7 +134,7 @@ function init(){
     const previousLogout=bzAbmelden;
     globalThis.bzAbmelden=function(...args){
       const value=previousLogout(...args);
-      requests=[];seen.clear();ready=false;render();
+      viewVersion++;requests=[];seen.clear();ready=false;render();
       return value;
     };
   }

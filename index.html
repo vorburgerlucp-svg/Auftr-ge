@@ -1,6 +1,7 @@
 ﻿<!DOCTYPE html>
 <html lang="de"><head>
 <script src="pilot-config.js"></script>
+<script src="pilot-pin.js"></script>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2776,7 +2777,7 @@ function fzgMonteurPickerOpen() {
 
 // Büro-Anmeldung: Name und PIN gehen an den Worker. Der Browser prueft nichts selbst.
 // Erst mit dem Firebase-Custom-Token wird Firebase angemeldet, danach werden die Daten geladen.
-const LT_WORKER_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+const LT_WORKER_URL = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
 let officeAnmeldungLaeuft = false;
 let officeWartetAufSync = null;
 
@@ -2794,6 +2795,8 @@ async function doLogin() {
   officeAnmeldungLaeuft = true;
   let r;
   try {
+    if (!window.lagertoolPilotWorkerAllowed(LT_WORKER_URL)) throw Error('pilot_not_configured');
+    const version = bzGeneration;
     const res = await fetch(LT_WORKER_URL + '/app/office/anmelden', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2803,6 +2806,14 @@ async function doLogin() {
     });
     let data = null;
     try { data = await res.json(); } catch (x) { data = null; }
+    if (version !== bzGeneration) return;
+    if (res.ok && data?.pinWechselPflicht && data.officeSession) {
+      bzSession = { token: data.officeSession, name };
+      document.getElementById('login-pin').value = '';
+      officeAnmeldungLaeuft = false;
+      bzPinWechsel();
+      return;
+    }
     if (!res.ok || !data || !data.firebaseToken || !data.officeSession) {
       throw new Error(res.status === 0 ? 'netz' : 'abgelehnt');
     }
@@ -2871,9 +2882,15 @@ function officeAnmeldungNachSync() {
 
 // Ablauf der Firebase-Sitzung (nach ca. einer Stunde): sauber zur Anmeldung zurueck.
 function officeSitzungAbgelaufen() {
-  if (!currentLoginUser) return;
-  toast('Sitzung abgelaufen', 'Bitte erneut anmelden.', '⏱');
-  setTimeout(() => location.reload(), 1500);
+  currentLoginUser = null; lagertoolSitzungMaId = null;
+  officeWartetAufSync = null; officeAnmeldungLaeuft = false;
+  try { if (typeof dbRef !== 'undefined' && dbRef) dbRef.off(); } catch {}
+  try { firebase.auth().signOut().catch(() => {}); } catch {}
+  // Remove private DOM immediately, before the reload clears the full application state.
+  document.getElementById('login-screen').style.display = 'flex';
+  const err = document.getElementById('login-error');
+  err.textContent = 'Die Büro-Sitzung wurde beendet. Bitte erneut anmelden.'; err.style.display = 'block';
+  setTimeout(() => location.reload(), 0);
 }
 
 function finishLogin() {
@@ -3131,6 +3148,7 @@ function openWebauthnSettingsModal() {
 
 let pendingSavePromise = null;
 async function doLogout() {
+  bzAbmelden();
   // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten,
   // damit der Reload keine frischen Änderungen "abschneidet" (Datenverlust-Bug).
   try {
@@ -3416,8 +3434,8 @@ function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdo
 // Die Daten liegen auf dem Server (R2). Die Büro-Sitzung wird nur im Speicher dieser Seite gehalten.
 // Die Pilot-Büroansicht darf niemals unbemerkt den produktiven Worker kontaktieren.
 const BZ_WORKER = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
-const BZ_PILOT_WORKER_OK = /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(BZ_WORKER)
-  && BZ_WORKER !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+const BZ_PILOT_WORKER_OK = window.lagertoolPilotWorkerAllowed ? window.lagertoolPilotWorkerAllowed(BZ_WORKER) : /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(BZ_WORKER) && BZ_WORKER !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+let bzGeneration = 0;
 const BZ_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Abgeschlossen' };
 const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittiert: 'Quittiert', abgeschlossen: 'Abgeschlossen', zurueckgegeben: 'Zur Bearbeitung zurück', wieder_geoeffnet: 'Wieder geöffnet' };
 let bzSession = null;          // { token, name }
@@ -3450,6 +3468,7 @@ function bzFehlertext(e) {
 }
 
 async function bzCall(method, path, body) {
+  const version = bzGeneration;
   if (!BZ_PILOT_WORKER_OK) {
     const e = new Error('pilot_not_configured');e.status = 0;e.code = 'pilot_not_configured';throw e;
   }
@@ -3467,10 +3486,14 @@ async function bzCall(method, path, body) {
   }
   let data = null;
   try { data = await res.json(); } catch (x) { data = null; }
+  if (version !== bzGeneration) { const e = new Error('session_changed'); e.code = 'session_changed'; throw e; }
   if (!res.ok) {
     const e = new Error(data && data.error ? data.error : 'http_' + res.status);
     e.status = res.status; e.code = data && data.error; e.aktuell = data && data.aktuell;
-    if (res.status === 401 && bzSession) { bzSession = null; }
+    if (res.status === 401 && bzSession && path !== '/app/pin-wechsel') {
+      bzAbmelden();
+      if (typeof officeSitzungAbgelaufen === 'function') officeSitzungAbgelaufen();
+    }
     throw e;
   }
   return data;
@@ -3484,6 +3507,7 @@ async function bzAnmelden(source = 'meldungen') {
   try {
     const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
     bzSession = { token: r.officeSession, name };
+    if (r.pinWechselPflicht) { bzPinWechsel(); return; }
     bzMeldung = null;
     await bzLaden();
   } catch (e) {
@@ -3494,6 +3518,9 @@ async function bzAnmelden(source = 'meldungen') {
 }
 
 function bzAbmelden() {
+  bzGeneration++;
+  window.PilotPin?.close();
+  bzRapportSiteId = 'all'; bzRapportAutorId = 'all';
   bzSession = null;
   bzDaten = { meldungen: [], rapporte: [] };
   bzMeldung = null;
@@ -3503,15 +3530,27 @@ function bzAbmelden() {
 // Laedt alle Vorgaenge vom Server. Ein Fehler laesst die alte Anzeige stehen und sagt es.
 async function bzLaden() {
   if (!bzSession) return bzRender();
+  const version = bzGeneration;
   try {
     const [m, r] = await Promise.all([bzCall('GET', '/app/admin/meldungen'), bzCall('GET', '/app/admin/rapporte')]);
+    if (version !== bzGeneration || !bzSession) return;
     bzDaten = { meldungen: m.meldungen || [], rapporte: r.rapporte || [] };
     bzMeldung = null;
   } catch (e) {
+    if (e.code === 'session_changed') return;
     if (e.code === 'unauthorized' || e.status === 401) { bzSession = null; bzMeldung = 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.'; }
     else bzMeldung = bzFehlertext(e);
   }
   bzRender();
+}
+
+function bzPinWechsel() {
+  PilotPin.open({ change: (altPin, neuPin) => bzCall('POST', '/app/pin-wechsel', { altPin, neuPin }),
+    cancel: () => bzAbmelden(), complete: () => {
+      bzAbmelden(); officeAnmeldungLaeuft = false;
+      const err = document.getElementById('login-error');
+      err.textContent = 'PIN geändert. Bitte mit dem neuen PIN anmelden.'; err.style.display = 'block';
+    } });
 }
 
 // Statuswechsel. expectedStatus ist der Stand, den das Büro gerade sieht.
@@ -3574,80 +3613,6 @@ function bzVerlauf(v) {
     const art = BZ_AKTION[e.aktion] || e.aktion;
     return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${bzEsc(String(e.at || '').slice(0, 16).replace('T', ' '))} · ${bzEsc(art)} · ${bzEsc(BZ_STATUS[e.von] || e.von)} → ${bzEsc(BZ_STATUS[e.nach] || e.nach)} · durch ${bzEsc(bzName(e.durchId))}${e.kommentar ? ' · ' + bzEsc(e.kommentar) : ''}</div>`;
   }).join('');
-}
-
-function bzRapportDatum(value) {
-  if (!value) return 'Zeitpunkt nicht hinterlegt';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Zeitpunkt nicht hinterlegt'
-    : date.toLocaleString('de-CH', { timeZone: 'Europe/Zurich', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function bzRenderRapporte() {
-  const el = document.getElementById('bz-rapporte-section');
-  if (!el) return;
-  if (!bzSession) {
-    el.innerHTML = `
-      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Büro-Anmeldung für Arbeitsrapporte</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Nur berechtigte Büromitarbeiter können Rapporte sehen.</div>
-      <input type="text" id="bz-rapport-login-name" autocomplete="username" placeholder="Name" style="margin-bottom:6px">
-      <input type="password" id="bz-rapport-login-pin" autocomplete="current-password" maxlength="4" inputmode="numeric" placeholder="PIN" style="margin-bottom:6px">
-      <button class="btn btn-primary" onclick="bzAnmelden('rapporte')">Anmelden</button>
-      ${bzMeldung ? '<div style="font-size:12px;color:var(--red);margin-top:8px">' + bzEsc(bzMeldung) + '</div>' : ''}`;
-    return;
-  }
-  const rapporte = Array.isArray(bzDaten.rapporte) ? bzDaten.rapporte : [];
-  const baustellen = state.baustellen || [];
-  // Alte Rapporte bleiben auch sichtbar, wenn die Baustelle nicht mehr im Stamm geführt wird.
-  const sites = new Map(baustellen.map(b => [String(b.id), String(b.name || b.id)]));
-  for (const r of rapporte) if (!sites.has(String(r.siteId))) sites.set(String(r.siteId), String(r.siteName || r.siteId));
-  const siteOptions = [...sites.entries()].sort((a,b) => a[1].localeCompare(b[1], 'de'))
-    .map(([id,name]) => `<option value="${bzEsc(id)}"${bzRapportSiteId === id ? ' selected' : ''}>${bzEsc(name)}</option>`).join('');
-  const people = new Map();
-  for (const r of rapporte) {
-    if (r.autorId == null) continue;
-    const id = String(r.autorId), name = String(r.autorName || bzName(id));
-    if (!people.has(id)) people.set(id, name);
-  }
-  const personOptions = [...people.entries()].sort((a,b) => a[1].localeCompare(b[1], 'de'))
-    .map(([id,name]) => `<option value="${bzEsc(id)}"${bzRapportAutorId === id ? ' selected' : ''}>${bzEsc(name)}</option>`).join('');
-  const selection = rapporte.filter(r =>
-    (bzRapportSiteId === 'all' || String(r.siteId) === bzRapportSiteId) &&
-    (bzRapportAutorId === 'all' || String(r.autorId) === bzRapportAutorId)
-  ).sort((a,b) => String(b.submittedAt || b.createdAt || b.datum || '').localeCompare(String(a.submittedAt || a.createdAt || a.datum || '')));
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      <div><b>Angemeldet als ${bzEsc(bzSession.name)}</b></div>
-      <div><button class="btn btn-sm" onclick="bzLaden()">↻ Aktualisieren</button>
-      <button class="btn btn-sm" onclick="bzAbmelden()">Abmelden</button></div>
-    </div>
-    ${bzMeldung ? '<p style="color:var(--red)">' + bzEsc(bzMeldung) + '</p>' : ''}
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <label style="flex:1;min-width:170px">Baustelle
-        <select id="bz-rapport-site" onchange="bzRapportSiteId=this.value;bzRenderRapporte()">
-          <option value="all">Alle Baustellen</option>${siteOptions}
-        </select>
-      </label>
-      <label style="flex:1;min-width:170px">Eingereicht von
-        <select id="bz-rapport-autor" onchange="bzRapportAutorId=this.value;bzRenderRapporte()">
-          <option value="all">Alle Monteure</option>${personOptions}
-        </select>
-      </label>
-    </div>
-    <div style="font-weight:700;font-size:14px;margin-bottom:10px">Eingereichte Rapporte (${selection.length})</div>
-    ${selection.length ? selection.map(r => `
-      <article style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
-        <div style="font-weight:700;font-size:13px">${bzEsc(r.siteName || sites.get(String(r.siteId)) || r.siteId)} · ${bzEsc(r.datum)}</div>
-        ${r.mode === 'simple' ? '' : `<div style="font-size:12px;color:var(--muted);margin-top:4px">Arbeitszeit: ${bzEsc(r.timeStart)}–${bzEsc(r.timeEnd)} · Pause ${bzEsc(r.breakMinutes)} Min.${r.totalHours == null ? '' : ' · ' + bzEsc(r.totalHours) + ' Std.'}</div>`}
-        <div style="font-size:13px;margin-top:8px"><b>Eingereicht von: ${bzEsc(r.autorName || bzName(r.autorId))}</b> (Mitarbeiter-ID: ${bzEsc(r.autorId)})</div>
-        <div style="font-size:12px;color:var(--muted)">Abgegeben am: ${bzEsc(bzRapportDatum(r.submittedAt || r.createdAt))} · Rapport-ID: ${bzEsc(r.id)}</div>
-        <div style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:9px">${bzEsc(r.workPerformed)}</div>
-        ${r.materialUsed ? '<div style="margin-top:6px;font-size:12px">Material: ' + bzEsc(r.materialUsed) + '</div>' : ''}
-        ${r.issues ? '<div style="margin-top:6px;font-size:12px">Probleme: ' + bzEsc(r.issues) + '</div>' : ''}
-        ${r.extraWork ? '<div style="margin-top:6px;font-size:12px">Zusatzarbeiten: ' + bzEsc(r.extraWork) + '</div>' : ''}
-        ${r.notes ? '<div style="margin-top:6px;font-size:12px">Notizen: ' + bzEsc(r.notes) + '</div>' : ''}
-        <div style="margin-top:8px;font-size:12px;color:var(--muted)">Für Rückfragen: ${bzEsc(r.autorName || bzName(r.autorId))}</div>
-      </article>`).join('') : '<p style="color:var(--muted)">Keine Arbeitsrapporte für diese Auswahl vorhanden.</p>'}`;
 }
 
 function bzRender() {
@@ -10436,7 +10401,7 @@ function readBsFile(file) {
 // Ersetzt für NEUE Dateien den bisherigen reinen Base64/IndexedDB-Weg.
 // Bestehende IndexedDB-Dokumente (readBsFile-Altbestand) bleiben unberührt.
 // ══════════════════════════════════════════════════════════════
-const LAGERTOOL_SITE_DOCS_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/api/v1/site-documents';
+const LAGERTOOL_SITE_DOCS_URL = String(window.MONTEUR_TEST_WORKER_URL || '') + '/api/v1/site-documents';
 
 // Leitet aus der Adresse eine Ortsangabe ab - identische Logik wie
 // deriveCityFromAddress() im Worker, damit Browser- und ChatGPT-Pfad auf
@@ -11825,10 +11790,12 @@ function applyFirebaseConfig() {
 }
 
 function initFirebase(url, key, pid, appid) {
-  console.log('[Firebase] initFirebase called', url, pid);
+  if (pid !== 'demo-lagertool' || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw Error('pilot_emulator_required');
   window._fbPid = pid;
   try {
-    firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
+    const app = firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
+    app.auth().useEmulator('http://127.0.0.1:9099');
+    app.database().useEmulator('127.0.0.1', 9000);
     console.log('[Firebase] app initialized (ohne Anmeldung, wartet auf Büro-Login)');
   } catch (e) {
     console.error('[Firebase] init error', e);
@@ -12603,10 +12570,11 @@ if (state.config.adminPw) { const el = document.getElementById('cfg-admin-pw'); 
 
 // Firebase: immer hardcoded Config verwenden (Netlify)
 window.addEventListener('load', function() {
-  const FB_URL    = 'https://wochenplanung-6b50a-default-rtdb.europe-west1.firebasedatabase.app';
-  const FB_KEY    = 'AIzaSyBwCjK7nzs8BV3GyFTouVFK16aUWGTntu4';
-  const FB_PID    = 'wochenplanung-6b50a';
-  const FB_APPID  = '1:715914728927:web:7630a296888f052c8f606a';
+  if (!['127.0.0.1', 'localhost'].includes(location.hostname)) return;
+  const FB_URL    = 'https://demo-lagertool-default-rtdb.firebaseio.com';
+  const FB_KEY    = 'demo-local-key';
+  const FB_PID    = 'demo-lagertool';
+  const FB_APPID  = '1:0:web:local';
   // Felder befüllen
   const u = document.getElementById('cfg-fb-url');
   const k = document.getElementById('cfg-fb-apikey');
@@ -13731,7 +13699,7 @@ function forceSave() {
   </div>
 </div>
 <script id="gpt-assistant-script">
-const GPT_ASSISTANT_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/';
+const GPT_ASSISTANT_URL = String(window.MONTEUR_TEST_WORKER_URL || '') + '/';
 const LAGERTOOL_OAUTH_CLIENT_ID = 'lagertool-webapp';
 const LAGERTOOL_OAUTH_REDIRECT_URI = 'https://vorburgerlucp-svg.github.io/Auftr-ge/';
 let lagertoolOAuthToken = null;
@@ -14598,6 +14566,7 @@ function gptToggleSpeech(){
 // PWA/Push-Grundregistrierung: keine Berechtigungsabfrage ohne Benutzeraktion.
 window.addEventListener('load',()=>{ todoServiceWorker().then(()=>todoPushStatusAktualisieren()).catch(()=>{}); todoHandleDeepLink(); setTimeout(todoPopupPruefen,500); });
 </script>
+<script src="office-rapports.js"></script>
 <script src="office-comms.js"></script>
 
 </body></html>

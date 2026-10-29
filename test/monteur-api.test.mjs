@@ -156,3 +156,33 @@ test('request ids are unique and well formed', () => {
   assert.equal(ids.size, 50);
   for (const id of ids) assert.match(id, /^req-[0-9a-f]{24}$/);
 });
+
+test('first login exposes PIN requirement, change ends session and requires a new login',async()=>{
+ const seen=[];
+ const api=load(async(url,init)=>{seen.push({url,init});return jsonRes(200,url.endsWith('/anmelden')?{sessionToken:'restricted',pinWechselPflicht:true}:{ok:true});});
+ assert.equal((await api.login('Test','1234')).pinWechselPflicht,true);
+ await api.changePin('1234','5678');
+ assert.equal(api.hasSession(),false);
+ assert.equal(seen[1].url,'/app/pin-wechsel');
+ assert.equal(seen[1].init.headers.Authorization,'Bearer restricted');
+});
+test('late login after logout cannot restore a session',async()=>{
+ let release;const api=load(()=>new Promise(r=>release=r));
+ const pending=api.login('Test','1234');api.endSession();release(jsonRes(200,{sessionToken:'late'}));
+ await assert.rejects(pending,e=>e.code==='session_changed');assert.equal(api.hasSession(),false);
+});
+test('late data after logout is discarded',async()=>{
+ let release;const api=load(async url=>url.endsWith('/anmelden')?jsonRes(200,{sessionToken:'t'}):new Promise(r=>release=r));
+ await api.login('Test','1234');const pending=api.get('/app/monteur/sites');api.endSession();release(jsonRes(200,{sites:[{id:'private'}]}));
+ await assert.rejects(pending,e=>e.code==='session_changed');
+});
+test('late 401 cannot terminate a newer login',async()=>{
+ let release;const api=load(async url=>url.endsWith('/anmelden')?jsonRes(200,{sessionToken:'new'}):new Promise(r=>release=r));
+ await api.login('Test','1234');const pending=api.get('/app/monteur/sites');await api.login('Test','5678');release(jsonRes(401,{error:'unauthorized'}));
+ await assert.rejects(pending,e=>e.code==='session_changed');assert.equal(api.hasSession(),true);
+});
+test('network failure after logout is not retried with a new identity',async()=>{
+ let reject,requests=0;const api=load(async url=>{if(url.endsWith('/anmelden'))return jsonRes(200,{sessionToken:'t'});requests++;return new Promise((_,r)=>reject=r);});
+ await api.login('Test','1234');const pending=api.post('/save',{requestId:'same'});api.endSession();reject(Error('offline'));
+ await assert.rejects(pending,e=>e.code==='session_changed');assert.equal(requests,1);
+});

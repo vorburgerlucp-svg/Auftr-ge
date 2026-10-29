@@ -4,10 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const begin = html.indexOf('function bzRapportDatum(value) {');
-const end = html.indexOf('function bzRender() {', begin);
-if(begin<0||end<=begin)throw Error('Separate Rapportansicht fehlt');
-const code = html.slice(begin,end);
+const code = readFileSync(new URL('../office-rapports.js', import.meta.url), 'utf8');
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({
   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'

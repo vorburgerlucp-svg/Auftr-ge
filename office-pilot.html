@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="pilot-config.js"></script>
+<script src="pilot-pin.js"></script>
 <title>LagerTool Pilot – Büro-Kommunikation</title>
 <style>
 :root{font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#213b33;background:#eef4f0}
@@ -24,12 +26,13 @@ nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 <main>
 <header>
   <h1>📬 LagerTool – Büro-Kommunikation</h1>
-  <p class="subtitle">Isolierte Testversion · Nur Monteur-Anfragen und Rückmeldungen · Keine Verbindung zur produktiven LagerTool-Datenbank</p>
+  <p class="subtitle">Isolierte Testversion · Monteur-Anfragen und Arbeitsrapporte · Keine Verbindung zur produktiven LagerTool-Datenbank</p>
   <nav>
     <button id="nav-anfragen" type="button">Anfragen <span id="bz-anfragen-count"></span></button>
-    <button type="button" onclick="window.location.reload()">Abmelden / neu starten</button>
+    <button type="button" onclick="bzAbmelden()">Abmelden / neu starten</button>
   </nav>
 </header>
+<section class="card"><h2>Arbeitsrapporte</h2><div id="bz-rapporte-section"></div></section>
 <div id="page-anfragen" class="active">
   <h2>Neue Meldungen, Reparaturen und Material</h2>
   <p class="subtitle">Büroantworten erscheinen automatisch im Postfach des jeweiligen Monteurs.</p>
@@ -38,9 +41,15 @@ nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 </main>
 <div id="notifications" aria-live="polite"></div>
 <script>
-const BZ_WORKER='https://auftragstool-ai-monteur-pilot.vorburgerluc-p.workers.dev';
-let bzSession=null;
+const BZ_WORKER=String(window.MONTEUR_TEST_WORKER_URL||'').trim();
+let bzSession=null,bzGeneration=0,bzDaten={meldungen:[],rapporte:[]},bzMeldung=null;
+let bzRapportSiteId='all',bzRapportAutorId='all';
+const state={baustellen:[]};
+function bzEsc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function bzName(id){return 'Mitarbeiter '+id;}
 async function bzCall(method,path,body){
+  if(!window.lagertoolPilotWorkerAllowed(BZ_WORKER))throw {code:'pilot_not_configured',status:0};
+  const generation=bzGeneration;
   const result=await fetch(BZ_WORKER+path,{
     method,credentials:'omit',cache:'no-store',
     headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),
@@ -48,13 +57,37 @@ async function bzCall(method,path,body){
     body:body!==undefined?JSON.stringify(body):undefined
   });
   let data={};try{data=await result.json();}catch{}
+  if(generation!==bzGeneration)throw {code:'session_changed'};
   if(!result.ok){
-    if(result.status===401)bzSession=null;
+    if(result.status===401&&bzSession&&path!=='/app/pin-wechsel')bzAbmelden();
     throw {code:data.error||'http_error',status:result.status};
   }
   return data;
 }
-async function bzLaden(){return;}
+function bzAbmelden(){
+  bzGeneration++;window.PilotPin?.close();bzSession=null;bzDaten={meldungen:[],rapporte:[]};
+  bzRapportSiteId='all';bzRapportAutorId='all';bzMeldung=null;bzRenderRapporte();
+}
+function bzPinWechsel(){
+  PilotPin.open({change:(altPin,neuPin)=>bzCall('POST','/app/pin-wechsel',{altPin,neuPin}),cancel:bzAbmelden,
+    complete:()=>{bzAbmelden();bzMeldung='PIN geändert. Bitte erneut anmelden.';bzRenderRapporte();}});
+}
+async function bzAnmelden(){
+  const name=document.getElementById('bz-rapport-login-name').value.trim();
+  const pin=document.getElementById('bz-rapport-login-pin').value;
+  try{const data=await bzCall('POST','/app/office/anmelden',{name,pin});
+    if(!data.officeSession)throw Error('login_failed');bzSession={token:data.officeSession,name};
+    if(data.pinWechselPflicht){bzPinWechsel();return;}await bzLaden();
+  }catch(e){if(e.code==='session_changed')return;bzAbmelden();bzMeldung='Anmeldung fehlgeschlagen.';bzRenderRapporte();}
+}
+async function bzLaden(){
+  if(!bzSession){bzRenderRapporte();return;}
+  const generation=bzGeneration;
+  try{const data=await bzCall('GET','/app/admin/rapporte');if(generation!==bzGeneration||!bzSession)return;
+    bzDaten.rapporte=data.rapporte||[];bzMeldung=null;bzRenderRapporte();
+  }catch(e){if(e.code==='session_changed')return;bzMeldung=e.status===401?'Büro-Sitzung beendet. Bitte erneut anmelden.':'Keine Verbindung. Bitte erneut versuchen.';bzRenderRapporte();}
+}
+window.setInterval(()=>{if(bzSession)bzLaden();},60000);
 function toast(title,message){
   const box=document.getElementById('notifications'),n=document.createElement('div');
   const strong=document.createElement('strong'),p=document.createElement('p');
@@ -62,6 +95,8 @@ function toast(title,message){
   setTimeout(()=>n.remove(),12000);
 }
 </script>
+<script src="office-rapports.js"></script>
+<script>bzRenderRapporte();</script>
 <script src="office-comms.js"></script>
 </body>
 </html>
