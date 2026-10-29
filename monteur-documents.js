@@ -90,7 +90,7 @@ function chooseSite(parent,r,a,v){
 }
 async function showUpload(batch=null){
  const a=adapter();if(!enabled||a?.prefix!=='/app/monteur')return;queue?.pause();const v=++generation;root.hidden=false;root.replaceChildren(node('h2','Dokumente hochladen'));
- root.append(node('p','Bis 40 JPG/PNG/PDF, je 8 MB, insgesamt 16 MB. Mindestens 30 kleine Fotos sind möglich. HEIC vorher auf dem Gerät sicher als JPEG exportieren. Originale bleiben privat; bei unklarer Baustelle folgt eine Rückfrage.'));
+ root.append(node('p','Bis 40 JPG/PNG/PDF, je 8 MB, insgesamt 16 MB; JPEG maximal 4 Megapixel. Mindestens 30 kleine Fotos sind möglich. HEIC vorher auf dem Gerät sicher als JPEG exportieren. Originale bleiben privat; bei unklarer Baustelle folgt eine Rückfrage.'));
  const files=field(root,'Fotos oder PDFs auswählen','file');files.multiple=true;files.accept='.jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf';const progress=node('progress');progress.max=1;progress.value=0;const label=node('p','Bereit');root.append(progress,label);
  queue=new UploadQueue(a,(done,total)=>{if(current(a,v)){progress.max=total;progress.value=done;label.textContent=done+' / '+total+' gespeichert';}});
  files.onchange=()=>{try{queue.setFiles(files.files,batch);label.textContent=queue.files.length+' Dateien ausgewählt';}catch(e){error(e);}};
