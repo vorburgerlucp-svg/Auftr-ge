@@ -62,9 +62,10 @@
     assertCurrent(version);
     const url = baseUrl + path + (query ? '?' + new URLSearchParams(query).toString() : '');
     const headers = {};
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const multipart=typeof global.FormData==='function'&&body instanceof global.FormData;
+    if (body !== undefined&&!multipart) headers['Content-Type'] = 'application/json';
     if (token) headers.Authorization = 'Bearer ' + token;
-    const init = { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, cache: 'no-store', credentials: 'omit' };
+    const init = { method, headers, body: multipart ? body : body !== undefined ? JSON.stringify(body) : undefined, cache: 'no-store', credentials: 'omit' };
     let res;
     try {
       res = await global.fetch(url, init);
@@ -111,6 +112,9 @@
 
   const api = {
     configure,
+    sessionVersion() { return generation; },
+    getBinary(path) { return send(path, 'GET', undefined, null, { binary: true }); },
+    uploadBatchFile(id,index,file) { const form=new global.FormData(); form.set('id',id); form.set('index',String(index)); form.set('file',file,file.name); return send('/app/monteur/batches/file','POST',form,null,{retryNetwork:true}); },
     ApiError,
     messageFor(err) {
       if (err && err.code && ERR[err.code]) return ERR[err.code];
