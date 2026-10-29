@@ -581,6 +581,7 @@ async function loadMonteurData() {
   const farbe = Object.fromEntries(neu.baustellen.map(b => [String(b.id), b.farbeHex]));
   for (const e of plan.eintraege) {
     if (!neu.plan[e.datum]) neu.plan[e.datum] = {};
+    if(e.status){neu.plan[e.datum]['status_ma'+me.id]={maId:me.id,status:e.status,farbeHex:e.farbeHex,notiz:e.notiz||''};continue;}
     neu.plan[e.datum]['ma' + me.id + '_' + e.datum] = {
       maId: me.id, bsId: e.siteId, farbeHex: farbe[String(e.siteId)] || '#8a8f98', notiz: e.notiz || ''
     };

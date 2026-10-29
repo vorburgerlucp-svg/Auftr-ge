@@ -1,7 +1,7 @@
 (function(global){
   'use strict';
   const labels={siteName:'Baustelle',adresse:'Adresse',address:'Adresse',kunde:'Kunde',auftragsnummer:'Auftrag',kommission:'Kommission',von:'Von',bis:'Bis',startzeit:'Baustellenbeginn',siteStart:'Baustellenbeginn',montagebeschreibung:'Montagearbeiten',montageArt:'Montageart',rapportDate:'Berichtsdatum',timeStart:'Arbeitsbeginn',timeEnd:'Arbeitsende',breakMinutes:'Pause in Minuten',totalHours:'Arbeitsstunden',workPerformed:'Ausgeführte Arbeiten',materialUsed:'Verwendetes Material',issues:'Probleme',extraWork:'Zusatzarbeiten',notes:'Berichtnotizen'};
-  let panel,result,errorBox,input,launcher,busy=false,epoch=0;
+  let panel,result,errorBox,input,launcher,vacationButton,busy=false,epoch=0;
   let voice=null,voiceTarget=null,voiceButton=null,voiceStatus=null,voiceRun=0;
   const controls=new Set();
   const el=(tag,content)=>{const n=document.createElement(tag);if(content!==undefined)n.textContent=String(content);return n;};
@@ -197,6 +197,8 @@
       const card=el('article');card.append(el('h3',d.fileName||'Dokument'));line(card,'Dokumentdatum',d.documentDate||'nicht hinterlegt');line(card,'Version',d.version??'nicht hinterlegt');line(card,'Abgelegt',d.createdAt);
       card.append(button('Öffnen',()=>openDocument({...d,siteId:data.siteId})));result.append(card);
     }
+    if(data.kind==='vacation_form')vacationForm(data);
+    if(data.kind==='vacation_list')vacationList(data.requests||[]);
     if(data.kind==='report_form')reportForm(data);
     if(data.kind==='report_preview'){
       if(data.report?.mode==='simple'){
@@ -217,6 +219,38 @@
       line(result,'Gespeichert um',data.submittedAt);
       line(result,'Rapport-ID',data.reportId);
     }
+  }
+  function vacationList(items){
+    for(const r of items){const card=el('article');card.append(el('h3','Ferien '+r.from+' bis '+r.to));
+      line(card,'Status',r.status);line(card,'Bemerkung',r.note);line(card,'Begründung',r.reason);result.append(card);}
+    if(!items.length)result.append(el('p','Noch keine Ferienanträge.'));
+  }
+  function vacationForm(data){
+    const from=formField(result,'Ferienbeginn (mit Jahr)'),to=formField(result,'Ferienende (mit Jahr)'),note=formField(result,'Bemerkung (optional)','textarea');
+    from.type=to.type='date';from.id='assistant-vacation-from';to.id='assistant-vacation-to';note.id='assistant-vacation-note';
+    from.value=data.from||'';to.value=data.to||'';
+    result.append(el('p','Mitarbeiter: automatisch aus deiner Anmeldung. Keine automatische Genehmigung.'));
+    result.append(button('Ferienantrag prüfen',()=>{
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(from.value)||!/^\d{4}-\d{2}-\d{2}$/.test(to.value)||from.value>to.value){
+        errorBox.replaceChildren(el('p','Bitte gültigen Zeitraum mit Jahr angeben.'));return;}
+      const payload={from:from.value,to:to.value,note:note.value,confirmation:true,requestId:global.MonteurApi.newRequestId()};
+      result.replaceChildren(el('h3','Ferienantrag prüfen'));line(result,'Von',payload.from);line(result,'Bis',payload.to);line(result,'Bemerkung',payload.note);
+      result.append(button('Zurück bearbeiten',()=>render({...data,from:payload.from,to:payload.to,kind:'vacation_form'})));
+      result.append(button('Ferienantrag verbindlich absenden',async()=>{
+        if(busy)return;const generation=epoch;setBusy(true);errorBox.replaceChildren();
+        try{const saved=await global.MonteurApi.post('/app/monteur/ferien',payload);
+          if(generation!==epoch)return;
+          if(!saved.ok)throw Error('Ferienantrag wurde nicht als gespeichert bestätigt.');
+          result.replaceChildren(el('h3','Ferienantrag eingereicht'),el('p','Status: '+saved.request.status));
+        }catch(e){if(generation===epoch)failure(e);}finally{if(generation===epoch)setBusy(false);}
+      }));
+    }));
+  }
+  async function loadVacationFeature(){
+    const generation=epoch;
+    try{const data=await global.MonteurApi.get('/app/monteur/features');
+      if(generation===epoch&&global.MonteurApi.hasSession())vacationButton.hidden=data.vacationEnabled!==true;
+    }catch{if(generation===epoch)vacationButton.hidden=true;}
   }
   async function ask(body){
     if(busy)return;
@@ -250,7 +284,8 @@
       ['Meine Bestellungen',()=>ownOrders()]],
     dokumente:[['Pläne anzeigen',()=>ask({tool:'site_documents',args:{}})],
       ['Dokument hochladen',()=>uploadInformation()]],
-    postfach:[['Meine Nachrichten',()=>showInbox()],
+    postfach:[['Meine Ferienanträge',()=>ask({tool:'my_vacations',args:{}})],
+      ['Meine Nachrichten',()=>showInbox()],
       ['Allgemeine Anfrage',()=>requestForm('general')]]
   };
   let sectionMenu=null, inboxTimer=null, noticeBox=null, lastNotified=new Set();
@@ -347,7 +382,7 @@
     line(card,'Aktualisiert',record.updatedAt);
     if(record.version>record.ackVersion)card.append(button('✓ Gelesen',async()=>{
       try{
-        await global.MonteurApi.post('/app/monteur/requests/'+encodeURIComponent(record.id)+'/ack',{version:record.version});
+        await global.MonteurApi.post((record.kind==='vacation_request'?'/app/monteur/ferien/':'/app/monteur/requests/')+encodeURIComponent(record.id)+'/ack',{version:record.version});
         await showInbox();
       }catch(e){failure(e);}
     }));
@@ -365,11 +400,13 @@
   }
   async function checkMessages(){
     if(!global.MonteurApi?.hasSession())return;
+    const generation=epoch;
     try{
       const data=await global.MonteurApi.get('/app/monteur/requests');
+      if(generation!==epoch||!global.MonteurApi.hasSession())return;
       const unread=(data.requests||[]).filter(r=>r.version>r.ackVersion&&!lastNotified.has(r.id+':'+r.version));
       if(!unread.length)return;
-      for(const r of unread)lastNotified.add(r.id+':'+r.version);
+      const first=unread[0];lastNotified.add(first.id+':'+first.version);
       noticeBox?.remove();
       noticeBox=el('div');
       noticeBox.className='assistant-notice';
@@ -377,7 +414,12 @@
       noticeBox.append(el('strong','📬 Neue Antwort vom Büro'));
       const r=unread[0];noticeBox.append(el('p',[r.targetLabel||r.kind,r.reply||r.status].join(' · ')));
       noticeBox.append(button('Nachricht ansehen',()=>{noticeBox.remove();noticeBox=null;panel.hidden=false;showInbox();}));
-      noticeBox.append(button('Später',()=>{noticeBox.remove();noticeBox=null;}));
+      if(r.kind==='vacation_request')noticeBox.append(button('Verstanden',async()=>{
+        try{await global.MonteurApi.post('/app/monteur/ferien/'+encodeURIComponent(r.id)+'/ack',{version:r.version});
+          if(generation!==epoch)return;noticeBox?.remove();noticeBox=null;await checkMessages();
+        }catch(e){if(generation===epoch&&noticeBox)noticeBox.append(el('p','Nicht quittiert. Bitte erneut versuchen.'));}
+      }));
+      else noticeBox.append(button('Später',()=>{noticeBox.remove();noticeBox=null;}));
       document.body.append(noticeBox);
     }catch{/* connection errors should not interrupt the Monteur's current work */}
   }
@@ -523,6 +565,8 @@
     for(const [id,title] of [['baustellen','🏗️ Baustellen'],['fahrzeuge','🚐 Fahrzeuge'],
       ['werkzeuge','🧰 Werkzeuge'],['bestellungen','📦 Bestellungen'],['dokumente','📁 Dokumente'],
       ['postfach','📬 Nachrichten']])sectionMenu.append(button(title,()=>showSection(id)));
+    vacationButton=button('Ferien beantragen',()=>ask({tool:'vacation_request',args:{}}));vacationButton.id='assistant-vacation-launch';vacationButton.hidden=true;
+    panel.append(vacationButton);
     panel.append(sectionMenu);
     const shortcutDetails=el('details');const quickSummary=el('summary','Schnellfragen (optional)');shortcutDetails.append(quickSummary);
     const shortcuts=el('div');shortcuts.style.display='grid';shortcuts.style.gridTemplateColumns='repeat(2,minmax(0,1fr))';
@@ -549,7 +593,7 @@
     errorBox=el('div');errorBox.id='assistant-errors';errorBox.setAttribute('role','alert');result=el('div');result.id='assistant-result';result.setAttribute('aria-live','polite');panel.append(errorBox,result);
     document.body.append(launcher,panel);
   }
-  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;setBusy(false);}
-  global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;startInboxPolling();showHome();},reset};
+  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;if(vacationButton)vacationButton.hidden=true;setBusy(false);}
+  global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;startInboxPolling();loadVacationFeature();showHome();},reset};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(typeof window!=='undefined'?window:globalThis);

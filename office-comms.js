@@ -1,7 +1,7 @@
 // LagerTool Pilot: private office inbox, no unauthenticated data and no unsafe HTML insertion.
 (function(){
 'use strict';
-const kinds={vehicle_service:'Fahrzeug-Service',vehicle_repair:'Fahrzeug-Reparatur',
+const kinds={vacation_request:'Ferienantrag · Prio 1',vehicle_service:'Fahrzeug-Service',vehicle_repair:'Fahrzeug-Reparatur',
   tool_repair:'Werkzeug-Reparatur',material_request:'Materialanfrage',
   site_issue:'Baustellenproblem',general:'Nachricht',document_upload:'Dokument zur Prüfung'};
 const statusValues=['neu','in_bearbeitung','terminiert','bereit','erledigt','abgelehnt'];
@@ -24,7 +24,7 @@ function render(){
   const root=section();if(!root)return;
   if(!active()){requests=[];seen.clear();ready=false;}
   const badge=document.getElementById('bz-anfragen-count');
-  const neu=requests.filter(r=>r.status==='neu').length;
+  const neu=requests.filter(r=>['neu','BEANTRAGT'].includes(r.status)).length;
   if(badge)badge.textContent=neu?'('+neu+')':'';
   root.replaceChildren();
   if(!active()){
@@ -61,6 +61,21 @@ function render(){
     card.append(node('h3',(kinds[item.kind]||item.kind)+' · '+(item.targetLabel||'Allgemein')));
     const meta=node('small','Von: '+(item.authorName||item.employeeId)+' · '+item.createdAt+' · '+item.status);
     card.append(meta,row('Anfrage',item.message));
+    if(item.kind==='vacation_request'){
+      const details=node('div');card.append(details);
+      details.append(row('Zeitraum',item.from+' bis '+item.to),row('Mitarbeiter-ID',item.employeeId),row('Status',item.status));
+      for(const event of item.history||[])details.append(row('Protokoll',event.at+' · '+event.by+' · '+event.action));
+      if(item.status==='BEANTRAGT'){
+        const conflicts=item.conflicts||[];
+        const summary=node('p',conflicts.length?'Genehmigung gesperrt: Einsätze/Abwesenheiten zuerst in der bestehenden Wochenplanung bereinigen.':'Keine Konflikte im zuletzt gelesenen Plan. Beim Speichern wird erneut atomar geprüft.');
+        details.append(summary);
+        for(const c of conflicts)details.append(row('Konflikt',c.date+' · '+(c.siteId||c.status)+' · '+c.note));
+        const reason=field(details,'Begründung (optional)','textarea');reason.maxLength=1500;
+        const approve=btn('Ferien genehmigen',()=>decideVacation(item,'BESTÄTIGT',reason.value));approve.disabled=conflicts.length>0;
+        details.append(btn('Planung erneut prüfen',()=>load(false)),approve,btn('Ferien ablehnen',()=>decideVacation(item,'ABGELEHNT',reason.value)));
+      }else details.append(row('Begründung',item.reason));
+      root.append(card);continue;
+    }
     if(item.kind==='document_upload'&&item.attachment){
       const attachment=btn('📎 '+(item.attachment.fileName||'Datei')+' herunterladen',async()=>{
         try{
@@ -107,6 +122,19 @@ function render(){
     root.append(card);
   }
 }
+async function decideVacation(item,decision,reason){
+  const version=viewVersion,session=bzSession;
+  try{
+    await bzCall('POST','/app/admin/ferien/'+encodeURIComponent(item.id)+'/decision',{decision,reason});
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    if(typeof toast==='function')toast('Ferienantrag',decision==='BESTÄTIGT'?'Genehmigt und Wochenplan kontrolliert.':'Abgelehnt; Wochenplan unverändert.','✅');
+    await load(false);
+  }catch(e){
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    if(typeof toast==='function')toast('Nicht bestätigt',e?.code==='planning_conflict'?'Die Planung hat Konflikte. Zuerst dort bereinigen.':'Keine bestätigte Speicherung. Bitte aktualisieren und prüfen.','⚠️');
+    await load(false);
+  }
+}
 async function load(silent=true){
   if(!active()){if(!silent)render();return;}
   if(loading)return;loading=true;
@@ -115,14 +143,18 @@ async function load(silent=true){
     const session=bzSession;
     const data=await bzCall('GET','/app/admin/requests');
     if(version!==viewVersion||session!==bzSession||!active())return;
-    const items=data.requests||[];
-    const fresh=ready?items.filter(i=>i.status==='neu'&&!seen.has(i.id)):[];
+    let vacations=[];
+    try{const data=await bzCall('GET','/app/admin/ferien');vacations=data.requests||[];}
+    catch(e){if(e?.status!==404)throw e;}
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    const items=[...vacations.map(r=>({...r,kind:'vacation_request',targetLabel:r.from+' bis '+r.to,message:r.note})),...(data.requests||[])];
+    const fresh=ready?items.filter(i=>['neu','BEANTRAGT'].includes(i.status)&&!seen.has(i.id)):[];
     items.forEach(i=>seen.add(i.id));
     ready=true;requests=items;
     if(fresh.length)notify((kinds[fresh[0].kind]||fresh[0].kind)+' – '+(fresh[0].targetLabel||'')+' von '+fresh[0].authorName);
     const visible=document.getElementById('page-anfragen')?.classList.contains('active');
     if(visible||!silent)render();
-    else{const badge=document.getElementById('bz-anfragen-count');if(badge){const count=requests.filter(x=>x.status==='neu').length;badge.textContent=count?'('+count+')':'';}}
+    else{const badge=document.getElementById('bz-anfragen-count');if(badge){const count=requests.filter(x=>['neu','BEANTRAGT'].includes(x.status)).length;badge.textContent=count?'('+count+')':'';}}
   }catch(e){if(!silent&&typeof toast==='function')toast('Keine Verbindung zum Postfach','Bitte später aktualisieren','⚠️');}
   finally{loading=false;}
 }

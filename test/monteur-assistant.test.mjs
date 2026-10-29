@@ -56,3 +56,20 @@ test('logout reset removes report previews and stale replies cannot restore them
   const pending=x.ctx.MonteurAssistant.ask({message:'Wo bin ich morgen?'});x.ctx.MonteurAssistant.reset();resolve({ok:true,kind:'help',reply:'STALE'});await pending;
   assert.ok(!x.body.all().some(e=>e.textContent==='STALE'));
 });
+
+test('vacation form previews dates before sending and retries with the same request id',async()=>{
+ const x=setup([{ok:true,kind:'vacation_form',from:'2027-04-12',to:'2027-04-23',reply:'Prüfen'},new Error('Speicherfehler'),{ok:true,request:{id:'ferien_req-test',status:'BEANTRAGT'}}]);
+ x.ctx.MonteurApi.newRequestId=()=> 'req-'+'a'.repeat(24);
+ await x.ctx.MonteurAssistant.ask({message:'Ich möchte Ferien'});
+ const preview=x.body.all().find(e=>e.textContent==='Ferienantrag prüfen');assert.ok(preview);await preview.click();assert.equal(x.calls.length,1);
+ const confirm=x.body.all().find(e=>e.textContent==='Ferienantrag verbindlich absenden');assert.ok(confirm);await confirm.click();await confirm.click();
+ assert.equal(x.calls[1].path,'/app/monteur/ferien');assert.equal(x.calls[1].data.confirmation,true);assert.equal(x.calls[1].data.employeeId,undefined);assert.equal(x.calls[1].data.requestId,x.calls[2].data.requestId);
+});
+test('logout before vacation save finishes cannot resurrect private vacation data',async()=>{
+ const x=setup([{ok:true,kind:'vacation_form',from:'2027-04-12',to:'2027-04-23'}]);x.ctx.MonteurApi.newRequestId=()=> 'req-'+'a'.repeat(24);
+ await x.ctx.MonteurAssistant.ask({tool:'vacation_request'});
+ await x.body.all().find(e=>e.textContent==='Ferienantrag prüfen').click();
+ let resolve;x.ctx.MonteurApi.post=()=>new Promise(r=>resolve=r);
+ const pending=x.body.all().find(e=>e.textContent==='Ferienantrag verbindlich absenden').click();x.ctx.MonteurAssistant.reset();resolve({ok:true,request:{status:'BEANTRAGT'}});await pending;
+ assert.ok(!x.body.all().some(e=>e.textContent==='Ferienantrag eingereicht'));
+});
