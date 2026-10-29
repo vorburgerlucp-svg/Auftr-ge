@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>LagerTool – Monteur</title>
+<script src="pilot-config.js"></script>
+<script src="pilot-pin.js"></script>
 <script src="monteur-api.js"></script>
 <style>
   :root {
@@ -268,7 +270,7 @@
   </div>
 </div>
 
-<script src="pilot-config.js"></script>
+
 <!-- PAGE: BAUSTELLEN-STATUS -->
 <div id="page-baustatus" class="page">
   <h1>📊 Baustellen-Status</h1>
@@ -535,8 +537,7 @@ function setSyncStatus(state, label) {
 // ── START ──
 // Pilot-App: niemals automatisch auf den produktiven Worker ausweichen.
 const MONTEUR_WORKER_URL = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
-const MONTEUR_TEST_HOST_OK = /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(MONTEUR_WORKER_URL)
-  && MONTEUR_WORKER_URL !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+const MONTEUR_TEST_HOST_OK = window.lagertoolPilotWorkerAllowed(MONTEUR_WORKER_URL);
 window.addEventListener('load', function () {
   MonteurApi.configure({ baseUrl: MONTEUR_WORKER_URL, onSessionEnd: onSessionEnded });
   load();
@@ -544,6 +545,7 @@ window.addEventListener('load', function () {
 });
 
 function onSessionEnded() {
+  window.PilotPin?.close();
   window.MonteurAssistant?.reset();
   if (!currentLoginUser) return;
   currentLoginUser = null;
@@ -572,12 +574,14 @@ async function loadMonteurData() {
     MonteurApi.get('/app/monteur/arbeitsleistungen'),
     MonteurApi.get('/app/monteur/rapporte')
   ]);
+  if (!MonteurApi.hasSession() || currentLoginUser !== me) throw new MonteurApi.ApiError(401, 'session_changed');
   const neu = emptyState();
   neu.mitarbeiter = [me];
   neu.baustellen = sites.sites.map(siteToLocal);
   const farbe = Object.fromEntries(neu.baustellen.map(b => [String(b.id), b.farbeHex]));
   for (const e of plan.eintraege) {
     if (!neu.plan[e.datum]) neu.plan[e.datum] = {};
+    if(e.status){neu.plan[e.datum]['status_ma'+me.id]={maId:me.id,status:e.status,farbeHex:e.farbeHex,notiz:e.notiz||''};continue;}
     neu.plan[e.datum]['ma' + me.id + '_' + e.datum] = {
       maId: me.id, bsId: e.siteId, farbeHex: farbe[String(e.siteId)] || '#8a8f98', notiz: e.notiz || ''
     };
@@ -643,7 +647,14 @@ async function doLogin() {
     return;
   }
   try {
-    await MonteurApi.login(name, pin);
+    const login = await MonteurApi.login(name, pin);
+    if (login.pinWechselPflicht) {
+      document.getElementById('login-pin').value = '';
+      PilotPin.open({ change: (alt, neu) => MonteurApi.changePin(alt, neu),
+        cancel: () => MonteurApi.endSession(),
+        complete: () => { errEl.textContent = 'PIN geändert. Bitte mit dem neuen PIN anmelden.'; errEl.style.display = 'block'; } });
+      return;
+    }
     const profil = await MonteurApi.get('/app/monteur/profil');
     currentLoginUser = {
       id: profil.profil.id,
@@ -655,16 +666,19 @@ async function doLogin() {
     await loadMonteurData();
     finishLogin();
   } catch (e) {
+    if (e.code === 'session_changed') return;
     currentLoginUser = null;
     MonteurApi.endSession();
     state = emptyState();
     document.getElementById('login-pin').value = '';
+    if (e.code === 'session_changed') return;
     errEl.textContent = MonteurApi.messageFor(e);
     errEl.style.display = 'block';
   }
 }
 
 function doLogout() {
+  window.PilotPin?.close();
   window.MonteurAssistant?.reset();
   currentLoginUser = null;
   MonteurApi.endSession();
@@ -675,6 +689,7 @@ function doLogout() {
 }
 
 function finishLogin() {
+  if (!MonteurApi.hasSession() || !currentLoginUser) return;
   window.MonteurAssistant?.show();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('header-name').textContent = currentLoginUser.vorname + ' ' + (currentLoginUser.nachname||'');

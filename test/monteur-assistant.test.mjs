@@ -30,13 +30,13 @@ test('assistant previews report and writes only after the explicit confirmation 
   assert.ok(x.ctx.MonteurAssistant,'assistant is installed');
   await x.ctx.MonteurAssistant.ask({tool:'report_draft',args:{siteId:'a'}});
   assert.equal(x.calls.length,1);assert.ok(!x.calls[0].data.confirmation);
-  const confirm=x.body.all().find(e=>e.textContent==='Bericht verbindlich speichern');assert.ok(confirm);
+  const confirm=x.body.all().find(e=>e.textContent==='Rapport verbindlich speichern');assert.ok(confirm);
   await confirm.click();assert.equal(x.calls.length,2);assert.equal(x.calls[1].data.draftToken,'signed-preview');assert.equal(x.calls[1].data.confirmation,true);
 });
 test('storage failure stays visible and retains the same confirmation token',async()=>{
   const x=setup([{ok:true,kind:'report_preview',report:{siteName:'Nord',workPerformed:'Text'},draftToken:'same',reply:'Prüfen'},new Error('Speichern fehlgeschlagen'),{ok:true,kind:'report_saved',reply:'Gespeichert'}]);
   assert.ok(x.ctx.MonteurAssistant);await x.ctx.MonteurAssistant.ask({tool:'report_draft'});
-  const b=x.body.all().find(e=>e.textContent==='Bericht verbindlich speichern');await b.click();
+  const b=x.body.all().find(e=>e.textContent==='Rapport verbindlich speichern');assert.ok(b);await b.click();
   assert.ok(x.body.all().some(e=>e.textContent==='Speichern fehlgeschlagen'));await b.click();assert.equal(x.calls[2].data.draftToken,'same');
 });
 test('ambiguous site choice resends the original function with exactly the selected id',async()=>{
@@ -55,4 +55,21 @@ test('logout reset removes report previews and stale replies cannot restore them
   x.ctx.MonteurApi.post=()=>new Promise(r=>resolve=r);
   const pending=x.ctx.MonteurAssistant.ask({message:'Wo bin ich morgen?'});x.ctx.MonteurAssistant.reset();resolve({ok:true,kind:'help',reply:'STALE'});await pending;
   assert.ok(!x.body.all().some(e=>e.textContent==='STALE'));
+});
+
+test('vacation form previews dates before sending and retries with the same request id',async()=>{
+ const x=setup([{ok:true,kind:'vacation_form',from:'2027-04-12',to:'2027-04-23',reply:'Prüfen'},new Error('Speicherfehler'),{ok:true,request:{id:'ferien_req-test',status:'BEANTRAGT'}}]);
+ x.ctx.MonteurApi.newRequestId=()=> 'req-'+'a'.repeat(24);
+ await x.ctx.MonteurAssistant.ask({message:'Ich möchte Ferien'});
+ const preview=x.body.all().find(e=>e.textContent==='Ferienantrag prüfen');assert.ok(preview);await preview.click();assert.equal(x.calls.length,1);
+ const confirm=x.body.all().find(e=>e.textContent==='Ferienantrag verbindlich absenden');assert.ok(confirm);await confirm.click();await confirm.click();
+ assert.equal(x.calls[1].path,'/app/monteur/ferien');assert.equal(x.calls[1].data.confirmation,true);assert.equal(x.calls[1].data.employeeId,undefined);assert.equal(x.calls[1].data.requestId,x.calls[2].data.requestId);
+});
+test('logout before vacation save finishes cannot resurrect private vacation data',async()=>{
+ const x=setup([{ok:true,kind:'vacation_form',from:'2027-04-12',to:'2027-04-23'}]);x.ctx.MonteurApi.newRequestId=()=> 'req-'+'a'.repeat(24);
+ await x.ctx.MonteurAssistant.ask({tool:'vacation_request'});
+ await x.body.all().find(e=>e.textContent==='Ferienantrag prüfen').click();
+ let resolve;x.ctx.MonteurApi.post=()=>new Promise(r=>resolve=r);
+ const pending=x.body.all().find(e=>e.textContent==='Ferienantrag verbindlich absenden').click();x.ctx.MonteurAssistant.reset();resolve({ok:true,request:{status:'BEANTRAGT'}});await pending;
+ assert.ok(!x.body.all().some(e=>e.textContent==='Ferienantrag eingereicht'));
 });

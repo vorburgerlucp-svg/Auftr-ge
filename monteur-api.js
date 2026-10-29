@@ -43,6 +43,8 @@
 
   let baseUrl = '';
   let token = null;
+  let generation = 0;
+  function assertCurrent(version) { if (version !== generation) throw new ApiError(401, 'session_changed', null); }
   let onSessionEnd = null;
 
   function configure(opts) {
@@ -56,7 +58,8 @@
     return 'req-' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  async function send(path, method, body, query, { retryNetwork = false, keepSessionOn401 = false, binary = false } = {}) {
+  async function send(path, method, body, query, { retryNetwork = false, keepSessionOn401 = false, binary = false, version = generation } = {}) {
+    assertCurrent(version);
     const url = baseUrl + path + (query ? '?' + new URLSearchParams(query).toString() : '');
     const headers = {};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -66,14 +69,17 @@
     try {
       res = await global.fetch(url, init);
     } catch (e) {
-      if (retryNetwork) return send(path, method, body, query, { retryNetwork: false, keepSessionOn401, binary });
+      assertCurrent(version);
+      if (retryNetwork) return send(path, method, body, query, { retryNetwork: false, keepSessionOn401, binary, version });
       throw new ApiError(0, 'network', null);
     }
-    if (res.ok && binary) return res.blob();
+    assertCurrent(version);
+    if (res.ok && binary) { const blob = await res.blob(); assertCurrent(version); return blob; }
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
+    assertCurrent(version);
     if (res.status === 401 && !keepSessionOn401 && token) {
-      token = null;
+      api.endSession();
       if (onSessionEnd) onSessionEnd();
     }
     if (!res.ok) throw new ApiError(res.status, (data && data.error) || ('http_' + res.status), data);
@@ -85,6 +91,7 @@
     if(!file||file.size<1||file.size>8*1024*1024)throw new ApiError(400,'invalid_file_size',null);
     const allowed=new Set(['application/pdf','image/jpeg','image/png','image/webp']);
     if(!allowed.has(file.type))throw new ApiError(415,'unsupported_file_type',null);
+    const version=generation;
     const form=new FormData();
     form.append('siteId',String(siteId||''));
     form.append('file',file,file.name);
@@ -94,9 +101,10 @@
       res=await global.fetch(baseUrl+'/app/monteur/upload',{
         method:'POST',headers:{Authorization:'Bearer '+token},body:form,credentials:'omit',cache:'no-store'
       });
-    }catch{throw new ApiError(0,'network',null);}
+    }catch{assertCurrent(version);throw new ApiError(0,'network',null);}
     const data=await res.json().catch(()=>null);
-    if(res.status===401){token=null;if(onSessionEnd)onSessionEnd();}
+    assertCurrent(version);
+    if(res.status===401){api.endSession();if(onSessionEnd)onSessionEnd();}
     if(!res.ok)throw new ApiError(res.status,data?.error||'upload_failed',data);
     return data;
   }
@@ -110,15 +118,22 @@
       return (err && err.message) || 'Unbekannter Fehler.';
     },
     hasSession() { return Boolean(token); },
-    endSession() { token = null; },
+    endSession() { generation++; token = null; },
     newRequestId,
 
     // Anmeldung mit Name und PIN. Das Ergebnis ist nur die Sitzung, keine Mitarbeiterdaten.
     async login(name, pin) {
-      const data = await send('/app/monteur/anmelden', 'POST', { name: String(name || ''), pin: String(pin || '') }, null, { keepSessionOn401: true });
+      const version = ++generation;
+      const data = await send('/app/monteur/anmelden', 'POST', { name: String(name || ''), pin: String(pin || '') }, null, { keepSessionOn401: true, version });
       if (!data || !data.sessionToken) throw new ApiError(500, 'invalid_response', null);
       token = data.sessionToken;
-      return { expiresIn: data.expiresIn };
+      return { expiresIn: data.expiresIn, pinWechselPflicht: data.pinWechselPflicht === true };
+    },
+
+    async changePin(altPin, neuPin) {
+      const result = await send('/app/pin-wechsel', 'POST', { altPin, neuPin }, null, { keepSessionOn401: true, retryNetwork: true });
+      api.endSession();
+      return result;
     },
 
     downloadDocument(siteId, documentId) { return send('/app/monteur/dokument', 'GET', undefined, { siteId, documentId }, { binary: true }); },
