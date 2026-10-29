@@ -96,6 +96,7 @@ async function showUpload(batch=null){
  const start=btn('Hochladen / Fortsetzen',async()=>{start.disabled=true;try{if(!queue.files.length)throw Error('Dateien auswählen.');const result=await queue.run();if(!current(a,v))return;if(result.paused){label.textContent='Unterbrochen. Fortsetzen möglich.';return;}label.textContent=result.batch.status;if(result.batch.status==='FEHLER')error(Error(result.batch.error));renderBatch(root,result.batch,a,v);}catch(e){if(current(a,v))error(e);}finally{if(current(a,v))start.disabled=false;}});
  root.append(start,btn('Unterbrechen',()=>queue.pause()),btn('Posteingang',showInbox));
 }
+function resetSession(){generation++;queue?.pause();queue=null;sessionKey=null;enabled=false;root?.replaceChildren();if(root)root.hidden=true;if(launcher)launcher.hidden=true;}
 async function refresh(){
  const a=adapter();if(!a){if(sessionKey!==null){generation++;queue?.pause();queue=null;root?.replaceChildren();if(root)root.hidden=true;}sessionKey=null;enabled=false;if(launcher)launcher.hidden=true;return;}
  if(a.key!==sessionKey){generation++;queue?.pause();root?.replaceChildren();if(root)root.hidden=true;sessionKey=a.key;enabled=false;}
@@ -108,6 +109,6 @@ function mount(){
  root=node('section');root.id='pilot-messages';root.hidden=true;root.style.cssText='position:fixed;inset:5%;z-index:3500;overflow:auto;background:white;color:#17372b;padding:18px;border:2px solid #337e61;border-radius:12px';
  launcher=btn('✉ Nachrichten',showInbox);launcher.id='pilot-messages-launch';launcher.hidden=true;launcher.style.cssText='position:fixed;left:12px;bottom:12px;z-index:2200;padding:12px';document.body.append(root,launcher);setInterval(refresh,10000);refresh();
 }
-global.PilotDocuments={UploadQueue,openUpload:showUpload,openInbox:showInbox,refresh};
+global.PilotDocuments={UploadQueue,openUpload:showUpload,openInbox:showInbox,refresh,resetSession};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(window);

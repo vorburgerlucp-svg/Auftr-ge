@@ -122,12 +122,13 @@
       return (err && err.message) || 'Unbekannter Fehler.';
     },
     hasSession() { return Boolean(token); },
-    endSession() { generation++; token = null; },
+    endSession() { generation++; token = null; global.PilotDocuments?.resetSession(); },
     newRequestId,
 
     // Anmeldung mit Name und PIN. Das Ergebnis ist nur die Sitzung, keine Mitarbeiterdaten.
     async login(name, pin) {
       const version = ++generation;
+      token=null;global.PilotDocuments?.resetSession();
       const data = await send('/app/monteur/anmelden', 'POST', { name: String(name || ''), pin: String(pin || '') }, null, { keepSessionOn401: true, version });
       if (!data || !data.sessionToken) throw new ApiError(500, 'invalid_response', null);
       token = data.sessionToken;
