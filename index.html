@@ -2780,6 +2780,7 @@ function fzgMonteurPickerOpen() {
 const LT_WORKER_URL = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
 let officeAnmeldungLaeuft = false;
 let officeWartetAufSync = null;
+let officeSyncGeneration = -1;
 
 async function doLogin() {
   const errEl = document.getElementById('login-error');
@@ -2831,19 +2832,27 @@ async function doLogin() {
   bzSession = { token: r.officeSession, name };
   lagertoolSitzungMaId = String(r.employeeId);
   officeWartetAufSync = String(r.employeeId);
+  officeSyncGeneration = bzGeneration;
   document.getElementById('login-pin').value = '';
   officeFirebaseAnmelden(r.firebaseToken);
 }
 
 // Firebase ausschliesslich mit dem Custom-Token. Keine anonyme Anmeldung.
 function officeFirebaseAnmelden(token) {
+  const generation = bzGeneration;
   try {
     if (typeof firebase === 'undefined') throw new Error('sdk');
     firebase.auth().signInWithCustomToken(token)
       .then(() => {
-        startFirebaseListener();
+        if (generation !== bzGeneration || !bzSession) {
+          firebase.auth().signOut().catch(() => {});
+          if (bzSession) officeSitzungAbgelaufen();
+          return;
+        }
+        startFirebaseListener(generation);
       })
       .catch(err => {
+        if (generation !== bzGeneration) return;
         console.error('[Firebase] Anmeldung mit Token fehlgeschlagen');
         officeAnmeldungFehlgeschlagen('Firebase-Anmeldung fehlgeschlagen. Bitte erneut anmelden.');
       });
@@ -2866,6 +2875,7 @@ function officeAnmeldungFehlgeschlagen(text) {
 // Nach der ersten Synchronisation: Büro-Berechtigung im geladenen Datenbestand bestaetigen.
 function officeAnmeldungNachSync() {
   if (!officeWartetAufSync) return;
+  if (officeSyncGeneration !== bzGeneration || !bzSession) { officeWartetAufSync = null; return; }
   const id = officeWartetAufSync;
   officeWartetAufSync = null;
   const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
@@ -3149,6 +3159,9 @@ function openWebauthnSettingsModal() {
 let pendingSavePromise = null;
 async function doLogout() {
   bzAbmelden();
+  officeWartetAufSync = null; officeSyncGeneration = -1;
+  currentLoginUser = null; lagertoolSitzungMaId = null;
+  officeAnmeldungLaeuft = false;
   // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten,
   // damit der Reload keine frischen Änderungen "abschneidet" (Datenverlust-Bug).
   try {
@@ -3467,7 +3480,7 @@ function bzFehlertext(e) {
   return 'Der Vorgang konnte nicht abgeschlossen werden.';
 }
 
-async function bzCall(method, path, body) {
+async function bzCall(method, path, body, {binary = false} = {}) {
   const version = bzGeneration;
   if (!BZ_PILOT_WORKER_OK) {
     const e = new Error('pilot_not_configured');e.status = 0;e.code = 'pilot_not_configured';throw e;
@@ -3483,6 +3496,11 @@ async function bzCall(method, path, body) {
     });
   } catch (netz) {
     const e = new Error('network'); e.status = 0; e.code = 'network'; throw e;
+  }
+  if (res.ok && binary) {
+    const blob = await res.blob();
+    if (version !== bzGeneration || !bzSession) { const e = new Error('session_changed'); e.code = 'session_changed'; throw e; }
+    return blob;
   }
   let data = null;
   try { data = await res.json(); } catch (x) { data = null; }
@@ -11802,13 +11820,14 @@ function initFirebase(url, key, pid, appid) {
   }
 }
 
-function startFirebaseListener() {
+function startFirebaseListener(generation = bzGeneration) {
   const pid = window._fbPid;
   try {
     const _db = firebase.database();
     dbRef = _db.ref('lagertool');
     console.log('[Firebase] dbRef set, adding listener...');
     dbRef.on('value', (snapshot) => {
+      if (generation !== bzGeneration || !bzSession) return;
       // suppressListener bleibt true bis der Timeout es zurücksetzt.
       // NICHT hier auf false setzen, sonst kommt das Echo durch!
       if (suppressListener) { firebaseReady = true; return; }

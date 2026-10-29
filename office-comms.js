@@ -65,11 +65,10 @@ function render(){
       const attachment=btn('📎 '+(item.attachment.fileName||'Datei')+' herunterladen',async()=>{
         try{
           if(!active())throw Error('not_authorized');
-          const response=await fetch(BZ_WORKER+'/app/admin/upload/'+encodeURIComponent(item.id),{
-            method:'GET',headers:{Authorization:'Bearer '+bzSession.token},
-            credentials:'omit',cache:'no-store'});
-          if(!response.ok)throw Error('download_failed');
-          const data=await response.blob(),url=URL.createObjectURL(data);
+          const version=viewVersion,session=bzSession;
+          const data=await bzCall('GET','/app/admin/upload/'+encodeURIComponent(item.id),undefined,{binary:true});
+          if(version!==viewVersion||session!==bzSession||!active())return;
+          const url=URL.createObjectURL(data);
           const a=node('a');a.href=url;a.download=String(item.attachment.fileName||'Dokument')
             .replace(/[\\/<>:"|?*]/g,'_');
           document.body.append(a);a.click();a.remove();
