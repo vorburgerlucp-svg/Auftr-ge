@@ -136,6 +136,7 @@
       return result;
     },
 
+    downloadMontageDocument(siteId, documentId) { return send('/app/monteur/montage/document', 'GET', undefined, { siteId, documentId }, { binary: true }); },
     downloadDocument(siteId, documentId) { return send('/app/monteur/dokument', 'GET', undefined, { siteId, documentId }, { binary: true }); },
     uploadDocument,
     get(path, query) { return send(path, 'GET', undefined, query); },

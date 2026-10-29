@@ -69,7 +69,7 @@ function render(){
         const conflicts=item.conflicts||[];
         const summary=node('p',conflicts.length?'Genehmigung gesperrt: Einsätze/Abwesenheiten zuerst in der bestehenden Wochenplanung bereinigen.':'Keine Konflikte im zuletzt gelesenen Plan. Beim Speichern wird erneut atomar geprüft.');
         details.append(summary);
-        for(const c of conflicts)details.append(row('Konflikt',c.date+' · '+(c.siteId||c.status)+' · '+c.note));
+        for(const c of conflicts){details.append(row('Konflikt',c.date+' · '+(c.siteId||c.status)+' · '+c.note));details.append(btn('In Wochenplanung öffnen · '+c.date,()=>globalThis.OfficePlanning?.open({from:c.date,employeeId:item.employeeId,onReturn:()=>load(false)})));}
         if(item.pendingDecision)details.append(node('p','Speicherprüfung offen – noch NICHT genehmigt. Genehmigung erneut ausführen. Für Ablehnung zuerst vorbereitete Ferieneinträge in der bestehenden Planung entfernen.'));
         const reason=field(details,'Begründung (optional)','textarea');reason.maxLength=1500;reason.value=item.pendingDecision?.reason||'';
         const approve=btn('Ferien genehmigen',()=>decideVacation(item,'BESTÄTIGT',reason.value));approve.disabled=conflicts.length>0;

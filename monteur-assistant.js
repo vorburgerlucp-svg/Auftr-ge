@@ -1,7 +1,7 @@
 (function(global){
   'use strict';
   const labels={siteName:'Baustelle',adresse:'Adresse',address:'Adresse',kunde:'Kunde',auftragsnummer:'Auftrag',kommission:'Kommission',von:'Von',bis:'Bis',startzeit:'Baustellenbeginn',siteStart:'Baustellenbeginn',montagebeschreibung:'Montagearbeiten',montageArt:'Montageart',rapportDate:'Berichtsdatum',timeStart:'Arbeitsbeginn',timeEnd:'Arbeitsende',breakMinutes:'Pause in Minuten',totalHours:'Arbeitsstunden',workPerformed:'Ausgeführte Arbeiten',materialUsed:'Verwendetes Material',issues:'Probleme',extraWork:'Zusatzarbeiten',notes:'Berichtnotizen'};
-  let panel,result,errorBox,input,launcher,vacationButton,vacationAvailable=false,busy=false,epoch=0;
+  let panel,result,errorBox,input,launcher,montageButton,vacationButton,vacationAvailable=false,busy=false,epoch=0;
   let voice=null,voiceTarget=null,voiceButton=null,voiceStatus=null,voiceRun=0;
   const controls=new Set();
   const el=(tag,content)=>{const n=document.createElement(tag);if(content!==undefined)n.textContent=String(content);return n;};
@@ -173,7 +173,9 @@
     }catch(e){if(generation===epoch)failure(e);}
   }
   function render(data){
+    global.MonteurMontage?.reset();
     result.replaceChildren(el('p',data.reply||''));
+    if(data.kind==='montage'||data.kind==='montage_choices'){global.MonteurMontage?.render(data,result);return;}
     if(data.kind==='assignments')for(const a of data.assignments){
       const card=el('article');card.append(el('h3',a.siteName||'Baustelle'));
       fields(card,a,['address','siteStart']);if(!a.siteStart)line(card,'Baustellenbeginn','nicht hinterlegt');point(card,a.meetingPoint);line(card,'Abfahrt Allschwil',a.departure);contacts(card,a.contacts);
@@ -249,11 +251,12 @@
   async function loadVacationFeature(){
     const generation=epoch;
     try{const data=await global.MonteurApi.get('/app/monteur/features');
-      if(generation===epoch&&global.MonteurApi.hasSession()){vacationAvailable=data.vacationEnabled===true;vacationButton.hidden=!vacationAvailable;}
+      if(generation===epoch&&global.MonteurApi.hasSession()){vacationAvailable=data.vacationEnabled===true;vacationButton.hidden=!vacationAvailable;if(montageButton)montageButton.hidden=data.montageEnabled!==true;}
     }catch{if(generation===epoch)vacationButton.hidden=true;}
   }
   async function ask(body){
     if(busy)return;
+    global.MonteurMontage?.reset();
     stopVoice();
     if(!global.MonteurApi.hasSession()){failure(new Error('Bitte zuerst in der Monteur-App anmelden.'));return;}
     const generation=epoch;errorBox.replaceChildren();setBusy(true);panel.hidden=false;
@@ -567,6 +570,8 @@
       ['werkzeuge','🧰 Werkzeuge'],['bestellungen','📦 Bestellungen'],['dokumente','📁 Dokumente'],
       ['postfach','📬 Nachrichten']])sectionMenu.append(button(title,()=>showSection(id)));
     vacationButton=button('Ferien beantragen',()=>ask({tool:'vacation_request',args:{}}));vacationButton.id='assistant-vacation-launch';vacationButton.hidden=true;
+    montageButton=button('Montageaufgebot suchen',()=>{global.MonteurMontage?.open(result);});montageButton.id='assistant-montage-launch';montageButton.hidden=true;
+    panel.append(montageButton);
     panel.append(vacationButton);
     panel.append(sectionMenu);
     const shortcutDetails=el('details');const quickSummary=el('summary','Schnellfragen (optional)');shortcutDetails.append(quickSummary);
@@ -594,7 +599,7 @@
     errorBox=el('div');errorBox.id='assistant-errors';errorBox.setAttribute('role','alert');result=el('div');result.id='assistant-result';result.setAttribute('aria-live','polite');panel.append(errorBox,result);
     document.body.append(launcher,panel);
   }
-  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;vacationAvailable=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;if(vacationButton)vacationButton.hidden=true;setBusy(false);}
+  function reset(){global.MonteurMontage?.reset();if(montageButton)montageButton.hidden=true;stopInboxPolling();stopVoice();epoch++;busy=false;vacationAvailable=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;if(vacationButton)vacationButton.hidden=true;setBusy(false);}
   global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;startInboxPolling();loadVacationFeature();showHome();},reset};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(typeof window!=='undefined'?window:globalThis);
