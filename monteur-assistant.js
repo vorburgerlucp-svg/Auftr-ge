@@ -529,6 +529,7 @@
     }catch(e){failure(e);}
   }
   async function uploadInformation(){
+    try { const features=await global.MonteurApi.get('/app/monteur/features'); if(features.documentsEnabled&&global.PilotDocuments){await global.PilotDocuments.refresh();global.PilotDocuments.openUpload();return;} } catch(e){failure(e);return;}
     sectionMenu.hidden=true;header('Foto oder PDF hochladen');
     result.append(el('p','Dateien landen privat zur Prüfung beim Büro. Sie werden nicht automatisch für andere Monteure freigegeben.'));
     try{
