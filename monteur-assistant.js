@@ -403,7 +403,7 @@
     const generation=epoch;
     try{
       const data=await global.MonteurApi.get('/app/monteur/requests');
-      if(generation!==epoch||!global.MonteurApi.hasSession())return;
+      if(generation!==epoch||!global.MonteurApi.hasSession()||noticeBox)return;
       const unread=(data.requests||[]).filter(r=>r.version>r.ackVersion&&!lastNotified.has(r.id+':'+r.version));
       if(!unread.length)return;
       const first=unread[0];lastNotified.add(first.id+':'+first.version);
