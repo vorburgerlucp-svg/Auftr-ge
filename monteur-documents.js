@@ -1,14 +1,14 @@
 // Shared private inbox and resumable upload queue. Credentials remain in the existing session adapters.
 (function(global){
 'use strict';
-const MAX=8*1024*1024,TOTAL=64*1024*1024;
+const MAX=8*1024*1024,TOTAL=16*1024*1024;
 class UploadQueue{
  constructor(api,changed=()=>{}){this.api=api;this.changed=changed;this.files=[];this.index=0;this.paused=false;this.batch=null;this.requestId=null;this.running=false;}
  setFiles(files,batch=null){
   if(this.running)throw Error('Upload läuft. Zuerst unterbrechen.');
   files=Array.from(files);if(!files.length||files.length>40)throw Error('Bitte 1 bis 40 Dateien auswählen.');
   for(const f of files){if(!['image/jpeg','image/png','application/pdf'].includes(f.type))throw Error('JPG, PNG oder PDF wählen. HEIC wird derzeit nicht sicher unterstützt.');if(f.size<1||f.size>MAX)throw Error('Maximal 8 MB pro Datei.');}
-  if(files.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error('Maximal 64 MB pro Sitzung.');
+  if(files.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error('Maximal 16 MB pro Sitzung.');
   if(batch&&(batch.files.length!==files.length||batch.files.some((f,i)=>f.name!==files[i].name||f.size!==files[i].size||f.mime!==files[i].type)))throw Error('Für Wiederaufnahme dieselben Dateien in derselben Reihenfolge auswählen.');
   this.files=files;this.batch=batch;this.index=0;this.requestId=null;this.paused=false;
  }
@@ -89,7 +89,7 @@ function chooseSite(parent,r,a,v){
 }
 async function showUpload(batch=null){
  const a=adapter();if(!enabled||a?.prefix!=='/app/monteur')return;queue?.pause();const v=++generation;root.hidden=false;root.replaceChildren(node('h2','Dokumente hochladen'));
- root.append(node('p','Bis 40 JPG/PNG/PDF, je 8 MB, insgesamt 64 MB. Mindestens 30 kleine Fotos sind möglich. HEIC vorher auf dem Gerät sicher als JPEG exportieren. Originale bleiben privat; bei unklarer Baustelle folgt eine Rückfrage.'));
+ root.append(node('p','Bis 40 JPG/PNG/PDF, je 8 MB, insgesamt 16 MB. Mindestens 30 kleine Fotos sind möglich. HEIC vorher auf dem Gerät sicher als JPEG exportieren. Originale bleiben privat; bei unklarer Baustelle folgt eine Rückfrage.'));
  const files=field(root,'Fotos oder PDFs auswählen','file');files.multiple=true;files.accept='.jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf';const progress=node('progress');progress.max=1;progress.value=0;const label=node('p','Bereit');root.append(progress,label);
  queue=new UploadQueue(a,(done,total)=>{if(current(a,v)){progress.max=total;progress.value=done;label.textContent=done+' / '+total+' gespeichert';}});
  files.onchange=()=>{try{queue.setFiles(files.files,batch);label.textContent=queue.files.length+' Dateien ausgewählt';}catch(e){error(e);}};
