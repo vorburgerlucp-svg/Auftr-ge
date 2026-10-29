@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de"><head>
 <script src="pilot-config.js"></script>
 <script src="pilot-pin.js"></script>
@@ -3281,6 +3281,19 @@ function syncStandUebernehmen(neu) {
   (state.baustellen || []).forEach(b => { const l = (lokalVor.baustellen || []).find(x => x.id === b.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) b.docs = l.docs; });
   try { lagertoolKeinCache( JSON.stringify(stripLargeData(state))); } catch (_) {}
 }
+// BEGIN VACATION PLAN AUDIT
+function vacationPlanAudit(state,before,by,timestamp){
+  if(!Array.isArray(state.ferienAntraege)||!state.ferienAntraege.length)return;
+  const changes=[];
+  for(const date of [...new Set([...Object.keys(before||{}),...Object.keys(state.plan||{})])].sort()){
+    const old=before?.[date]||{},next=state.plan?.[date]||{};
+    if(JSON.stringify(old)!==JSON.stringify(next))changes.push({date,before:JSON.parse(JSON.stringify(old)),after:JSON.parse(JSON.stringify(next))});
+  }
+  if(!changes.length)return;
+  if(!by||by==='unknown')throw Error('planning_actor_required');
+  state.planAenderungen=[...(state.planAenderungen||[]),{by:String(by),at:timestamp,source:'wochenplanung',changes}];
+}
+// END VACATION PLAN AUDIT
 let saveKette = Promise.resolve();
 // Ein Speichervorgang (läuft seriell hinter save()): frischer lokaler Schnappschuss → Transaktion mit Merge.
 async function syncMergeSpeichern(doVerify) {
@@ -3301,7 +3314,10 @@ async function syncMergeSpeichern(doVerify) {
     letzte = { merged: r.merged, konflikte: r.konflikte, geaendert: r.geaendert, remoteGeaendert, ts: 0 };
     if (!r.geaendert) return undefined;                               // Server enthält bereits alles
     // Kopie: r.merged kann auf den lokalen Schnappschuss zeigen (nur lokal geändert) – der darf nicht verändert werden (Wiederholung der Transaktion)
-    const w = Object.assign({}, r.merged, { _ts: Math.max(Date.now(), remoteTs + 1) }); letzte.ts = w._ts;
+    const audited=syncKopie(r.merged);
+    vacationPlanAudit(audited,remote.plan,typeof currentLoginUser!=='undefined'?currentLoginUser?.id:null,new Date().toISOString());
+    letzte.merged=audited;
+    const w = Object.assign({}, audited, { _ts: Math.max(Date.now(), remoteTs + 1) }); letzte.ts = w._ts;
     return JSON.stringify(w);
   };
   let tr;
@@ -7139,7 +7155,7 @@ function wpStatusZelleHtml(statusE, m, ds, neben) {
     ? '<span title="'+bsKwEsc(anz.titel + (neben ? ' – Excel-Eintrag steht neben einem anderen Einsatz dieses Tages' : ''))+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">'+bsKwEsc(anz.label + nebenTxt)+'</span></span>'
     : eigentlichStatus
       ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
-      : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
+      : bsKwEsc(planStatusAnzeige(statusE)) + (statusE.vacationPending?' · Speicherprüfung offen':'') + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
   return '<div class="wp-cell" draggable="true" '
     +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
     +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center'+(unverkn?';border:1px solid #e8574b':'')+'" '
@@ -8789,8 +8805,10 @@ async function excelAtomarAendern(mutator, verifiziere, opts) {
     let remote;
     try { remote = typeof current === 'string' ? JSON.parse(current) : JSON.parse(JSON.stringify(current)); }
     catch (e) { letzte = { geaendert: false, fehler: 'Serverstand nicht lesbar' }; return undefined; }
+    const beforePlan=JSON.parse(JSON.stringify(remote.plan||{}));
     let res;
-    try { res = excelMitState(remote, () => mutator(remote)); }
+    try { res = excelMitState(remote, () => mutator(remote));
+      vacationPlanAudit(remote,beforePlan,typeof currentLoginUser!=='undefined'?currentLoginUser?.id:null,new Date().toISOString()); }
     catch (e) { letzte = { geaendert: false, fehler: 'Mutator-Fehler: ' + (e && e.message || e) }; return undefined; }
     letzte = res || { geaendert: false };
     if (!res || !res.geaendert) return undefined;                       // Abbruch, nichts schreiben

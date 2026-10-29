@@ -1,7 +1,7 @@
 (function(global){
   'use strict';
   const labels={siteName:'Baustelle',adresse:'Adresse',address:'Adresse',kunde:'Kunde',auftragsnummer:'Auftrag',kommission:'Kommission',von:'Von',bis:'Bis',startzeit:'Baustellenbeginn',siteStart:'Baustellenbeginn',montagebeschreibung:'Montagearbeiten',montageArt:'Montageart',rapportDate:'Berichtsdatum',timeStart:'Arbeitsbeginn',timeEnd:'Arbeitsende',breakMinutes:'Pause in Minuten',totalHours:'Arbeitsstunden',workPerformed:'Ausgeführte Arbeiten',materialUsed:'Verwendetes Material',issues:'Probleme',extraWork:'Zusatzarbeiten',notes:'Berichtnotizen'};
-  let panel,result,errorBox,input,launcher,vacationButton,busy=false,epoch=0;
+  let panel,result,errorBox,input,launcher,vacationButton,vacationAvailable=false,busy=false,epoch=0;
   let voice=null,voiceTarget=null,voiceButton=null,voiceStatus=null,voiceRun=0;
   const controls=new Set();
   const el=(tag,content)=>{const n=document.createElement(tag);if(content!==undefined)n.textContent=String(content);return n;};
@@ -228,14 +228,14 @@
   function vacationForm(data){
     const from=formField(result,'Ferienbeginn (mit Jahr)'),to=formField(result,'Ferienende (mit Jahr)'),note=formField(result,'Bemerkung (optional)','textarea');
     from.type=to.type='date';from.id='assistant-vacation-from';to.id='assistant-vacation-to';note.id='assistant-vacation-note';
-    from.value=data.from||'';to.value=data.to||'';
+    from.value=data.from||'';to.value=data.to||'';note.value=data.note||'';
     result.append(el('p','Mitarbeiter: automatisch aus deiner Anmeldung. Keine automatische Genehmigung.'));
     result.append(button('Ferienantrag prüfen',()=>{
       if(!/^\d{4}-\d{2}-\d{2}$/.test(from.value)||!/^\d{4}-\d{2}-\d{2}$/.test(to.value)||from.value>to.value){
         errorBox.replaceChildren(el('p','Bitte gültigen Zeitraum mit Jahr angeben.'));return;}
       const payload={from:from.value,to:to.value,note:note.value,confirmation:true,requestId:global.MonteurApi.newRequestId()};
       result.replaceChildren(el('h3','Ferienantrag prüfen'));line(result,'Von',payload.from);line(result,'Bis',payload.to);line(result,'Bemerkung',payload.note);
-      result.append(button('Zurück bearbeiten',()=>render({...data,from:payload.from,to:payload.to,kind:'vacation_form'})));
+      result.append(button('Zurück bearbeiten',()=>render({...data,from:payload.from,to:payload.to,note:payload.note,kind:'vacation_form'})));
       result.append(button('Ferienantrag verbindlich absenden',async()=>{
         if(busy)return;const generation=epoch;setBusy(true);errorBox.replaceChildren();
         try{const saved=await global.MonteurApi.post('/app/monteur/ferien',payload);
@@ -249,7 +249,7 @@
   async function loadVacationFeature(){
     const generation=epoch;
     try{const data=await global.MonteurApi.get('/app/monteur/features');
-      if(generation===epoch&&global.MonteurApi.hasSession())vacationButton.hidden=data.vacationEnabled!==true;
+      if(generation===epoch&&global.MonteurApi.hasSession()){vacationAvailable=data.vacationEnabled===true;vacationButton.hidden=!vacationAvailable;}
     }catch{if(generation===epoch)vacationButton.hidden=true;}
   }
   async function ask(body){
@@ -303,7 +303,7 @@
     sectionMenu.hidden=true;header(({baustellen:'Baustellen',fahrzeuge:'Fahrzeuge',
       werkzeuge:'Werkzeuge',bestellungen:'Bestellungen',dokumente:'Dokumente',postfach:'Nachrichten'})[section]||section);
     const grid=el('div');grid.className='assistant-actions';
-    for(const [name,action] of SECTIONS[section])grid.append(button(name,action));
+    for(const [name,action] of SECTIONS[section]){if(name==='Meine Ferienanträge'&&!vacationAvailable)continue;grid.append(button(name,action));}
     result.append(grid);
   }
   function formField(parent,title,tag='input'){
@@ -399,7 +399,7 @@
     }catch(e){failure(e);}
   }
   async function checkMessages(){
-    if(!global.MonteurApi?.hasSession())return;
+    if(!global.MonteurApi?.hasSession()||noticeBox)return;
     const generation=epoch;
     try{
       const data=await global.MonteurApi.get('/app/monteur/requests');
@@ -412,12 +412,13 @@
       noticeBox.className='assistant-notice';
       noticeBox.setAttribute('role','status');
       noticeBox.append(el('strong','📬 Neue Antwort vom Büro'));
+      const shown=noticeBox;
       const r=unread[0];noticeBox.append(el('p',[r.targetLabel||r.kind,r.reply||r.status].join(' · ')));
       noticeBox.append(button('Nachricht ansehen',()=>{noticeBox.remove();noticeBox=null;panel.hidden=false;showInbox();}));
       if(r.kind==='vacation_request')noticeBox.append(button('Verstanden',async()=>{
         try{await global.MonteurApi.post('/app/monteur/ferien/'+encodeURIComponent(r.id)+'/ack',{version:r.version});
-          if(generation!==epoch)return;noticeBox?.remove();noticeBox=null;await checkMessages();
-        }catch(e){if(generation===epoch&&noticeBox)noticeBox.append(el('p','Nicht quittiert. Bitte erneut versuchen.'));}
+          if(generation!==epoch)return;shown.remove();if(noticeBox===shown)noticeBox=null;await checkMessages();
+        }catch(e){if(generation===epoch&&noticeBox===shown)shown.append(el('p','Nicht quittiert. Bitte erneut versuchen.'));}
       }));
       else noticeBox.append(button('Später',()=>{noticeBox.remove();noticeBox=null;}));
       document.body.append(noticeBox);
@@ -593,7 +594,7 @@
     errorBox=el('div');errorBox.id='assistant-errors';errorBox.setAttribute('role','alert');result=el('div');result.id='assistant-result';result.setAttribute('aria-live','polite');panel.append(errorBox,result);
     document.body.append(launcher,panel);
   }
-  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;if(vacationButton)vacationButton.hidden=true;setBusy(false);}
+  function reset(){stopInboxPolling();stopVoice();epoch++;busy=false;vacationAvailable=false;if(!panel)return;result.replaceChildren();errorBox.replaceChildren();input.value='';panel.hidden=true;launcher.hidden=true;if(vacationButton)vacationButton.hidden=true;setBusy(false);}
   global.MonteurAssistant={ask,mount,show(){mount();launcher.hidden=false;startInboxPolling();loadVacationFeature();showHome();},reset};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
 })(typeof window!=='undefined'?window:globalThis);
