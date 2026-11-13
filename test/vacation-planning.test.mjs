@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 test('existing weekly planner journals changed dates with office ID only when vacation workflow is present',()=>{
- const source=html.match(/\/\/ BEGIN VACATION PLAN AUDIT\n([\s\S]*?)\/\/ END VACATION PLAN AUDIT/);assert.ok(source);
+ const source=html.match(/\/\/ BEGIN VACATION PLAN AUDIT\r?\n([\s\S]*?)\/\/ END VACATION PLAN AUDIT/);assert.ok(source);
  const ctx=vm.createContext({});vm.runInContext(source[1],ctx);
  const before={'2026-11-30':{x:{maId:'m1',bsId:'a'}}};
  const state={ferienAntraege:[{id:'ferien_a'}],plan:{'2026-11-30':{}}};
@@ -14,7 +14,7 @@ test('existing weekly planner journals changed dates with office ID only when va
  const off={plan:{}};ctx.vacationPlanAudit(off,before,'o1','now');assert.equal(off.planAenderungen,undefined);
 });
 test('repeated Firebase updater never mutates captured local snapshot or duplicates an uncommitted planning journal',async()=>{
- const audit=html.match(/\/\/ BEGIN VACATION PLAN AUDIT\n([\s\S]*?)\/\/ END VACATION PLAN AUDIT/)[1];
+ const audit=html.match(/\/\/ BEGIN VACATION PLAN AUDIT\r?\n([\s\S]*?)\/\/ END VACATION PLAN AUDIT/)[1];
  const source=html.slice(html.indexOf('async function syncMergeSpeichern('),html.indexOf('function save(opts) {'));
  const remote={ferienAntraege:[{id:'f1'}],plan:{'2026-11-30':{x:{maId:'m1',bsId:'s'}}},_ts:1};
  const local=structuredClone(remote);local.plan['2026-11-30']={};const attempts=[];
