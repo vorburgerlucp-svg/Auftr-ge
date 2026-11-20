@@ -33,6 +33,7 @@
   let pendingSaveBeforeSync = false;
   function markFirebaseSynced() {
   if (typeof officeAnmeldungNachSync === 'function') officeAnmeldungNachSync();
+    if (typeof migrationSpeicherungNachAnmeldungNachholen === 'function') migrationSpeicherungNachAnmeldungNachholen();
     hasReceivedFirebaseSync = true;
     if (pendingSaveBeforeSync) {
       pendingSaveBeforeSync = false;
@@ -1098,7 +1099,7 @@
       <div><label>Startzeit</label><input type="text" id="ma-startzeit" placeholder="z.B. 06:30"></div>
     </div>
     <div class="form-row cols-1">
-      <div><label>🔐 PIN (4-stellig für Monteur-App)</label><input type="password" id="ma-pin" inputmode="numeric" maxlength="4" placeholder="z.B. 1234" style="letter-spacing:4px;font-size:18px;max-width:160px"></div>
+      <!-- Phase 48: PIN wird ueber "PIN aendern / zuruecksetzen" vergeben -->
     </div>
     <div class="form-row cols-1">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,184,75,.06);border:1px solid rgba(232,184,75,.2);border-radius:8px">
@@ -1941,7 +1942,32 @@ let state = {
 
 
 // Einmalige Migration: Klebstoffe/Silikon/Acryl/Werkzeug Artikel importieren
+// Phase 49B (M3): Startmigrationen speichern nur bei zulaessiger Schreibberechtigung. Fehlt sie noch (Start vor Anmeldung),
+// wird die Speicherung vorgemerkt und nach der Anmeldung nachgeholt; sie wird nicht stillschweigend verworfen.
+let migrationSpeicherungAusstehend = false;
+function migrationSpeichern() {
+  if (lagertoolDarfSchreiben()) { save(); return; }
+  migrationSpeicherungAusstehend = true;
+}
+function migrationSpeicherungNachAnmeldungNachholen() {
+  if (!migrationSpeicherungAusstehend || !lagertoolDarfSchreiben()) return;
+  migrationSpeicherungAusstehend = false;
+  save();
+}
+// Gleiche Reihenfolge wie beim Start (load); alle Migrationen sind kennzeichen- bzw. naechs-geprueft, also ohne Wirkung auf bereits migrierte Daten.
+function startMigrationenNachUebernahme() {
+  // Jede Migration einzeln abgesichert: ein Fehler blockiert weder Anmeldung noch die folgenden Migrationen.
+  const schritte = [migrationKontrollschilderRestore, migrationSdsBohrer, migrationHssBohrer, migrationKlebstoffeEtc, migrationSpanplattenschrauben,
+    migrationSchraubenNeu, migrationAbdeckband38mm, migrationDistanzplatten,
+    migrationTopRocRafixTX, migrationRafixOhneKopfErweiterung, fixRafixOhneKopfNr, applyArtikelPreise,
+    migrationKategorienKorrektur, migrationKategorienReorganisation, migrationKategorienAufbauen];
+  for (const f of schritte) { try { f(); } catch (e) { console.error('[Migration] ' + (f.name || 'unbenannt') + ' fehlgeschlagen:', e); } }
+}
+// Phase 49B (Dubletten): Artikel-ID aus der Artikelnummer (stabil, gleich auf jedem Client) und Anlegen nur ohne vorhandene Nummer.
+function artikelIdAusNr(nr) { return Number(String(nr).replace(/\D/g, '')); }
+function artikelNeuAnlegen(a) { if (!state.artikel.some(x => x.nr === a.nr)) state.artikel.push(a); }
 function migrationKlebstoffeEtc() {
+  if (state._klebstoffeEtcMigriert) return; // Phase 49: einmalig, wie die uebrigen Migrationen (verhindert Schreibvorgang bei jedem Laden)
   if (!state.artikel) state.artikel = [];
   const neueArtikel = [{"id":13004,"name":"Silikon Dichtstoff PERMAFIX 142 transparent","nr":"81.2211.0010","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13005,"name":"Silikon Dichtstoff PERMAFIX 142 RAL 9016 Verkehrsweiss","nr":"81.2211.0020","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13006,"name":"Silikon Dichtstoff PERMAFIX 142 schwarz","nr":"81.2211.0200","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13007,"name":"Dichtstoff Acryl PERMAFIX 505 RAL 9016 Verkehrsweiss","nr":"81.2422.0011","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13008,"name":"Dichtstoff Acryl PERMAFIX 505 grau","nr":"81.2422.0012","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13009,"name":"Glättespachteln FALCONE Star","nr":"81.2593.0000","kat":"Werkzeug & Zubehör","einheit":"Stk","bestand":0,"min":5},{"id":13010,"name":"Abdeckvlies PETERHANS","nr":"81.7682.2050","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13011,"name":"Doppelseitiges Klebeband PERMAFIX 620/1780","nr":"81.7106.0911","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13012,"name":"Abdeckband PERMAFIX 710 25mm","nr":"81.7303.2024","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13013,"name":"Abdeckband PERMAFIX 710 30mm","nr":"81.7303.2030","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13014,"name":"Abdeckband PERMAFIX 710 50mm","nr":"81.7303.2048","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13015,"name":"Verbindungsplättchen LAMELLO 0","nr":"80.1351.0000","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13016,"name":"Verbindungsplättchen LAMELLO 10","nr":"80.1351.0010","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13017,"name":"Verbindungsplättchen LAMELLO 20","nr":"80.1351.0020","kat":"Lamello","einheit":"Stk","bestand":0,"min":20}];
   neueArtikel.forEach(a => {
@@ -1949,7 +1975,7 @@ function migrationKlebstoffeEtc() {
     if (!exists) state.artikel.push(a);
   });
   state._klebstoffeEtcMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: HSS-Bohrer Artikel importieren
@@ -1962,7 +1988,7 @@ function migrationHssBohrer() {
     if (!exists) state.artikel.push(a);
   });
   state._hssBohrerMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: SDS-Bohrer (Bosch) Artikel importieren
@@ -1975,7 +2001,7 @@ function migrationSdsBohrer() {
     if (!exists) state.artikel.push(a);
   });
   state._sdsBohrerMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Spanplattenschrauben Artikel importieren
@@ -1988,7 +2014,7 @@ function migrationSpanplattenschrauben() {
     if (!exists) state.artikel.push(a);
   });
   state._spanplattenschraubenMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Top-Roc und Rafix mit Kopf TX Artikel importieren
@@ -2001,7 +2027,7 @@ function migrationTopRocRafixTX() {
     if (!exists) state.artikel.push(a);
   });
   state._topRocRafixTXMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Rafix ohne Kopf 252/302mm ergänzen
@@ -2014,17 +2040,24 @@ function migrationRafixOhneKopfErweiterung() {
     if (!exists) state.artikel.push(a);
   });
   state._rafixOhneKopfErgaenztMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Migration: state.kategorien aus vorhandenen Artikel-Kats aufbauen (einmalig + idempotent)
+// Phase 49C: Kategorie-ID aus dem Namen (deterministisch). Zwei Clients, die dieselbe Kategorie anlegen,
+// erzeugen dieselbe ID und damit keine Dublette.
+function katIdAusName(name) {
+  return 'kat_' + String(name).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
 function migrationKategorienAufbauen() {
   const katsImArtikel = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))];
   if (!Array.isArray(state.kategorien)) state.kategorien = [];
   // Neue Kats hinzufügen die noch nicht in state.kategorien sind
   katsImArtikel.forEach(k => {
     if (!state.kategorien.some(x => x.name === k)) {
-      state.kategorien.push({ id: 'kat_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: k, order: state.kategorien.length });
+      let id = katIdAusName(k);
+      if (state.kategorien.some(x => x.id === id)) id += '_2'; // bestehende ID nie ueberschreiben
+      state.kategorien.push({ id, name: k, order: state.kategorien.length });
     }
   });
   // Reihenfolge normalisieren
@@ -2038,7 +2071,7 @@ function migrationKategorienKorrektur() {
   const korrekturen = {"81.7106.0911":"Abdeckung & Schutz","80.1351.0000":"Lamello","80.1351.0010":"Lamello","80.1351.0020":"Lamello"};
   state.artikel.forEach(a => { if (korrekturen[a.nr]) a.kat = korrekturen[a.nr]; });
   state._kategorienKorrekturMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Zentrale Kategorie-Zuordnung anhand des Artikelnamens
@@ -2063,15 +2096,17 @@ function klassifiziereKategorie(name, nr, altKat) {
 function migrationKategorienReorganisation() {
   if (!state.artikel) state.artikel = [];
   if (state._kategorienReorganisationMigriert) return;
-  state.artikel.forEach(a => { a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
+  // Phase 49C: bestehende Kategorien nie ueberschreiben (vorher wurde jeder Artikel neu klassifiziert).
+  // Nur Artikel ohne Kategorie erhalten eine Zuordnung.
+  state.artikel.forEach(a => { if (!a.kat) a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
   state._kategorienReorganisationMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Preis pro Stk für Artikel hinterlegen (aus Lieferanten-Preislisten, CHF exkl. MwSt).
 // PREIS_MAP wird bei Bedarf mit weiteren Artikelnummern ergänzt (nr -> CHF pro Stk).
-// Läuft bei jedem Start (kein einmaliges Flag), damit neue Einträge sofort greifen
-// und bestehende Preise bei Aktualisierung überschrieben werden.
+// Phase 49C: Nur fehlende Preise werden ergänzt. Vorhandene Preise werden nie stillschweigend ersetzt;
+// eine Preisänderung bestehender Artikel ist eine ausdrücklich freizugebende Datenänderung.
 const PREIS_MAP = {
   // Senkkopfschrauben ohne Schaft / Vollgewinde (82.1012.xxxxx)
   '82.1012.30012': 0.035, '82.1012.30016': 0.033, '82.1012.30020': 0.035, '82.1012.30025': 0.039, '82.1012.30030': 0.048,
@@ -2116,9 +2151,11 @@ function applyArtikelPreise() {
   if (!Array.isArray(state.artikel)) return;
   let n = 0;
   state.artikel.forEach(a => {
-    if (a.nr && PREIS_MAP[a.nr] !== undefined) { a.preis = PREIS_MAP[a.nr]; n++; }
+    // Phase 49C: nur fehlende Preise ergaenzen (idempotent, kein Schreibvorgang bei unveraenderten Daten).
+    const fehlt = a.preis === undefined || a.preis === null || a.preis === '';
+    if (a.nr && PREIS_MAP[a.nr] !== undefined && fehlt) { a.preis = PREIS_MAP[a.nr]; n++; }
   });
-  if (n > 0) save();
+  if (n > 0) migrationSpeichern();
 }
 
 // Korrigiert die Artikel-Nr von "Rafix ohne Kopf": alte Nr 82.5416.75xxx existiert beim
@@ -2127,9 +2164,13 @@ function fixRafixOhneKopfNr() {
   if (!Array.isArray(state.artikel)) return;
   let n = 0;
   state.artikel.forEach(a => {
-    if (a.nr && a.nr.startsWith('82.5416.75')) { a.nr = a.nr.replace('82.5416.75', '82.5406.75'); n++; }
+    if (!a.nr || !a.nr.startsWith('82.5416.75')) return;
+    const neueNr = a.nr.replace('82.5416.75', '82.5406.75');
+    // Phase 49C: keine Umbenennung, wenn die Zielnummer bereits existiert (sonst doppelte Artikelnummer).
+    if (state.artikel.some(x => x.nr === neueNr)) return;
+    a.nr = neueNr; n++;
   });
-  if (n > 0) save();
+  if (n > 0) migrationSpeichern();
 }
 
 // Einmalige Ergänzung: Abdeckband PERMAFIX 710 38mm fehlte im System
@@ -2137,50 +2178,16 @@ function migrationAbdeckband38mm() {
   if (!Array.isArray(state.artikel)) return;
   if (state._abdeckband38Migriert) return;
   if (!state.artikel.some(a => a.nr === '81.7303.2036')) {
-    state.artikel.push({ id: Date.now()+Math.floor(Math.random()*99999), name: 'Abdeckband PERMAFIX 710 38mm', nr: '81.7303.2036', kat: 'Abdeckung & Schutz', einheit: 'Stk', bestand: 0, min: 5 });
+    state.artikel.push({ id: 8173032036, name: 'Abdeckband PERMAFIX 710 38mm', nr: '81.7303.2036', kat: 'Abdeckung & Schutz', einheit: 'Stk', bestand: 0, min: 5 });
   }
   state._abdeckband38Migriert = true;
-  save();
+  migrationSpeichern();
 }
 
-function migrationSchraubenNeu() {
-  if (state._schraubenNeuMigriert2) return;
-  // Zusätzlich prüfen ob noch alte Schrauben drin sind — wenn ja, nochmal laufen
-  const hatAlteSchrauben = (state.artikel||[]).some(a =>
-    a.kat === 'Schrauben' || a.kat === 'Schrauben & Befestigung' ||
-    (a.name||'').toLowerCase().startsWith('linsenkopf') ||
-    (a.name||'').toLowerCase().startsWith('spanplattenschraube') ||
-    (a.name||'').toLowerCase().startsWith('spax')
-  );
-  if (!hatAlteSchrauben && state._schraubenNeuMigriert2) return;
-
-  // 1. Alle alten Schrauben-Artikel entfernen (alle Kategorien die Schrauben enthalten)
-  const schraubenKats = ['Schrauben', 'Schrauben & Befestigung', 'Rundkopfschrauben', 'Senkkopfschrauben mit Schaft', 'Senkkopfschrauben Vollgewinde', 'Senkkopfschrauben ohne Schaft'];
-  state.artikel = (state.artikel||[]).filter(a => !schraubenKats.includes(a.kat));
-
-  // 2. Alle alten Schrauben-Kategorien entfernen
-  state.kategorien = (state.kategorien||[]).filter(k => !schraubenKats.includes(k.name));
-  const ts = Date.now();
-  const newKats = [
-    { id: 'kat_senk_s_' + ts, name: 'Senkkopfschrauben mit Schaft',   order: 50 },
-    { id: 'kat_senk_v_' + ts, name: 'Senkkopfschrauben ohne Schaft',   order: 51 },
-    { id: 'kat_rund_' + ts,   name: 'Rundkopfschrauben',               order: 52 },
-  ];
-  state.kategorien.push(...newKats);
-
-  // 3. Artikel generieren — Name: "Rundkopfschraube Ø3mm × 12mm", Nr: "82.1510.30012"
-  function makeArtikel(nr, d1, L, kat, prefix) {
-    return {
-      id: Date.now() + Math.floor(Math.random()*99999),
-      name: `${prefix} Ø${d1}mm × ${L}mm`,
-      nr: nr,
-      kat: kat,
-      einheit: 'Stk',
-      bestand: 0,
-      min: 10
-    };
-  }
-
+// Phase 49C: Schrauben-Kategorien der frueheren (loeschenden) Migration. Nur fuer die Pruefung, nicht fuer Schreibvorgaenge.
+const SCHRAUBEN_KATS_ALT = ['Schrauben', 'Schrauben & Befestigung', 'Rundkopfschrauben', 'Senkkopfschrauben mit Schaft', 'Senkkopfschrauben Vollgewinde', 'Senkkopfschrauben ohne Schaft'];
+// Phase 49C: Zielkatalog Schrauben als reine Daten (kein Schreibzugriff).
+function schraubenZielKatalog() {
   // ── Rundkopfschrauben (82.1510) ──
   const rundkopf = [
     ['82.1510.30012',3,12],['82.1510.30016',3,16],['82.1510.30020',3,20],['82.1510.30025',3,25],['82.1510.30035',3,35],
@@ -2226,12 +2233,37 @@ function migrationSchraubenNeu() {
     ['82.1012.60050',6,50],['82.1012.60060',6,60],['82.1012.60070',6,70],['82.1012.60080',6,80],
   ];
 
-  rundkopf.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Rundkopfschrauben','Rundkopfschraube')));
-  senkkopfMitSchaft.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben mit Schaft','Senkkopfschraube m.Schaft')));
-  senkkopfVollgewinde.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben ohne Schaft','Senkkopfschraube o.Schaft')));
-
-  state._schraubenNeuMigriert2 = true;
-  save();
+  const ziel = [];
+  const add = (liste, kat, prefix) => liste.forEach(([nr, d1, L]) => ziel.push({ nr, name: `${prefix} Ø${d1}mm × ${L}mm`, kat, einheit: 'Stk', bestand: 0, min: 10 }));
+  add(rundkopf, 'Rundkopfschrauben', 'Rundkopfschraube');
+  add(senkkopfMitSchaft, 'Senkkopfschrauben mit Schaft', 'Senkkopfschraube m.Schaft');
+  add(senkkopfVollgewinde, 'Senkkopfschrauben ohne Schaft', 'Senkkopfschraube o.Schaft');
+  return ziel;
+}
+// Phase 49C: reiner Pruefplan. Veraendert nichts; zaehlt nur, was eine Freigabe betreffen wuerde.
+function schraubenMigrationsPlan(artikel) {
+  const liste = Array.isArray(artikel) ? artikel : [];
+  const ziel = schraubenZielKatalog();
+  const nrs = new Set(liste.map(x => x.nr));
+  const ids = new Set(liste.map(x => x.id));
+  const alte = liste.filter(x => SCHRAUBEN_KATS_ALT.includes(x.kat) || /^(linsenkopf|spanplattenschraube|spax)/i.test(x.name || ''));
+  const fehlend = ziel.filter(z => !nrs.has(z.nr));
+  return {
+    zielAnzahl: ziel.length,
+    vorhanden: ziel.length - fehlend.length,
+    fehlendAnzahl: fehlend.length,
+    fehlendNr: fehlend.map(z => z.nr),
+    idKollisionen: fehlend.filter(z => ids.has(artikelIdAusNr(z.nr))).map(z => z.nr),
+    alteSchraubenAnzahl: alte.length,
+    alteMitBestand: alte.filter(x => Number(x.bestand) > 0).length,
+  };
+}
+// Phase 49C: GESPERRT, kein Schreibzugriff. Die fruehere Fassung loeschte alle bestehenden Schraubenartikel samt
+// Bestand und Kategorien und legte Datensaetze mit Bestand 0 neu an (Artikel-IDs, Mengen und Zuordnungen gingen verloren).
+// Eine Ausfuehrung ist nur nach dokumentierter Freigabe zulaessig (PHASE49C-ABSCHLUSS.md, Abschnitt K).
+function migrationSchraubenNeu() {
+  const plan = schraubenMigrationsPlan(state.artikel);
+  console.info('[Migration] Schrauben gesperrt, kein Schreibzugriff. Plan:', JSON.stringify({ ...plan, fehlendNr: plan.fehlendNr.length }));
 }
 
 // Repariert bestehende Meldungen ohne maId: Monteur über die zugehörige
@@ -2257,7 +2289,7 @@ function migrationMeldungenMaIdReparatur() {
     }
   });
   state._meldungenMaIdRepariert = true;
-  if (repariert > 0) save();
+  if (repariert > 0) migrationSpeichern();
 }
 
 // Einmalige Migration: das separate "Notiz"-Feld bei To-Dos wurde aus der UI
@@ -2277,7 +2309,7 @@ function migrationTodoNotizMerge() {
     }
   });
   state._todoNotizGemerged = true;
-  if (gemerged > 0) save();
+  if (gemerged > 0) migrationSpeichern();
 }
 
 function migrationDistanzplatten() {
@@ -2286,7 +2318,7 @@ function migrationDistanzplatten() {
   if (!Array.isArray(state.artikel)) state.artikel = [];
   // Kategorie hinzufügen falls nicht vorhanden
   if (!state.kategorien.some(k => k.name === 'Distanzplatten')) {
-    state.kategorien.push({ id: 'kat_dist_' + Date.now(), name: 'Distanzplatten', order: 53 });
+    state.kategorien.push({ id: 'kat_distanzplatten', name: 'Distanzplatten', order: 53 }); // Phase 49C: deterministische ID
   }
   const artikel = [
     { nr: '80.1280.0123', dicke: 1 },
@@ -2298,7 +2330,7 @@ function migrationDistanzplatten() {
   artikel.forEach(a => {
     if (!state.artikel.some(x => x.nr === a.nr)) {
       state.artikel.push({
-        id: Date.now() + Math.floor(Math.random()*99999),
+        id: artikelIdAusNr(a.nr),
         name: `Distanzplatte ${a.dicke}mm × 22mm × 100mm`,
         nr: a.nr,
         kat: 'Distanzplatten',
@@ -2309,7 +2341,7 @@ function migrationDistanzplatten() {
     }
   });
   state._distanzplattenMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: R+S Zollikon Baustelle aus altem Baustellen-Manager übernehmen
@@ -2321,7 +2353,7 @@ function migrationZollikon() {
     state.baustellen.push({"id":1001,"name":"R+S Zollikon","kunde":"","adresse":"Zollikon","von":"2026-06-01","bis":"2026-06-12","positionen":1,"startzeit":"","tasks":[{"id":"tkq33vnwln","name":"Küche","hours":41.5,"monteurHours":{"Mitteregger Christian":5,"Dubs Gilles":5,"Themporär 2":4.5,"Temporär Zollikon":4.5},"kwHours":{},"fertig":false},{"id":"tzqndkw5m6","name":"Oberbaumöbel Astor","hours":3.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"twgg0v3bo2","name":"Einbauschrank Eingang","hours":3.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"togfq48gnv","name":"Schiebetüre","hours":5.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"t77g23dz6r","name":"Waschküche","hours":29.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"td4jhy6p4k","name":"Trennwand Küche – Waschküche","hours":17.5,"monteurHours":{"Mitteregger Christian":12,"Dubs Gilles":11.5},"kwHours":{},"fertig":false},{"id":"tepaq2ck4e","name":"Einbauschrank gross Elternzimmer","hours":11.5,"monteurHours":{"Mitteregger Christian":5.5,"Dubs Gilles":5.5},"kwHours":{},"fertig":false},{"id":"t6kkbn4v4j","name":"Einbauschrank klein Elternzimmer","hours":4,"monteurHours":{"Mitteregger Christian":5,"Dubs Gilles":5},"kwHours":{},"fertig":false},{"id":"t5aj1m2xyc","name":"Bett / Bettmöbel Elternzimmer","hours":7.5,"monteurHours":{"Mitteregger Christian":7,"Dubs Gilles":7},"kwHours":{},"fertig":false},{"id":"tpqxgt5iot","name":"Bettmöbel Kinderzimmer","hours":5.5,"monteurHours":{"Mitteregger Christian":9,"Dubs Gilles":9},"kwHours":{},"fertig":false},{"id":"tigrdlcd4e","name":"Einbauschrank Kinderzimmer","hours":5.5,"monteurHours":{"Mitteregger Christian":7,"Dubs Gilles":7},"kwHours":{},"fertig":false},{"id":"t90li8lbqv","name":"Bürotisch an Einbauschrank Kinderzimmer","hours":3.5,"monteurHours":{"Mitteregger Christian":10,"Dubs Gilles":10},"kwHours":{},"fertig":false},{"id":"t9k2t3474h","name":"Einbauschrank Gang Zimmer","hours":6.5,"monteurHours":{},"kwHours":{},"fertig":false}]});
   }
   state._zollikonMigriert = true;
-  save();
+  migrationSpeichern(); // Phase 49C: gleiche Schreibsperre wie die uebrigen Startmigrationen (vorher direktes save())
 }
 
 // Sicherer localStorage-Wrapper: Fallback auf In-Memory wenn localStorage blockiert ist
@@ -2399,13 +2431,14 @@ function load() {
   migrationSpanplattenschrauben();
   migrationSchraubenNeu();
   migrationAbdeckband38mm();
-  fixRafixOhneKopfNr();
-  applyArtikelPreise();
   migrationDistanzplatten();
-  migrationMeldungenMaIdReparatur();
-  migrationTodoNotizMerge();
+  // Phase 49D: migrationMeldungenMaIdReparatur und migrationTodoNotizMerge sind NICHT freigegeben und werden nicht ausgefuehrt
+  // (Funktionen unveraendert im Code; Freigabe und Fachpruefung ausstehend, siehe PHASE49D-INTEGRATION.md).
   migrationTopRocRafixTX();
   migrationRafixOhneKopfErweiterung();
+  // Phase 49C: Nummern- und Preisergaenzung erst nach allen katalogerzeugenden Migrationen (sonst fehlen Preise neu angelegter Artikel).
+  fixRafixOhneKopfNr();
+  applyArtikelPreise();
   migrationKategorienKorrektur();
   migrationKategorienReorganisation();
   migrationKategorienAufbauen();
@@ -5690,7 +5723,8 @@ function maCardHtml(m) {
           ? `<div style="font-size:12px">🚐 <span class="badge badge-green" style="font-size:10px">${fzg.name}</span></div>`
           : `<div style="font-size:12px;color:var(--muted)">🚐 Kein Fahrzeug zugewiesen</div>`}
         ${m.buero ? `<div style="font-size:12px">🏢 ${m.buero}</div>` : ''}
-        ${(currentLoginUser?.entwickler || currentLoginUser?.admin) && m.pin ? `<div style="font-size:12px;color:var(--muted)">🔑 PIN: <span style="font-family:var(--mono);color:var(--accent2);letter-spacing:2px">${m.pin}</span></div>` : ''}
+        ${currentLoginUser?.admin === true ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;margin-top:4px" onclick="event.stopPropagation();pinResetOeffnen('${m.id}')">🔐 PIN ändern / zurücksetzen</button>` : ''}
+        <!-- Phase 48: PIN wird nicht mehr angezeigt -->
         ${m.kontaktName ? `<div style="font-size:11px;color:var(--muted)">👤 ${m.kontaktName}${m.kontaktTel ? ` · <a href="tel:${m.kontaktTel}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.kontaktTel}</a>` : ''}</div>` : ''}
         ${m.notfall ? `<div style="font-size:11px;color:var(--muted)">🆘 ${m.notfall}</div>` : ''}
         ${(m.docs||[]).length ? `<div style="font-size:11px;color:var(--muted)">📁 ${m.docs.length} Dokument(e)</div>` : ''}
@@ -5894,7 +5928,6 @@ function showMaModal(id) {
   document.getElementById('ma-eintritt').value = m?.eintritt || '';
   document.getElementById('ma-geburtsdatum').value = m?.geburtsdatum || '';
   document.getElementById('ma-funktion').value = m?.funktion || '';
-  document.getElementById('ma-pin').value = m?.pin || '';
   document.getElementById('ma-admin').checked = !!(m?.admin);
   document.getElementById('ma-startzeit').value = m?.startzeit || '';
   document.getElementById('ma-notfall').value = m?.notfall || '';
@@ -6491,6 +6524,76 @@ async function schluesselImportAusfuehren() {
   toast('Schlüsselliste übernommen', zugeordnet + ' zugeordnet, ' + ungeklaert + ' ungeklärt', '🔑');
 }
 
+// ── Phase 48: PIN-Verwaltung (nur Administratoren; der PIN wird nie angezeigt oder gespeichert, ausser einmalig als generierter Wert) ──
+function pinResetOeffnen(maId) {
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(maId));
+  if (!m) return toast('Fehler', 'Mitarbeiter nicht gefunden', '⚠️');
+  let box = document.getElementById('pin-reset-dialog');
+  if (box) box.remove();
+  box = document.createElement('div');
+  box.id = 'pin-reset-dialog';
+  box.setAttribute('role', 'dialog');
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  const karte = document.createElement('div');
+  karte.style.cssText = 'background:#1f2435;color:#e8eaf0;max-width:420px;width:100%;border-radius:10px;padding:18px;font-size:13px';
+  const titel = document.createElement('h3');
+  titel.textContent = 'PIN ändern / zurücksetzen';
+  titel.style.margin = '0 0 6px';
+  const name = document.createElement('p');
+  name.textContent = [m.vorname, m.nachname].filter(Boolean).join(' ');
+  const hinweis = document.createElement('p');
+  hinweis.style.cssText = 'color:#9aa3bd;font-size:12px';
+  hinweis.textContent = 'Der bisherige PIN muss nicht bekannt sein. Bestehende Sitzungen dieses Mitarbeiters werden beendet.';
+  const feld = (id, label, typ) => { const w = document.createElement('label'); w.style.cssText = 'display:block;margin:8px 0'; w.textContent = label; const i = document.createElement('input'); i.id = id; i.type = typ; i.inputMode = 'numeric'; i.maxLength = 4; i.autocomplete = 'off'; i.style.cssText = 'display:block;width:100%;margin-top:4px;padding:8px;letter-spacing:4px'; w.append(i); return w; };
+  const neu = feld('pin-reset-neu', 'Neuer PIN (4 Ziffern)', 'password');
+  const wdh = feld('pin-reset-wdh', 'Neuen PIN wiederholen', 'password');
+  const mussAendern = document.createElement('label');
+  mussAendern.style.cssText = 'display:flex;gap:8px;align-items:center;margin:10px 0';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'pin-reset-pflicht'; cb.checked = true;
+  mussAendern.append(cb, document.createTextNode('Mitarbeiter muss den PIN bei der nächsten Anmeldung ändern'));
+  const ausgabe = document.createElement('p');
+  ausgabe.id = 'pin-reset-ausgabe';
+  ausgabe.style.cssText = 'color:#4be88a;font-size:13px;word-break:break-all';
+  const knoepfe = document.createElement('div');
+  knoepfe.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+  const btn = (label, fn, primaer) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:8px 12px;border-radius:6px;border:1px solid #4b9fe8;cursor:pointer;background:' + (primaer ? '#4b9fe8;color:#0f1117' : 'transparent;color:#e8eaf0'); b.onclick = fn; return b; };
+  knoepfe.append(
+    btn('PIN generieren', () => pinResetGenerieren(maId), false),
+    btn('Speichern', () => pinResetSenden(maId), true),
+    btn('Abbrechen', () => box.remove(), false)
+  );
+  karte.append(titel, name, hinweis, neu, wdh, mussAendern, ausgabe, knoepfe);
+  box.append(karte);
+  document.body.append(box);
+}
+async function pinResetGenerieren(maId) {
+  // Vier Ziffern ohne Modulo-Verzerrung: Wert nur bei Bereich 0..9999 uebernehmen (sonst neu ziehen).
+  let wert;
+  do { wert = crypto.getRandomValues(new Uint16Array(1))[0]; } while (wert >= 60000);
+  const pin = String(wert % 10000).padStart(4, '0');
+  document.getElementById('pin-reset-neu').value = pin;
+  document.getElementById('pin-reset-wdh').value = pin;
+  document.getElementById('pin-reset-ausgabe').textContent = 'Generierter PIN (bitte jetzt notieren und übergeben): ' + pin;
+}
+async function pinResetSenden(maId) {
+  const pin = document.getElementById('pin-reset-neu').value.trim();
+  const wdh = document.getElementById('pin-reset-wdh').value.trim();
+  if (!/^\d{4}$/.test(pin)) return toast('Fehler', 'PIN muss aus genau 4 Ziffern bestehen', '⚠️');
+  // Phase 49: PIN nur ueber geschuetzte Verbindung (https); lokale Testadresse ausgenommen.
+  if (!/^https:\/\//.test(BZ_WORKER) && !/^http:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(BZ_WORKER)) return toast('Fehler', 'Keine geschützte Verbindung – PIN wird nicht gesendet', '⚠️');
+  if (pin !== wdh) return toast('Fehler', 'Die beiden PIN-Eingaben stimmen nicht überein', '⚠️');
+  try {
+    const antwort = await bzCall('POST', '/app/admin/employees/' + encodeURIComponent(String(maId)) + '/pin', { pin, pinBestaetigung: wdh, mussAendern: document.getElementById('pin-reset-pflicht').checked });
+    document.getElementById('pin-reset-neu').value = '';
+    document.getElementById('pin-reset-wdh').value = '';
+    document.getElementById('pin-reset-dialog')?.remove();
+    toast('PIN gesetzt', 'Bestehende Sitzungen des Mitarbeiters wurden beendet.', '✅');
+    return antwort;
+  } catch (e) {
+    toast('Fehler', 'PIN konnte nicht gesetzt werden', '⚠️');
+  }
+}
+
 function saveMaModal() {
   const vorname = document.getElementById('ma-vorname').value.trim();
   const nachname = document.getElementById('ma-nachname').value.trim();
@@ -6512,7 +6615,6 @@ function saveMaModal() {
     eintritt: document.getElementById('ma-eintritt').value,
     geburtsdatum: document.getElementById('ma-geburtsdatum').value,
     funktion: document.getElementById('ma-funktion').value.trim(),
-    pin: document.getElementById('ma-pin').value.trim() || undefined,
     admin: document.getElementById('ma-admin').checked,
     startzeit: document.getElementById('ma-startzeit').value.trim(),
     faehigkeiten: Array.from(document.querySelectorAll('#ma-faehigkeiten-wrap input:checked')).map(cb=>cb.value),
@@ -11980,10 +12082,7 @@ function startFirebaseListener(generation = bzGeneration) {
 
           mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
-          migrationSchraubenNeu();
-          migrationDistanzplatten();
-          migrationMeldungenMaIdReparatur();
-          migrationTodoNotizMerge();
+          startMigrationenNachUebernahme(); // Phase 49B: Serverstand uebernommen, Migrationen mit Speicherung nach Anmeldung
           markFirebaseSynced();
           lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
           renderAll();
