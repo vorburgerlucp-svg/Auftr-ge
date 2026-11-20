@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const start=html.indexOf('const BZ_WORKER ='),end=html.indexOf('// Statuswechsel.',start);
 function load(fetch){
- const ctx=vm.createContext({window:{MONTEUR_TEST_WORKER_URL:'https://pilot.example.workers.dev'},fetch,
+ const ctx=vm.createContext({window:{MONTEUR_TEST_WORKER_URL:'https://pilot.example.workers.dev'},fetch,OfficeSession:{expired:()=>false,clear(){},logout(){},aktiv:()=>false},
   document:{getElementById:()=>({value:'Test',style:{}})},bzRender(){},officeSitzungAbgelaufen(){ctx.revoked++;},revoked:0});
  vm.runInContext(html.slice(start,end),ctx);return ctx;
 }

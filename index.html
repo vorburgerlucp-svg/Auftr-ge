@@ -2,6 +2,7 @@
 <html lang="de"><head>
 <script src="pilot-config.js"></script>
 <script src="pilot-pin.js"></script>
+<script src="office-session.js"></script>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2583,19 +2584,10 @@ function istAdminUser(u) {
 }
 
 function initLoginScreen() {
-  // Bereits eingeloggt? (sessionStorage)
-  let savedLogin = null;
-  try { savedLogin = sessionStorage.getItem('lagertool_login'); } catch(e) {}
-  if (savedLogin) {
-    try {
-      const u = JSON.parse(savedLogin);
-      const m = state.mitarbeiter.find(x => x.id === u.id);
-      if (m && istAdminUser(m) && !m.abgemeldet) { currentLoginUser = m; lagertoolSitzungMaId = m.id; finishLogin(); return; }
-      // Zugriff nicht (mehr) erlaubt (kein Admin/Entwickler, z.B. Rolle nachträglich
-      // geändert) - alte Session verwerfen statt automatisch einzuloggen.
-      if (m) { try { sessionStorage.removeItem('lagertool_login'); } catch(e2) {} }
-    } catch(e) {}
-  }
+  // Hinweis nach Ablauf, Logout in anderem Tab oder PIN-Wechsel (fester Text, keine Daten).
+  const hinweis = OfficeSession.hinweisLesen();
+  if (hinweis) { const el = document.getElementById('login-error'); if (el) { el.textContent = hinweis; el.style.display = 'block'; } }
+  // Keine automatische Anmeldung aus dem Browser-Speicher: jede Büro-Sitzung braucht Name und PIN.
 
   document.getElementById('login-pin').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
@@ -2809,7 +2801,7 @@ async function doLogin() {
     try { data = await res.json(); } catch (x) { data = null; }
     if (version !== bzGeneration) return;
     if (res.ok && data?.pinWechselPflicht && data.officeSession) {
-      bzSession = { token: data.officeSession, name };
+      if (!officeSitzungSetzen(data.officeSession, name, data.expiresIn)) throw new Error('session_invalid');
       document.getElementById('login-pin').value = '';
       officeAnmeldungLaeuft = false;
       bzPinWechsel();
@@ -2828,8 +2820,13 @@ async function doLogin() {
     errEl.style.display = 'block';
     return;
   }
-  // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server.
-  bzSession = { token: r.officeSession, name };
+  // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server. Ablaufzeit ab Token-exp (siehe officeSitzungSetzen).
+  if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn)) {
+    officeAnmeldungLaeuft = false;
+    errEl.textContent = 'Anmeldung ungültig. Bitte erneut versuchen.';
+    errEl.style.display = 'block';
+    return;
+  }
   lagertoolSitzungMaId = String(r.employeeId);
   officeWartetAufSync = String(r.employeeId);
   officeSyncGeneration = bzGeneration;
@@ -2890,18 +2887,59 @@ function officeAnmeldungNachSync() {
   finishLogin();
 }
 
-// Ablauf der Firebase-Sitzung (nach ca. einer Stunde): sauber zur Anmeldung zurueck.
-function officeSitzungAbgelaufen() {
+// Ablauf der Firebase-Sitzung: Die Büro-Sitzung endet acht Stunden nach Anmeldung. Die Zeitsteuerung liegt in
+// office-session.js (gemeinsam mit office-pilot.html). Hier: Anbindung an Firebase und Bereinigung.
+OfficeSession.onEnd = (grund) => officeSitzungBeenden(grund);
+
+// Einzige Stelle der Haupt-App, an der eine Büro-Sitzung entsteht. false = Laufzeit nicht gueltig, Anmeldung abgelehnt.
+function officeSitzungSetzen(token, name, expiresIn) {
+  if (!OfficeSession.start(token, expiresIn)) return false;
+  bzSession = { token, name };
+  return true;
+}
+
+// Gemeinsame Bereinigung fuer Abmelden und Sitzungsende. Entfernt Büro-Zustand, beendet Listener und Abonnements,
+// meldet Firebase ab und loescht den lokalen Dokumentspeicher. Monteur-Sitzungen werden nicht beruehrt.
+// Liefert ein Promise, das erst nach Abmeldung und Loeschung erfuellt ist (vor dem Neuladen abwarten).
+function officeSitzungAufraeumen() {
+  OfficeSession.clear();
+  lagertoolOAuthToken = null;                // Google-Anmeldung der Büro-Sitzung verwerfen
+  bzGeneration++;                          // verspaetete Antworten (bzCall, Firebase) werden verworfen
+  bzSession = null;
+  bzDaten = { meldungen: [], rapporte: [] };
+  bzMeldung = null;
+  officeAnmeldungLaeuft = false;
+  officeWartetAufSync = null; officeSyncGeneration = -1;
   currentLoginUser = null; lagertoolSitzungMaId = null;
-  officeWartetAufSync = null; officeAnmeldungLaeuft = false;
-  try { if (typeof dbRef !== 'undefined' && dbRef) dbRef.off(); } catch {}
-  try { firebase.auth().signOut().catch(() => {}); } catch {}
+  try { window.PilotPin?.close(); } catch (_) {}
+  try { if (dbRef) dbRef.off(); } catch (_) {}
+  dbRef = null;                            // kein weiteres Schreiben nach Firebase
+  try { sessionStorage.removeItem('lagertool_login'); } catch (_) {}
+  const signOut = Promise.resolve().then(() => firebase.auth().signOut()).catch(() => {});
+  const docs = new Promise(res => {
+    const t = setTimeout(res, 3000);       // blockierte Loeschung nicht endlos abwarten
+    try {
+      const q = indexedDB.deleteDatabase('lagertool_docs');
+      q.onsuccess = q.onerror = q.onblocked = () => { clearTimeout(t); res(); };
+    } catch (_) { clearTimeout(t); res(); }
+  });
+  return Promise.all([signOut, docs]);
+}
+
+// Ablauf der Büro-Sitzung: Bereinigung, dann zur Anmeldung. Neuladen erst nach Abmeldung in Firebase.
+// Ende der Büro-Sitzung: Bereinigung, Hinweis merken, dann neu laden.
+// grund: 'expired' (Ablauf), 'remote-logout' (Logout in anderem Tab), 'pin-changed' (PIN geaendert).
+function officeSitzungBeenden(grund) {
+  const fertig = officeSitzungAufraeumen();
+  const code = { expired: 'abgelaufen', 'remote-logout': 'anderer-tab', 'pin-changed': 'pin-gewechselt', revoked: 'ungueltig', 'logout-unbestaetigt': 'logout-unbestaetigt', 'logout-spiegel-offen': 'logout-spiegel-offen' }[grund] || null;
+  if (code) OfficeSession.hinweisSetzen(code);
   // Remove private DOM immediately, before the reload clears the full application state.
   document.getElementById('login-screen').style.display = 'flex';
-  const err = document.getElementById('login-error');
-  err.textContent = 'Die Büro-Sitzung wurde beendet. Bitte erneut anmelden.'; err.style.display = 'block';
-  setTimeout(() => location.reload(), 0);
+  fertig.then(() => location.reload(), () => location.reload());
 }
+// Ablauf der Sitzung (Aufrufe aus bzCall und Listener-Fehler).
+// Ungueltige Sitzung (401, Listener-Fehler): 'abgelaufen' nur, wenn die Uhr den Ablauf bestaetigt. Sonst 'ungueltig'.
+function officeSitzungAbgelaufen() { officeSitzungBeenden(OfficeSession.expired() ? 'expired' : 'revoked'); }
 
 function finishLogin() {
   const loginScreen = document.getElementById('login-screen');
@@ -3157,21 +3195,31 @@ function openWebauthnSettingsModal() {
 })();
 
 let pendingSavePromise = null;
+// Manueller Logout. Tab-Signal sofort, Oberfläche sofort gesperrt, dann der serverseitige Widerruf mit Zeitlimit.
+// Ein Zweitklick startet keinen zweiten Ablauf. Ein Netzwerkfehler beendet trotzdem lokal (Hinweis, kein Widerruf).
+let officeLogoutLaeuft = false;
 async function doLogout() {
-  bzAbmelden();
+  if (officeLogoutLaeuft) return;
+  officeLogoutLaeuft = true;
+  const token = bzSession ? bzSession.token : null;      // nur im Speicher dieser Funktion
+  OfficeSession.logout();                                  // andere Tabs informieren (ohne Token)
+  bzAbmelden();                                            // keine neuen Anfragen mehr
   officeWartetAufSync = null; officeSyncGeneration = -1;
   currentLoginUser = null; lagertoolSitzungMaId = null;
   officeAnmeldungLaeuft = false;
-  // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten,
-  // damit der Reload keine frischen Änderungen "abschneidet" (Datenverlust-Bug).
+  const oberflaeche = document.getElementById('login-screen');
+  if (oberflaeche) oberflaeche.style.display = 'flex';
+  const serverPromise = token ? OfficeSession.serverLogout(BZ_WORKER, token) : Promise.resolve('kein-token');
+  // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten (Datenverlust vermeiden).
   try {
     if (pendingSavePromise) {
       await Promise.race([pendingSavePromise, new Promise(r => setTimeout(r, 2500))]);
     }
   } catch(e) {}
-  try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
-  try { await firebase.auth().signOut(); } catch(e) {}
-  try { indexedDB.deleteDatabase('lagertool_docs'); } catch(e) {}
+  const ergebnis = await serverPromise;                    // höchstens das Zeitlimit
+  try { await officeSitzungAufraeumen(); } catch(e) {}
+  const hinweis = OfficeSession.logoutHinweis(ergebnis);
+  if (hinweis) OfficeSession.hinweisSetzen(hinweis);
   location.reload();
 }
 // save() bleibt für alle bestehenden Aufrufer 100% wie bisher nutzbar
@@ -3498,6 +3546,13 @@ function bzFehlertext(e) {
 
 async function bzCall(method, path, body, {binary = false} = {}) {
   const version = bzGeneration;
+  // Abgelaufene Sitzung: keine Anfrage mehr senden, sondern sofort abmelden (auch ohne ausgeloesten Timer).
+  // Ohne Sitzung wird nichts gesendet, ausser der Anmeldung selbst.
+  if (path !== '/app/office/anmelden' && !bzSession) { const e = new Error('session_required'); e.code = 'session_required'; e.status = 401; throw e; }
+  if (bzSession && OfficeSession.expired()) {
+    officeSitzungAbgelaufen();
+    const e = new Error('session_expired'); e.code = 'session_expired'; e.status = 401; throw e;
+  }
   if (!BZ_PILOT_WORKER_OK) {
     const e = new Error('pilot_not_configured');e.status = 0;e.code = 'pilot_not_configured';throw e;
   }
@@ -3540,7 +3595,7 @@ async function bzAnmelden(source = 'meldungen') {
   if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
   try {
     const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
-    bzSession = { token: r.officeSession, name };
+    if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn)) throw new Error('session_invalid');
     if (r.pinWechselPflicht) { bzPinWechsel(); return; }
     bzMeldung = null;
     await bzLaden();
@@ -3553,6 +3608,7 @@ async function bzAnmelden(source = 'meldungen') {
 
 function bzAbmelden() {
   bzGeneration++;
+  OfficeSession.clear();
   window.PilotPin?.close();
   bzRapportSiteId = 'all'; bzRapportAutorId = 'all';
   bzSession = null;
@@ -3581,9 +3637,10 @@ async function bzLaden() {
 function bzPinWechsel() {
   PilotPin.open({ change: (altPin, neuPin) => bzCall('POST', '/app/pin-wechsel', { altPin, neuPin }),
     cancel: () => bzAbmelden(), complete: () => {
-      bzAbmelden(); officeAnmeldungLaeuft = false;
-      const err = document.getElementById('login-error');
-      err.textContent = 'PIN geändert. Bitte mit dem neuen PIN anmelden.'; err.style.display = 'block';
+      // PIN geaendert: alte Sitzung beenden (auch in anderen Tabs), Hinweis, neu laden.
+      officeAnmeldungLaeuft = false;
+      OfficeSession.logout();
+      officeSitzungBeenden('pin-changed');
     } });
 }
 
@@ -4029,6 +4086,7 @@ async function todoPushAktivieren(){
     if(!pkRes.ok||!pk.publicKey) throw new Error(pk.message||pk.error||'VAPID Public Key fehlt.');
     let sub=await reg.pushManager.getSubscription();
     if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:todoUrlBase64ToUint8Array(pk.publicKey)});
+    if(!lagertoolOAuthToken||!bzSession||!OfficeSession.aktiv()) throw new Error('Bitte zuerst als Büro anmelden.');
     const r=await fetch(new URL('api/v1/push/subscriptions',GPT_ASSISTANT_URL),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+lagertoolOAuthToken},body:JSON.stringify({subscription:sub.toJSON(),device:{ua:navigator.userAgent,platform:navigator.platform||'',label:(currentLoginUser?todoActor().name:'Gerät')}})});
     const data=await r.json(); if(!r.ok) throw new Error(data.message||data.error||'Push-Registrierung fehlgeschlagen');
     toast('Push aktiv','Dieses Gerät erhält Prio-1- und Prio-2-Meldungen.','🔔'); todoPushStatusAktualisieren();
@@ -10471,6 +10529,8 @@ function lagertoolOAuthWaitForToken(timeoutMs = 120000) {
   });
 }
 async function lagertoolOAuthEnsureToken() {
+  // Google-Anmeldung nur innerhalb einer aktiven Büro-Sitzung (lokale Ablaufkontrolle).
+  if (!bzSession || !OfficeSession.aktiv()) throw new Error('Bitte zuerst als Büro anmelden.');
   if (lagertoolOAuthToken) return lagertoolOAuthToken;
   await lagertoolOAuthLogin();
   const statusEl = document.getElementById('bs-doc-upload-status');

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="pilot-config.js"></script>
 <script src="pilot-pin.js"></script>
+<script src="office-session.js"></script>
 <title>LagerTool Pilot – Büro-Kommunikation</title>
 <style>
 :root{font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#213b33;background:#eef4f0}
@@ -29,7 +30,7 @@ nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   <p class="subtitle">Isolierte Testversion · Monteur-Anfragen und Arbeitsrapporte · Keine Verbindung zur produktiven LagerTool-Datenbank</p>
   <nav>
     <button id="nav-anfragen" type="button">Anfragen <span id="bz-anfragen-count"></span></button>
-    <button type="button" onclick="bzAbmelden()">Abmelden / neu starten</button>
+    <button type="button" onclick="bzManuellAbmelden()">Abmelden / neu starten</button>
   </nav>
 </header>
 <section class="card"><h2>Arbeitsrapporte</h2><div id="bz-rapporte-section"></div></section>
@@ -44,12 +45,15 @@ nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 const BZ_WORKER=String(window.MONTEUR_TEST_WORKER_URL||'').trim();
 let bzSession=null,bzGeneration=0,bzDaten={meldungen:[],rapporte:[]},bzMeldung=null;
 let bzRapportSiteId='all',bzRapportAutorId='all';
+bzMeldung=OfficeSession.hinweisLesen();   // Hinweis nach Ablauf, Logout in anderem Tab oder PIN-Wechsel
 const state={baustellen:[]};
 function bzEsc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function bzName(id){return 'Mitarbeiter '+id;}
 async function bzCall(method,path,body,{binary=false}={}){
   if(!window.lagertoolPilotWorkerAllowed(BZ_WORKER))throw {code:'pilot_not_configured',status:0};
   const generation=bzGeneration;
+  if(path!=='/app/office/anmelden'&&!bzSession)throw {code:'session_required',status:401};
+  if(bzSession&&OfficeSession.expired()){bzSitzungEnde('expired');throw {code:'session_expired',status:401};}
   const result=await fetch(BZ_WORKER+path,{
     method,credentials:'omit',cache:'no-store',
     headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),
@@ -60,24 +64,40 @@ async function bzCall(method,path,body,{binary=false}={}){
   let data={};try{data=await result.json();}catch{}
   if(generation!==bzGeneration)throw {code:'session_changed'};
   if(!result.ok){
-    if(result.status===401&&bzSession&&path!=='/app/pin-wechsel')bzAbmelden();
+    if(result.status===401&&bzSession&&path!=='/app/pin-wechsel')bzSitzungEnde(OfficeSession.expired()?'expired':'revoked');
     throw {code:data.error||'http_error',status:result.status};
   }
   return data;
 }
 function bzAbmelden(){
-  bzGeneration++;window.PilotDocuments?.resetSession();window.PilotPin?.close();bzSession=null;bzDaten={meldungen:[],rapporte:[]};
+  bzGeneration++;OfficeSession.clear();window.PilotDocuments?.resetSession();window.PilotPin?.close();bzSession=null;bzDaten={meldungen:[],rapporte:[]};
   bzRapportSiteId='all';bzRapportAutorId='all';bzMeldung=null;bzRenderRapporte();
 }
+// Sitzungsende (Ablauf oder Abmelden): Zeitsteuerung beenden, Zustand verwerfen, dann neu laden.
+// Neu laden entfernt die Daten aller eingebundenen Module (Anfragen, Rapporte, Dokumente, Planung) aus dem Speicher.
+// Ende der Büro-Sitzung: Zustand verwerfen, Hinweis merken (nur Code), neu laden. Neu laden entfernt die Daten der Module.
+function bzSitzungEnde(grund){bzAbmelden();const c={expired:'abgelaufen','remote-logout':'anderer-tab','pin-changed':'pin-gewechselt',revoked:'ungueltig','logout-unbestaetigt':'logout-unbestaetigt','logout-spiegel-offen':'logout-spiegel-offen'}[grund];if(c)OfficeSession.hinweisSetzen(c);location.reload();}
+// Manueller Logout: informiert andere Tabs, dann ohne Hinweis neu laden.
+// Manueller Logout: Tab-Signal, Oberfläche sofort leer, serverseitiger Widerruf mit Zeitlimit, dann Neuladen.
+let bzLogoutLaeuft=false;
+async function bzManuellAbmelden(){
+  if(bzLogoutLaeuft)return; bzLogoutLaeuft=true;
+  const token=bzSession?bzSession.token:null;
+  OfficeSession.logout();
+  bzAbmelden();
+  const ergebnis=token?await OfficeSession.serverLogout(BZ_WORKER,token):'kein-token';
+  bzSitzungEnde(ergebnis==='fehler'?'logout-unbestaetigt':ergebnis==='ok-spiegel-offen'?'logout-spiegel-offen':'logout');
+}
+OfficeSession.onEnd=(g)=>bzSitzungEnde(g);
 function bzPinWechsel(){
-  PilotPin.open({change:(altPin,neuPin)=>bzCall('POST','/app/pin-wechsel',{altPin,neuPin}),cancel:bzAbmelden,
-    complete:()=>{bzAbmelden();bzMeldung='PIN geändert. Bitte erneut anmelden.';bzRenderRapporte();}});
+  PilotPin.open({change:(altPin,neuPin)=>bzCall('POST','/app/pin-wechsel',{altPin,neuPin}),cancel:()=>bzManuellAbmelden(),
+    complete:()=>{OfficeSession.logout();bzSitzungEnde('pin-changed');}});
 }
 async function bzAnmelden(){
   const name=document.getElementById('bz-rapport-login-name').value.trim();
   const pin=document.getElementById('bz-rapport-login-pin').value;
   try{const data=await bzCall('POST','/app/office/anmelden',{name,pin});
-    if(!data.officeSession)throw Error('login_failed');bzSession={token:data.officeSession,name};
+    if(!data.officeSession||!OfficeSession.start(data.officeSession,data.expiresIn))throw Error('login_failed');bzSession={token:data.officeSession,name};
     if(data.pinWechselPflicht){bzPinWechsel();return;}await bzLaden();
   }catch(e){if(e.code==='session_changed')return;bzAbmelden();bzMeldung='Anmeldung fehlgeschlagen.';bzRenderRapporte();}
 }

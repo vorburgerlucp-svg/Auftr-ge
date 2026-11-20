@@ -41,6 +41,8 @@ function render(){
         if(version!==viewVersion)return;
         if(!auth.officeSession)throw Error('login_failed');
         if(typeof bzGeneration!=='undefined')bzGeneration++;
+        // Zeitsteuerung der Büro-Sitzung (office-session.js). Ohne sie wird die Anmeldung nicht angenommen.
+        if(typeof OfficeSession==="undefined"||!OfficeSession.start(auth.officeSession,auth.expiresIn))throw Error("session_invalid");
         bzSession={token:auth.officeSession,name:name.value.trim()};
         if(auth.pinWechselPflicht){if(typeof bzPinWechsel==='function')bzPinWechsel();else {bzSession=null;loginError='Bitte PIN zuerst in der Büro-App ändern.';render();}return;}
         loginError='';seen.clear();ready=false;
