@@ -1,3 +1,4 @@
+import { stubEntityOutbox } from './helpers/entity-outbox-stub.mjs';
 // Serverseitiger Büro-Logout im Frontend (Phase 7). Echter Code aus office-session.js, office-pilot.html und index.html
 // in vm-Umgebungen mit gefälschter Uhr und gestubbtem fetch. Keine Netzwerkzugriffe, keine Produktivdaten.
 import test from 'node:test';
@@ -99,7 +100,7 @@ function tab({ id = 'A', store = storage(), server = 'ok', exp = EXP, bus = null
     bzRenderRapporte() {}, bzRender() {},
   };
   ctx.window = ctx;
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   vm.runInContext('var bzSession = null;', ctx);
   if (bus) ctx.BroadcastChannel = makeChannel(bus, id);
   vm.runInContext(CORE, ctx);
@@ -235,6 +236,7 @@ test('9 a Firebase permission error ends the index session as revoked when the c
     setTimeout,
   });
   ctx.window = ctx;
+  stubEntityOutbox(ctx);
   vm.runInContext(CORE, ctx);
   vm.runInContext(INDEX.slice(a, b), ctx);
   ctx.OfficeSession.start(tokenMit(EXP), 28800);
@@ -371,7 +373,7 @@ function indexLogoutWorld({ server = 'ok' } = {}) {
     MONTEUR_TEST_WORKER_URL: BASE,
   };
   ctx.window = ctx;
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   const bz = INDEX.indexOf('const BZ_WORKER =');
   const bzEnd = INDEX.indexOf('// Statuswechsel.', bz);
   vm.runInContext(CORE, ctx);
@@ -395,7 +397,8 @@ test('I1 index manual logout: confirmed revocation, token sent, Firebase signed 
   assert.equal(logout.length, 1);
   assert.equal(logout[0].auth, 'Bearer ' + tokenMit(EXP));
   assert.equal(w.rec.signOuts, 1, 'Firebase signed out');
-  assert.ok(w.rec.deleted.includes('lagertool_docs'), 'documents removed');
+  // Phase 49O: lokale Dokumente werden beim Abmelden nicht mehr geloescht (Sync-Status unbekannt).
+  assert.ok(!w.rec.deleted.includes('lagertool_docs'), 'documents kept (Phase 49O)');
   assert.equal(w.sessionStore.getItem('lagertool_hinweis'), null);
   assert.equal(w.rec.reloads, 1);
 });

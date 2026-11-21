@@ -444,6 +444,7 @@
   .todo-push-status{font-size:12px;color:var(--muted);margin-top:8px}
   @media(max-width:700px){.todo-prio-summary{grid-template-columns:repeat(2,1fr)}.todo-wf-actions .btn{flex:1;justify-content:center;min-height:42px}#todo-alert-box{max-height:90vh;overflow:auto}}
 </style>
+<script src="docs-outbox.js"></script>
 </head>
 <body>
 
@@ -2394,10 +2395,23 @@ function debugClick() {
 function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser */ }
 
 // Altbestaende aus frueheren Versionen: gespeicherte Biometrie-PINs und API-Schluessel werden entfernt.
+// Phase 49O: Die lokale Dokumentdatenbank 'lagertool_docs' wird NICHT mehr geloescht. Sie kann ungesicherte,
+// nur lokal vorhandene Dateien enthalten, und ihr Synchronisierungsstatus ist unbekannt. Nur Hinweis, kein Eingriff.
 function bereinigeAltbestaende() {
-  try { indexedDB.deleteDatabase('lagertool_docs'); } catch (_) {}
   try { safeStorage.keys(WEBAUTHN_PIN_PREFIX).forEach(k => safeStorage.removeItem(k)); } catch (_) {}
   try { localStorage.removeItem('lagertool_claude_key'); } catch (_) {}
+  legacyDokumenteHinweis();
+}
+// Liest nur die Liste der Datenbanknamen (kein Oeffnen, kein Schreiben, kein Loeschen).
+function legacyDokumenteHinweis() {
+  try {
+    if (!indexedDB || typeof indexedDB.databases !== 'function') return;
+    indexedDB.databases().then(liste => {
+      if ((liste || []).some(d => d && d.name === 'lagertool_docs')) {
+        console.warn('Lokaler Dokument-Altbestand (lagertool_docs) vorhanden. Er wurde nicht geloescht und nicht geprueft.');
+      }
+    }).catch(() => {});
+  } catch (_) {}
 }
 let claudeApiKeySitzung = '';
 
@@ -2834,7 +2848,7 @@ async function doLogin() {
     try { data = await res.json(); } catch (x) { data = null; }
     if (version !== bzGeneration) return;
     if (res.ok && data?.pinWechselPflicht && data.officeSession) {
-      if (!officeSitzungSetzen(data.officeSession, name, data.expiresIn)) throw new Error('session_invalid');
+      if (!officeSitzungSetzen(data.officeSession, name, data.expiresIn, data.employeeId)) throw new Error('session_invalid');
       document.getElementById('login-pin').value = '';
       officeAnmeldungLaeuft = false;
       bzPinWechsel();
@@ -2854,7 +2868,7 @@ async function doLogin() {
     return;
   }
   // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server. Ablaufzeit ab Token-exp (siehe officeSitzungSetzen).
-  if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn)) {
+  if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn, r.employeeId)) {
     officeAnmeldungLaeuft = false;
     errEl.textContent = 'Anmeldung ungültig. Bitte erneut versuchen.';
     errEl.style.display = 'block';
@@ -2925,9 +2939,9 @@ function officeAnmeldungNachSync() {
 OfficeSession.onEnd = (grund) => officeSitzungBeenden(grund);
 
 // Einzige Stelle der Haupt-App, an der eine Büro-Sitzung entsteht. false = Laufzeit nicht gueltig, Anmeldung abgelehnt.
-function officeSitzungSetzen(token, name, expiresIn) {
+function officeSitzungSetzen(token, name, expiresIn, employeeId) {
   if (!OfficeSession.start(token, expiresIn)) return false;
-  bzSession = { token, name };
+  bzSession = { token, name, employeeId: employeeId != null ? String(employeeId) : null };
   return true;
 }
 
@@ -2949,14 +2963,8 @@ function officeSitzungAufraeumen() {
   dbRef = null;                            // kein weiteres Schreiben nach Firebase
   try { sessionStorage.removeItem('lagertool_login'); } catch (_) {}
   const signOut = Promise.resolve().then(() => firebase.auth().signOut()).catch(() => {});
-  const docs = new Promise(res => {
-    const t = setTimeout(res, 3000);       // blockierte Loeschung nicht endlos abwarten
-    try {
-      const q = indexedDB.deleteDatabase('lagertool_docs');
-      q.onsuccess = q.onerror = q.onblocked = () => { clearTimeout(t); res(); };
-    } catch (_) { clearTimeout(t); res(); }
-  });
-  return Promise.all([signOut, docs]);
+  // Phase 49O: Beim Abmelden werden keine lokalen Dokumente geloescht (Synchronisierungsstatus unbekannt).
+  return Promise.all([signOut]);
 }
 
 // Ablauf der Büro-Sitzung: Bereinigung, dann zur Anmeldung. Neuladen erst nach Abmeldung in Firebase.
@@ -3233,6 +3241,7 @@ let pendingSavePromise = null;
 let officeLogoutLaeuft = false;
 async function doLogout() {
   if (officeLogoutLaeuft) return;
+  if (!entityAbmeldungBestaetigen()) return;   // PHASE 49P: ungesicherte Dokumente nur nach Bestaetigung verwerfen
   officeLogoutLaeuft = true;
   const token = bzSession ? bzSession.token : null;      // nur im Speicher dieser Funktion
   OfficeSession.logout();                                  // andere Tabs informieren (ohne Token)
@@ -3554,20 +3563,250 @@ function save(opts) {
 }
 
 // Dokumente (Fotos, PDFs) werden NICHT dauerhaft im Browser gespeichert. Sie liegen nur im Speicher der Sitzung
-// bzw. im Worker. Altbestaende aus frueheren Versionen werden beim Start geloescht (bereinigeAltbestaende).
+// bzw. im Worker. Altbestaende aus frueheren Versionen werden beim Start NICHT geloescht (Phase 49O, nur Hinweis).
 function saveDocsToIDB(s) { /* bewusst leer: kein dauerhafter Dokumentcache im Browser */ }
 function loadDocsFromIDB(s) { return Promise.resolve(); }
+
+// PHASE 49Q/49R: Fahrzeug- und Mitarbeiterdokumente. Neue Dokumente werden vor dem Speichern verschlüsselt in
+// der lokalen Outbox (IndexedDB, docs-outbox.js) abgelegt, danach auf den Server hochgeladen (zunächst wartend)
+// und erst beim erfolgreichen Speichern des Formulars endgültig zugeordnet (Finalisierung).
+// Abmelden und Neuladen verwerfen nichts. Verwerfen geschieht nur ausdrücklich über entityDokumentEntfernen oder das Prüffenster.
+let entityOutbox = [];           // Anzeige: Einträge des angemeldeten Benutzers (ohne Inhalt)
+let entityOutboxLaeuft = false;
+let entityRetryTimer = null;
+let entityPersistenz = null;     // Ergebnis der Speicherprüfung (status, dauerhaft, kapazitaetKnapp)
+let entityPersistenzAngefragt = false;
+function entityOwner() { return bzSession ? String(bzSession.employeeId || '') : ''; }
+function entityEsc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function entityOutboxPlanen(verzoegerungMs) {
+  clearTimeout(entityRetryTimer);
+  entityRetryTimer = setTimeout(() => { entityOutboxAbarbeiten(); }, verzoegerungMs);
+}
+// Adapter für docs-outbox.js: JSON- oder Rohanfragen über die Büro-Sitzung.
+function entityApi(m, p, o) { return bzCall(m, p, o && o.json ? o.json : undefined, { raw: (o && o.raw) || null }); }
+async function entityBytesVon(dataUrl) { const r = await fetch(dataUrl); return new Uint8Array(await r.arrayBuffer()); }
+const ENTITY_FEHLER_TEXT = {
+  speicher_voll: 'Der Gerätespeicher ist voll.',
+  persistenz_nicht_verfuegbar: 'Die sichere lokale Ablage ist auf diesem Gerät nicht verfügbar.',
+  readback_fehlgeschlagen: 'Die lokale Ablage konnte nicht zuverlässig geprüft werden.',
+  keine_sitzung: 'Keine Büro-Sitzung.',
+  ungueltige_groesse: 'Die Datei ist leer oder zu groß (max. 8 MB).'
+};
+// Vor dem Speichern: neue Dokumente sicher ablegen. Wirft, wenn das nicht gelingt (Datensatz wird dann nicht gespeichert).
+async function entityDokumenteVorSpeichern(kind, entityId, docs) {
+  if (!entityPersistenzAngefragt) { entityPersistenzAngefragt = true; entityPersistenzPruefen(true); }
+  for (const d of (docs || [])) {
+    if (d.storage === 'entity-doc' || d.uploadId || !d.data) continue;
+    if (!entityOwner()) throw Object.assign(new Error('keine_sitzung'), { code: 'keine_sitzung' });
+    const bytes = await entityBytesVon(d.data);
+    const res = await DocOutbox.hinzufuegen({ employeeId: entityOwner(), kind, entityId: String(entityId), name: d.name, type: d.type, bytes });
+    if (!res.ok) throw Object.assign(new Error(res.reason || 'persistenz_nicht_verfuegbar'), { code: res.reason || 'persistenz_nicht_verfuegbar' });
+    d.uploadId = res.uploadId;
+    d.pending = true;
+  }
+}
+// Datensatz-Entwürfe in Speicherform: Server-Dokumente unverändert, Outbox-Dokumente als Platzhalter ohne Inhalt.
+function entityAusFormular(kind, entityId, docs) {
+  return (docs || []).filter(d => d.storage === 'entity-doc' || d.uploadId).map(d => (
+    d.storage === 'entity-doc' ? d : { name: d.name, type: d.type, uploadId: d.uploadId, pending: true, _localOnly: true }
+  ));
+}
+function entityListeDesDatensatzes(kind, entityId) {
+  const liste = kind === 'fahrzeug' ? state.fahrzeuge : state.mitarbeiter;
+  return (liste || []).find(x => String(x.id) === String(entityId));
+}
+// Serverseitig wartend gespeichert: Platzhalter erhält die Serverkennung (noch keine endgültige Zuordnung).
+function entityDokumentUebernehmen(item, doc) {
+  const rec = entityListeDesDatensatzes(item.kind, item.entityId);
+  const i = rec && Array.isArray(rec.docs) ? rec.docs.findIndex(d => d.uploadId === item.uploadId) : -1;
+  if (i < 0) return false;   // Formular nicht gespeichert: Finalisierung erfolgt beim Speichern
+  rec.docs[i] = Object.assign({}, rec.docs[i], { serverDocId: doc.id, serverMeta: { mime: doc.mime, size: doc.size, sha256: doc.sha256, createdAt: doc.createdAt } });
+  save();
+  if (typeof renderAll === 'function') renderAll();
+  return true;
+}
+// Finalisiert wartende Dokumente, deren Datensatz gespeichert ist. Nur Einträge im Zustand 'stored'.
+async function entityFinalisiereBereite() {
+  if (!bzSession) return;
+  const offen = [];
+  for (const [kind, liste] of [['fahrzeug', state.fahrzeuge], ['mitarbeiter', state.mitarbeiter]]) {
+    for (const rec of (liste || [])) {
+      for (const d of (rec.docs || [])) {
+        if (d.uploadId && d.pending && !d.storage) offen.push({ kind, entityId: String(rec.id), uploadId: d.uploadId });
+      }
+    }
+  }
+  if (!offen.length) return;
+  let ergebnisse = [];
+  try {
+    ergebnisse = await DocOutbox.finalisiere({ employeeId: entityOwner(), api: entityApi, uploadIds: offen.map(o => o.uploadId) });
+  } catch (_) { return; }
+  let geaendert = false;
+  for (const e of ergebnisse) {
+    if (e.status !== 'final' && e.status !== 'discarded' && e.status !== 'forbidden' && e.status !== 'missing') continue;
+    const rec = entityListeDesDatensatzes(e.kind, e.entityId);
+    const i = rec && Array.isArray(rec.docs) ? rec.docs.findIndex(d => d.uploadId === e.uploadId) : -1;
+    if (i < 0) continue;
+    if (e.status === 'final') {
+      const alt = rec.docs[i];
+      const m = e.serverMeta || {};
+      rec.docs[i] = { id: e.serverDocId, name: alt.name, type: m.mime || alt.type, size: m.size, sha256: m.sha256, createdAt: m.createdAt, storage: 'entity-doc', kind: e.kind, entityId: String(e.entityId) };
+      geaendert = true;
+    } else {
+      rec.docs[i] = Object.assign({}, rec.docs[i], { fehler: e.status });
+      geaendert = true;
+    }
+  }
+  if (geaendert) { save(); if (typeof renderAll === 'function') renderAll(); }
+}
+async function entityOutboxAbarbeiten() {
+  if (!bzSession || entityOutboxLaeuft) return;
+  entityOutboxLaeuft = true;
+  let wartet = false;
+  try {
+    const r = await DocOutbox.hochladen({
+      employeeId: entityOwner(),
+      api: entityApi,
+      onErfolg: (rec, doc) => { entityDokumentUebernehmen(rec, doc); }
+    });
+    wartet = !!(r && r.wartet);
+    await entityFinalisiereBereite();
+  } catch (_) { wartet = true; }
+  finally { entityOutboxLaeuft = false; }
+  await entityOutboxAnzeigen();
+  if (wartet) entityOutboxPlanen(30000);
+}
+// Speicherstatus: ehrlich anzeigen. Ein "dauerhaft" ist keine vollständige Sicherheit.
+async function entityPersistenzPruefen(anfordern) {
+  try {
+    entityPersistenz = anfordern ? await DocOutbox.persistenzAnfordern() : await DocOutbox.persistenzStatus();
+  } catch (_) { entityPersistenz = { status: 'nicht_unterstuetzt' }; }
+  await entityOutboxAnzeigen();
+}
+// Anzeige: Status des Speichers, offene Einträge und Prüffenster (Verwerfen nur ausdrücklich).
+async function entityOutboxAnzeigen() {
+  let liste = [];
+  try { liste = await DocOutbox.liste(entityOwner()); } catch (_) { liste = []; }
+  entityOutbox = liste.filter(x => x.state !== 'final');
+  let el = document.getElementById('entity-outbox-hinweis');
+  const warnung = entityPersistenz && entityPersistenz.status !== 'dauerhaft' ? entityPersistenz.status : null;
+  if (!entityOutbox.length && !warnung) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'entity-outbox-hinweis';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;background:#fff3cd;color:#664d03;border:1px solid #ffe69c;border-radius:8px;padding:8px 12px;font-size:13px;max-height:50vh;overflow:auto';
+    document.body.appendChild(el);
+  }
+  el.replaceChildren();
+  if (warnung === 'nicht_unterstuetzt') el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Dieser Browser sagt keinen dauerhaften Speicher zu. Lokal verschlüsselte Dokumente können verloren gehen, bevor sie auf dem Server sind. Bitte zeitnah hochladen lassen.' }));
+  else if (warnung === 'nicht_dauerhaft') el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Der Browser hat dauerhaften Speicher nicht zugesagt. Lokal verschlüsselte Dokumente können bei Speicherdruck verloren gehen. Das ist kein vollständiger Schutz.' }));
+  if (entityPersistenz && entityPersistenz.kapazitaetKnapp) el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Der Gerätespeicher ist fast voll.' }));
+  if (entityOutbox.length) {
+    const bereit = entityOutbox.filter(x => ['queued', 'uploading', 'stored'].includes(x.state)).length;
+    el.appendChild(Object.assign(document.createElement('p'), { textContent: bereit + ' Dokument(e) sicher verwahrt; Hochladen und Zuordnung laufen.' }));
+    for (const x of entityOutbox.filter(x => ['unknown', 'rejected', 'corrupt', 'key_missing', 'discard_pending', 'discarded'].includes(x.state))) {
+      const zeile = document.createElement('div');
+      zeile.style.cssText = 'margin-top:6px';
+      zeile.appendChild(Object.assign(document.createElement('span'), { textContent: (x.name || 'Dokument') + ' – ' + x.state + (x.fehler ? ' (' + x.fehler + ')' : '') + ' ' }));
+      if (x.state === 'unknown') zeile.appendChild(entityButton('Serverstatus prüfen', () => entityStatusPruefen(x.uploadId)));
+      else if (x.state === 'discard_pending' || x.state === 'discarded') zeile.appendChild(entityButton('Verwerfen wiederholen', () => entityVerwerfenBestaetigen(x)));
+      else zeile.appendChild(entityButton('Verwerfen …', () => entityVerwerfenBestaetigen(x)));
+      el.appendChild(zeile);
+    }
+  }
+}
+function entityButton(text, onclick) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  b.className = 'btn';
+  b.style.cssText = 'margin-left:6px;font-size:12px;padding:2px 8px';
+  b.addEventListener('click', () => { Promise.resolve(onclick()).catch(() => {}); });
+  return b;
+}
+async function entityStatusPruefen(uploadId) {
+  const r = await DocOutbox.pruefeUnbekannt({ employeeId: entityOwner(), uploadId, api: entityApi });
+  toast('Serverstatus', r.ok ? ('Zustand: ' + r.state) : ('Nicht geklärt (' + r.reason + ')'), r.ok ? '✅' : '⚠️');
+  await entityOutboxAnzeigen();
+  entityOutboxPlanen(0);
+}
+// Ausdrückliches Verwerfen. Hinweis: noch nicht serverseitig gespeicherte Dokumente gehen dabei verloren.
+async function entityVerwerfenBestaetigen(x) {
+  const warnung = x.state === 'stored' || x.state === 'queued'
+    ? 'Das Dokument wurde noch nicht endgültig auf dem Server zugeordnet. Beim Verwerfen geht es verloren. '
+    : '';
+  if (!confirm(warnung + '„' + (x.name || 'Dokument') + '“ wirklich verwerfen? Diese Aktion kann nicht rückgängig gemacht werden.')) return false;
+  const r = await DocOutbox.verwerfen({ employeeId: entityOwner(), uploadId: x.uploadId, bestaetigt: true, api: entityApi });
+  if (r.reason === 'blob_offen' || r.reason === 'server_unbestaetigt') toast('Nicht vollständig verworfen', 'Der Server hat das Dokument noch nicht vollständig entfernt. Der Eintrag bleibt erhalten; bitte erneut versuchen.', '⚠️');
+  else if (!r.ok) toast('Nicht verworfen', 'Grund: ' + r.reason, '⚠️');
+  await entityOutboxAnzeigen();
+  return r.ok;
+}
+// Entfernen aus dem Formular vor dem Speichern. Gespeicherte Dokumente bleiben unberührt.
+async function entityDokumentEntfernen(liste, i) {
+  const d = liste[i];
+  if (!d) return;
+  if (d.storage === 'entity-doc') return toast('Hinweis', 'Gespeicherte Dokumente können hier nicht entfernt werden.', 'ℹ️');
+  if (d.uploadId) {
+    const item = entityOutbox.find(x => x.uploadId === d.uploadId);
+    if (item && item.state === 'uploading') return toast('Bitte warten', 'Der Upload läuft noch.', '⏳');
+    if (!confirm('„' + (d.name || 'Dokument') + '“ aus dem Formular entfernen? Es wird nicht gespeichert.')) return;
+    const r = await DocOutbox.verwerfenVorSpeichern({ employeeId: entityOwner(), uploadId: d.uploadId, bestaetigt: true, api: entityApi });
+    if (!r.ok && r.reason !== 'nicht_gefunden') {
+      if (r.reason === 'bereits_zugeordnet' || r.reason === 'nicht_verwerfbar') return toast('Hinweis', 'Das Dokument ist bereits gespeichert und kann hier nicht entfernt werden.', 'ℹ️');
+      return toast('Nicht entfernt', 'Das Dokument konnte nicht entfernt werden (' + r.reason + ').', '⚠️');
+    }
+  }
+  liste.splice(i, 1);
+  await entityOutboxAnzeigen();
+}
+// Ablauf bei Abmelden: nichts wird verworfen.
+function entityAbmeldungBestaetigen() { return true; }
+async function entityBlobVon(kind, entityId, docId) {
+  return bzCall('GET', '/app/admin/entity-docs/download?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId) + '&docId=' + encodeURIComponent(docId), undefined, { binary: true });
+}
+async function entityOeffnen(kind, entityId, docId) {
+  try {
+    const blob = await entityBlobVon(kind, entityId, docId);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e) { toast('Fehler', 'Dokument konnte nicht geladen werden (' + (e.code || e.message) + ')', '⚠️'); }
+}
+async function entityDataUrlVon(kind, entityId, doc) {
+  const blob = await entityBlobVon(kind, entityId, doc.id);
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+}
+window.addEventListener('online', () => { if (bzSession) entityOutboxPlanen(0); });
+setInterval(() => { if (bzSession) entityOutboxAbarbeiten(); }, 20000);
+// Speichern: neue Dokumente zuerst sicher ablegen, dann den Datensatz speichern, dann hochladen.
+async function entitySpeichernMit(kind, feldId, speichernIntern, docsRef) {
+  const feld = document.getElementById(feldId);
+  const id = kind === 'mitarbeiter' ? (maIdValue(feld.value) ?? Date.now()) : (parseInt(feld.value) || Date.now());
+  feld.value = String(id);
+  try {
+    await entityDokumenteVorSpeichern(kind, id, docsRef());
+  } catch (e) {
+    return toast('Dokument nicht gespeichert', (ENTITY_FEHLER_TEXT[e.code] || 'Das Dokument konnte nicht sicher abgelegt werden.') + ' Der Datensatz wurde nicht gespeichert.', '⚠️');
+  }
+  speichernIntern();
+  await entityFinalisiereBereite();
+  entityOutboxPlanen(0);
+}
+function saveFzgModal() { return entitySpeichernMit('fahrzeug', 'fzg-modal-id', saveFzgModalIntern, () => tempDocs); }
+function saveMaModal() { return entitySpeichernMit('mitarbeiter', 'ma-modal-id', saveMaModalIntern, () => tempMaDocs); }
 
 // Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
 // Firebase bekommt nur die schlanken Nutzdaten (~72 KB statt ~29 MB).
 function stripLargeData(s) {
   const copy = JSON.parse(JSON.stringify(s));
+  // PHASE 49P: Server-Dokumente (entity-doc) und Outbox-Platzhalter bleiben als Metadaten erhalten.
   (copy.fahrzeuge||[]).forEach(f => {
-    f.docs = (f.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+    f.docs = (f.docs||[]).map(d => (d.storage === 'entity-doc' || d.pending) ? d : ({ name: d.name, type: d.type, _localOnly: true }));
   });
   (copy.mitarbeiter||[]).forEach(m => {
     if (m.foto) m.foto = '_localOnly';
-    m.docs = (m.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+    m.docs = (m.docs||[]).map(d => (d.storage === 'entity-doc' || d.pending) ? d : ({ name: d.name, type: d.type, _localOnly: true }));
   });
   (copy.baustellen||[]).forEach(b => {
     // Server-Dokumente (storage:'site-document') enthalten ohnehin nur
@@ -3660,7 +3899,7 @@ function bzFehlertext(e) {
   return 'Der Vorgang konnte nicht abgeschlossen werden.';
 }
 
-async function bzCall(method, path, body, {binary = false} = {}) {
+async function bzCall(method, path, body, {binary = false, raw = null} = {}) {
   const version = bzGeneration;
   // Abgelaufene Sitzung: keine Anfrage mehr senden, sondern sofort abmelden (auch ohne ausgeloesten Timer).
   // Ohne Sitzung wird nichts gesendet, ausser der Anmeldung selbst.
@@ -3676,8 +3915,8 @@ async function bzCall(method, path, body, {binary = false} = {}) {
   try {
     res = await fetch(BZ_WORKER + path, {
       method,
-      headers: Object.assign({ 'Content-Type': 'application/json' }, bzSession ? { Authorization: 'Bearer ' + bzSession.token } : {}),
-      body: body ? JSON.stringify(body) : undefined,
+      headers: Object.assign({ 'Content-Type': raw ? raw.type : 'application/json' }, bzSession ? { Authorization: 'Bearer ' + bzSession.token } : {}),
+      body: raw ? raw.bytes : (body ? JSON.stringify(body) : undefined),
       cache: 'no-store',
       credentials: 'omit'
     });
@@ -3711,7 +3950,7 @@ async function bzAnmelden(source = 'meldungen') {
   if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
   try {
     const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
-    if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn)) throw new Error('session_invalid');
+    if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn, r.employeeId)) throw new Error('session_invalid');
     if (r.pinWechselPflicht) { bzPinWechsel(); return; }
     bzMeldung = null;
     await bzLaden();
@@ -4744,7 +4983,7 @@ function closeFzgModal() {
 
 // (Monteur-Picker im Fahrzeug-Modal: jetzt über universellen spOpen/spFilter)
 
-function saveFzgModal() {
+function saveFzgModalIntern() {
   const name = document.getElementById('fzg-modal-name').value.trim();
   const monteur = document.getElementById('fzg-modal-monteur').value.trim();
   const monteurIdRaw = document.getElementById('fzg-modal-monteur-id').value;
@@ -4766,7 +5005,7 @@ function saveFzgModal() {
     park: document.getElementById('fzg-modal-park').value,
     zone: document.getElementById('fzg-modal-zone').value.trim(),
     parkbis: document.getElementById('fzg-modal-parkbis').value,
-    docs: tempDocs,
+    docs: entityAusFormular('fahrzeug', id, tempDocs),
     service: tempService,
     werkzeug: tempWz,
     nutzungsHistorie: alt?.nutzungsHistorie||[]
@@ -4829,7 +5068,7 @@ function renderDocPreview() {
   if (!tempDocs.length) { grid.innerHTML = ''; return; }
   grid.innerHTML = tempDocs.map((d, i) => `
     <div class="doc-preview-item">
-      ${d.type?.startsWith('image')
+      ${d.type?.startsWith('image') && d.data
         ? `<img src="${d.data}" onclick="openLightbox('${d.data}')">`
         : `<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px">📄</div>`}
       <button class="doc-remove" onclick="removeDoc(${i})">✕</button>
@@ -4838,8 +5077,7 @@ function renderDocPreview() {
 }
 
 function removeDoc(i) {
-  tempDocs.splice(i, 1);
-  renderDocPreview();
+  return entityDokumentEntfernen(tempDocs, i).then(() => renderDocPreview());
 }
 
 function openLightbox(src) {
@@ -4965,7 +5203,9 @@ function renderFahrzeugePage() {
       : '';
     const docs = (f.docs||[]);
     const docHtml = docs.length ? `<div class="fzg-docs">${docs.map(d =>
-      d.type?.startsWith('image') && d.data ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
+      d.storage === 'entity-doc' ? `<span class="badge badge-yellow" style="cursor:pointer" title="${entityEsc(d.name)}" onclick="event.stopPropagation();entityOeffnen('fahrzeug','${entityEsc(f.id)}','${entityEsc(d.id)}')">📄 ${entityEsc(d.name)}</span>`
+      : d.pending ? `<span class="badge badge-red" title="${entityEsc(d.name)}">⏳ ${entityEsc(d.name)} (nicht hochgeladen)</span>`
+      : d.type?.startsWith('image') && d.data ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
       : `<span class="badge badge-yellow" title="${d.name}">📄 PDF</span>`
     ).join('')}</div>` : '';
 
@@ -5964,7 +6204,9 @@ async function maAnalysiereVerleihvertrag() {
   if (!doc) return toast('Hinweis','Bitte zuerst einen Verleihvertrag (PDF) bei "Dokumente" hochladen','⚠️');
   toast('Analysiere','Lese Vertrag…','⏳');
   try {
-    const text = await extrahierePdfText(doc.data);
+    // PHASE 49P: Server-Dokumente werden für die Analyse erst vom Server geladen (nur mit Büro-Sitzung).
+    const dataUrl = doc.data || await entityDataUrlVon('mitarbeiter', document.getElementById('ma-modal-id').value, doc);
+    const text = await extrahierePdfText(dataUrl);
     if (!text || text.trim().length<20) return toast('Hinweis','Kein auslesbarer Text gefunden (evtl. gescanntes Bild-PDF) – bitte Felder manuell ausfüllen','⚠️');
     const p = parseVerleihvertragText(text);
     if (p.buero) { maSetIfEmpty('ma-buero', p.buero); bueroAutocomplete(document.getElementById('ma-buero')); }
@@ -6199,7 +6441,7 @@ function renderMaDocPreview() {
   if (!tempMaDocs.length) { grid.innerHTML = ''; return; }
   grid.innerHTML = tempMaDocs.map((d, i) => `
     <div class="doc-preview-item">
-      ${d.type?.startsWith('image')
+      ${d.type?.startsWith('image') && d.data
         ? `<img src="${d.data}" onclick="openLightbox('${d.data}')">`
         : `<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px">📄</div>`}
       <button class="doc-remove" onclick="removeMaDoc(${i})">✕</button>
@@ -6208,8 +6450,7 @@ function renderMaDocPreview() {
 }
 
 function removeMaDoc(i) {
-  tempMaDocs.splice(i, 1);
-  renderMaDocPreview();
+  return entityDokumentEntfernen(tempMaDocs, i).then(() => renderMaDocPreview());
 }
 
 // ════════════════════════════════════════════════════════
@@ -6677,7 +6918,7 @@ async function pinResetSenden(maId) {
   }
 }
 
-function saveMaModal() {
+function saveMaModalIntern() {
   const vorname = document.getElementById('ma-vorname').value.trim();
   const nachname = document.getElementById('ma-nachname').value.trim();
   if (!vorname || !nachname) return toast('Fehler', 'Vor- und Nachname erforderlich', '⚠️');
@@ -6725,7 +6966,7 @@ function saveMaModal() {
       vertragsdatum: document.getElementById('ma-verleih-vertragsdatum').value
     },
     foto: tempMaFoto,
-    docs: tempMaDocs
+    docs: entityAusFormular('mitarbeiter', id, tempMaDocs)
   };
   // Schlüssel/Kreditkarte nur setzen, wenn vorhanden (ältere Datensätze bleiben unverändert schlank)
   if (tempMaSchluessel.length || (m && m.schluessel)) data.schluessel = tempMaSchluessel.map(k => ({...k}));

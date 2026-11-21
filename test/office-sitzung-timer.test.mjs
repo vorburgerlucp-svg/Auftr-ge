@@ -1,3 +1,4 @@
+import { stubEntityOutbox } from './helpers/entity-outbox-stub.mjs';
 // Sitzungsablauf der Büro-App (acht Stunden). Laedt den echten Code aus index.html in eine vm-Umgebung
 // mit gefaelschter Uhr. Eine Browser-Ruhephase wird simuliert, indem die Uhr springt, ohne Timer auszuloesen.
 // Keine Netzwerkzugriffe, keine Firebase-Verbindung, keine produktiven Daten.
@@ -75,7 +76,7 @@ function world(startAt = T0) {
     atob: s => Buffer.from(s, 'base64').toString('binary'),
     setTimeout: api.setTimeout, clearTimeout: api.clearTimeout, setInterval: api.setInterval, clearInterval: api.clearInterval,
   };
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   ctx.window = ctx;
   vm.runInContext('let currentLoginUser=null,dbRef=null,officeAnmeldungLaeuft=false,officeWartetAufSync=null,officeSyncGeneration=-1,lagertoolSitzungMaId=null;', ctx);
   vm.runInContext(CORE_SRC, ctx);
@@ -170,14 +171,14 @@ test('5 firebase refresh does not move the deadline: only the login response set
 });
 
 // --- 6. IndexedDB-Bereinigung und gemeinsame Bereinigungsfunktion ---
-test('6 cleanup removes office data, IndexedDB docs, session key and signs out Firebase', async () => {
+test('6 cleanup removes office data, keeps IndexedDB docs (Phase 49O), removes session key and signs out Firebase', async () => {
   const w = world();
   w.ctx.officeSitzungSetzen(tokenMit(EXP), 'Luc', 28800);
   w.run("bzDaten.rapporte=[{id:'private'}];bzMeldung='x';");
   await w.run('officeSitzungAufraeumen()');
   assert.equal(w.run('bzSession'), null);
   assert.equal(JSON.stringify(w.run('bzDaten')), JSON.stringify({ meldungen: [], rapporte: [] }));
-  assert.ok(w.rec.deleted.includes('lagertool_docs'));
+  assert.ok(!w.rec.deleted.includes('lagertool_docs'), 'Phase 49O: keine Dokumentlöschung beim Abmelden');
   assert.ok(w.rec.removed.includes('lagertool_login'));
   assert.equal(w.rec.signOuts, 1);
   assert.equal(w.run('OfficeSession.deadline()'), 0);

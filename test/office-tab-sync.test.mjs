@@ -1,3 +1,4 @@
+import { stubEntityOutbox } from './helpers/entity-outbox-stub.mjs';
 // Mehrere Büro-Tabs, Logout- und Ablauf-Synchronisation, PIN-Wechsel, Hinweise und geschützte Aktionen.
 // Echter Code aus office-session.js, office-pilot.html und index.html in vm-Umgebungen. Jeder Tab hat eigenen
 // Sitzungsspeicher, alle Tabs teilen eine Uhr und einen BroadcastChannel-Bus. Keine Netzwerkzugriffe, keine Produktivdaten.
@@ -97,7 +98,7 @@ function tab(g, { id, store = storage(), exp } = {}) {
     }
   };
   ctx.window = ctx;
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   vm.runInContext('var bzSession = null;', ctx);
   vm.runInContext(CORE, ctx);
   vm.runInContext(PILOT_SRC, ctx);
@@ -320,7 +321,7 @@ function indexWorld(g, { session = true, token = null } = {}) {
     sessionStorage: storage(),
   };
   ctx.window = ctx;
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   vm.runInContext(CORE, ctx);
   const ea = INDEX.indexOf('async function lagertoolOAuthEnsureToken() {');
   const eb = INDEX.indexOf('\n}', ea) + 2;

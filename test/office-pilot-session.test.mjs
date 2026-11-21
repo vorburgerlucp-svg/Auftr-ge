@@ -1,3 +1,4 @@
+import { stubEntityOutbox } from './helpers/entity-outbox-stub.mjs';
 // Sitzungssicherheit der Pilotseite office-pilot.html und des Büro-Logins in office-comms.js.
 // Echter Code aus den Dateien, in vm-Umgebungen mit gefaelschter Uhr. Keine Netzwerkzugriffe, keine Produktivdaten.
 import test from 'node:test';
@@ -110,7 +111,7 @@ function world({ withCore = true, withComms = false, startAt = T0 } = {}) {
     bzRender() {},
   };
   ctx.window = ctx;
-  vm.createContext(ctx);
+  stubEntityOutbox(vm.createContext(ctx));
   vm.runInContext('var bzSession = null;', ctx);
   if (withCore) vm.runInContext(CORE, ctx);
   // Ohne Zeitsteuerung wird die Pilotseite nicht geladen: ihr Skript setzt OfficeSession.onEnd voraus.
@@ -299,7 +300,7 @@ test('11 monteur page has no office session code and the core does not reference
 });
 
 // --- 12. doLogout() im Haupt-Frontend ---
-test('12 index.html doLogout: shared cleanup, sign-out awaited, data removed, then reload', async () => {
+test('12 index.html doLogout: shared cleanup, sign-out awaited, local documents kept (Phase 49O), then reload', async () => {
   const w = world();
   const rec = { signOuts: 0, deleted: [], removed: [], offs: 0 };
   w.ctx.firebase = { auth() { return { signOut: async () => { rec.signOuts++; } }; } };
@@ -316,7 +317,7 @@ test('12 index.html doLogout: shared cleanup, sign-out awaited, data removed, th
   await w.run('doLogout()');
   await flush();
   assert.equal(rec.signOuts, 1, 'Firebase sign-out awaited');
-  assert.ok(rec.deleted.includes('lagertool_docs'));
+  assert.ok(!rec.deleted.includes('lagertool_docs'), 'Phase 49O: keine Dokumentlöschung beim Abmelden');
   assert.ok(rec.removed.includes('lagertool_login'));
   assert.equal(rec.offs, 1, 'listener detached');
   assert.equal(w.run('OfficeSession.deadline()'), 0);
