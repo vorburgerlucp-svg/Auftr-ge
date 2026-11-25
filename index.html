@@ -445,6 +445,7 @@
   @media(max-width:700px){.todo-prio-summary{grid-template-columns:repeat(2,1fr)}.todo-wf-actions .btn{flex:1;justify-content:center;min-height:42px}#todo-alert-box{max-height:90vh;overflow:auto}}
 </style>
 <script src="docs-outbox.js"></script>
+<script src="entity-abmeldung.js"></script>
 </head>
 <body>
 
@@ -3241,8 +3242,9 @@ let pendingSavePromise = null;
 let officeLogoutLaeuft = false;
 async function doLogout() {
   if (officeLogoutLaeuft) return;
-  if (!entityAbmeldungBestaetigen()) return;   // PHASE 49P: ungesicherte Dokumente nur nach Bestaetigung verwerfen
+  // PHASE 50N: Flag vor der Rueckfrage setzen (Doppelklick waehrend der Rueckfrage darf nicht zweimal abmelden).
   officeLogoutLaeuft = true;
+  if (!(await entityAbmeldungBestaetigen())) { officeLogoutLaeuft = false; return; }   // loescht nichts
   const token = bzSession ? bzSession.token : null;      // nur im Speicher dieser Funktion
   OfficeSession.logout();                                  // andere Tabs informieren (ohne Token)
   bzAbmelden();                                            // keine neuen Anfragen mehr
@@ -3639,6 +3641,7 @@ async function entityFinalisiereBereite() {
   if (!offen.length) return;
   let ergebnisse = [];
   try {
+    await entityModusSicherstellen();
     ergebnisse = await DocOutbox.finalisiere({ employeeId: entityOwner(), api: entityApi, uploadIds: offen.map(o => o.uploadId) });
   } catch (_) { return; }
   let geaendert = false;
@@ -3664,6 +3667,7 @@ async function entityOutboxAbarbeiten() {
   entityOutboxLaeuft = true;
   let wartet = false;
   try {
+    await entityModusSicherstellen();
     const r = await DocOutbox.hochladen({
       employeeId: entityOwner(),
       api: entityApi,
@@ -3725,7 +3729,9 @@ function entityButton(text, onclick) {
   return b;
 }
 async function entityStatusPruefen(uploadId) {
-  const r = await DocOutbox.pruefeUnbekannt({ employeeId: entityOwner(), uploadId, api: entityApi });
+  let r;
+  try { await entityModusSicherstellen(); r = await DocOutbox.pruefeUnbekannt({ employeeId: entityOwner(), uploadId, api: entityApi }); }
+  catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
   toast('Serverstatus', r.ok ? ('Zustand: ' + r.state) : ('Nicht geklärt (' + r.reason + ')'), r.ok ? '✅' : '⚠️');
   await entityOutboxAnzeigen();
   entityOutboxPlanen(0);
@@ -3736,7 +3742,9 @@ async function entityVerwerfenBestaetigen(x) {
     ? 'Das Dokument wurde noch nicht endgültig auf dem Server zugeordnet. Beim Verwerfen geht es verloren. '
     : '';
   if (!confirm(warnung + '„' + (x.name || 'Dokument') + '“ wirklich verwerfen? Diese Aktion kann nicht rückgängig gemacht werden.')) return false;
-  const r = await DocOutbox.verwerfen({ employeeId: entityOwner(), uploadId: x.uploadId, bestaetigt: true, api: entityApi });
+  let r;
+  try { await entityModusSicherstellen(); r = await DocOutbox.verwerfen({ employeeId: entityOwner(), uploadId: x.uploadId, bestaetigt: true, api: entityApi }); }
+  catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
   if (r.reason === 'blob_offen' || r.reason === 'server_unbestaetigt') toast('Nicht vollständig verworfen', 'Der Server hat das Dokument noch nicht vollständig entfernt. Der Eintrag bleibt erhalten; bitte erneut versuchen.', '⚠️');
   else if (!r.ok) toast('Nicht verworfen', 'Grund: ' + r.reason, '⚠️');
   await entityOutboxAnzeigen();
@@ -3751,7 +3759,9 @@ async function entityDokumentEntfernen(liste, i) {
     const item = entityOutbox.find(x => x.uploadId === d.uploadId);
     if (item && item.state === 'uploading') return toast('Bitte warten', 'Der Upload läuft noch.', '⏳');
     if (!confirm('„' + (d.name || 'Dokument') + '“ aus dem Formular entfernen? Es wird nicht gespeichert.')) return;
-    const r = await DocOutbox.verwerfenVorSpeichern({ employeeId: entityOwner(), uploadId: d.uploadId, bestaetigt: true, api: entityApi });
+    let r;
+    try { await entityModusSicherstellen(); r = await DocOutbox.verwerfenVorSpeichern({ employeeId: entityOwner(), uploadId: d.uploadId, bestaetigt: true, api: entityApi }); }
+    catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
     if (!r.ok && r.reason !== 'nicht_gefunden') {
       if (r.reason === 'bereits_zugeordnet' || r.reason === 'nicht_verwerfbar') return toast('Hinweis', 'Das Dokument ist bereits gespeichert und kann hier nicht entfernt werden.', 'ℹ️');
       return toast('Nicht entfernt', 'Das Dokument konnte nicht entfernt werden (' + r.reason + ').', '⚠️');
@@ -3761,9 +3771,37 @@ async function entityDokumentEntfernen(liste, i) {
   await entityOutboxAnzeigen();
 }
 // Ablauf bei Abmelden: nichts wird verworfen.
-function entityAbmeldungBestaetigen() { return true; }
+// PHASE 50N: Abmeldebestaetigung. Liest den Outbox-Zustand des angemeldeten Nutzers; loescht nichts.
+// Lesefehler fuehren zur Rueckfrage (fail-safe), niemals zu stiller Bestaetigung.
+async function entityAbmeldungBestaetigen() {
+  let liste = null, fehler = false;
+  try { liste = await DocOutbox.liste(entityOwner()); } catch (_) { fehler = true; }
+  return EntityLogoutGuard.bestaetigen({
+    liste, fehler,
+    online: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
+    frage: text => (confirm(text) ? true : false)
+  });
+}
+// PHASE 50N: Dokumentmodus einmal je Sitzung vom Server holen. Fehler -> kein Pfad, kein Rueckfall.
+let entityModusCache = null;   // { token, modus }
+async function entityModusSicherstellen() {
+  if (!bzSession) throw Object.assign(new Error('session_required'), { code: 'session_required', status: 401 });
+  const token = bzSession.token;
+  if (entityModusCache && entityModusCache.token === token) return entityModusCache.modus;
+  const r = await bzCall('GET', '/app/admin/doc-mode');
+  const modus = r && r.mode;
+  if (modus !== 'off' && modus !== 'legacy' && modus !== 'authority') throw Object.assign(new Error('modus_unbekannt'), { code: 'modus_unbekannt' });
+  DocOutbox.setzeModus(modus === 'authority' ? 'authority' : 'legacy');
+  entityModusCache = { token, modus };
+  return modus;
+}
+// Download-Pfad nach Modus. Im Authority-Modus wird die Dokument-ID als uploadId übergeben.
 async function entityBlobVon(kind, entityId, docId) {
-  return bzCall('GET', '/app/admin/entity-docs/download?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId) + '&docId=' + encodeURIComponent(docId), undefined, { binary: true });
+  const modus = await entityModusSicherstellen();
+  const authority = modus === 'authority';
+  const pfad = authority ? '/app/admin/entity-docs2/download' : '/app/admin/entity-docs/download';
+  const idParam = authority ? '&uploadId=' : '&docId=';
+  return bzCall('GET', pfad + '?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId) + idParam + encodeURIComponent(docId), undefined, { binary: true });
 }
 async function entityOeffnen(kind, entityId, docId) {
   try {

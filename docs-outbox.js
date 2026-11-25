@@ -33,6 +33,34 @@
   const PERMANENT = [400, 403, 404, 413, 415];
   const OFFEN = ['queued', 'uploading', 'unknown'];
 
+  // PHASE 50N: Pfadbasis je Dokumentmodus. Wird nur über setzeModus() gesetzt, also aus der Serverantwort
+  // /app/admin/doc-mode. Ohne Setzung (null) ist jede Serveranfrage gesperrt: kein stiller Rückfall auf einen Pfad.
+  const BASIS_MODUS = { legacy: '/app/admin/entity-docs', authority: '/app/admin/entity-docs2' };
+  let basis = null;
+  let modus = null;
+  function pfad(suffix) {
+    if (!basis) { const e = new Error('modus_unbekannt'); e.code = 'modus_unbekannt'; throw e; }
+    return basis + suffix;
+  }
+  function setzeModus(m) {
+    if (!Object.prototype.hasOwnProperty.call(BASIS_MODUS, m)) throw new Error('modus_ungueltig');
+    modus = m;
+    basis = BASIS_MODUS[m];
+  }
+  // Upload-Ergebnis in die Form bringen, die der Ablauf erwartet. Legacy liefert doc; die Authority liefert
+  // {status, uploadId} und der Client übernimmt die lokal bekannten Metadaten (Groesse, Hash, Name).
+  // Ein fremdes Dokument (Duplikat unter anderer uploadId) wird nie als eigenes übernommen.
+  function docAusUpload(r, rec, klar) {
+    if (!r) return null;
+    if (modus === 'legacy') return r.doc || null;
+    if (r.status === 'duplicate') return { id: '', uploadId: r.uploadIdDuplikat || '__duplikat__' };
+    if ((r.status === 'pending' || r.status === 'final') && r.uploadId === rec.uploadId) {
+      return { id: rec.uploadId, uploadId: rec.uploadId, name: klar.name, mime: rec.mime, size: rec.size, sha256: rec.sha256,
+        createdAt: new Date().toISOString(), status: r.status };
+    }
+    return null;
+  }
+
   const enc = new TextEncoder();
   const dec = new TextDecoder();
 
@@ -207,7 +235,7 @@
   // Serverstatus über uploadId (Aufruf über den übergebenen API-Adapter).
   async function statusPruefen(api, rec) {
     const q = `?kind=${encodeURIComponent(rec.kind)}&id=${encodeURIComponent(rec.entityId)}&uploadId=${encodeURIComponent(rec.uploadId)}`;
-    return api('GET', '/app/admin/entity-docs/status' + q);
+    return api('GET', pfad('/status') + q);
   }
 
   async function setzeZustand(uploadId, aenderung) {
@@ -268,15 +296,16 @@
         await setzeZustand(rec.uploadId, { state: 'uploading', attempts: rec.attempts + 1 });
         try {
           const q = `?kind=${encodeURIComponent(rec.kind)}&id=${encodeURIComponent(rec.entityId)}&uploadId=${encodeURIComponent(rec.uploadId)}&sha256=${rec.sha256}&name=${encodeURIComponent(klar.name)}`;
-          const r = await api('POST', '/app/admin/entity-docs/upload' + q, { raw: { type: rec.mime, bytes: klar.bytes } });
-          if (!r || !r.doc) throw new Error('no_doc');
-          if (r.doc.uploadId && r.doc.uploadId !== rec.uploadId) {
+          const r = await api('POST', pfad('/upload') + q, { raw: { type: rec.mime, bytes: klar.bytes } });
+          const doc = docAusUpload(r, rec, klar);
+          if (!doc) throw new Error('no_doc');
+          if (doc.uploadId && doc.uploadId !== rec.uploadId) {
             // Server meldet ein fremdes Dokument mit gleichem Inhalt: nicht übernehmen, Bytes bleiben.
             await setzeZustand(rec.uploadId, { state: 'rejected', fehler: 'duplicate_fremd' });
             continue;
           }
-          await abschliessen(rec, r.doc);
-          if (onErfolg) await onErfolg(rec, r.doc, { nur: 'neu' });
+          await abschliessen(rec, doc);
+          if (onErfolg) await onErfolg(rec, doc, { nur: 'neu' });
           if (onStatus) onStatus('stored', rec.uploadId);
         } catch (e) {
           if (e && e.status === 401) { await setzeZustand(rec.uploadId, { state: 'queued' }); wartet = true; break; }
@@ -337,7 +366,7 @@
       const [kind, entityId] = k.split('/');
       let antwort;
       try {
-        antwort = await api('POST', '/app/admin/entity-docs/finalize?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId), { json: { uploadIds: recs.map(r => r.uploadId) } });
+        antwort = await api('POST', pfad('/finalize') + '?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId), { json: { uploadIds: recs.map(r => r.uploadId) } });
       } catch (e) {
         ergebnisse.push({ kind, entityId, status: 'server_unbestaetigt', code: e.code || null });
         continue;
@@ -366,7 +395,7 @@
     const d = await db();
     const lokalEntfernen = () => tx(d, ['items'], 'readwrite', t => { t.objectStore('items').delete(rec.uploadId); });
     try {
-      const antwort = await api('POST', '/app/admin/entity-docs/discard?kind=' + encodeURIComponent(rec.kind) + '&id=' + encodeURIComponent(rec.entityId) + '&uploadId=' + encodeURIComponent(rec.uploadId));
+      const antwort = await api('POST', pfad('/discard') + '?kind=' + encodeURIComponent(rec.kind) + '&id=' + encodeURIComponent(rec.entityId) + '&uploadId=' + encodeURIComponent(rec.uploadId));
       if (antwort && antwort.status === 'discarded' && antwort.blobGeloescht === true) {
         await lokalEntfernen();
         return { ok: true, reason: 'server_verworfen', blobGeloescht: true };
@@ -418,6 +447,7 @@
   global.DocOutbox = {
     pruefen, persistenzStatus, persistenzAnfordern,
     hinzufuegen, liste, hochladen, pruefeUnbekannt, finalisiere, verwerfen, verwerfenVorSpeichern,
+    setzeModus, modus: () => modus, basis: () => basis,
     _intern: { ownerHashOf, entschluesseln, verschluesseln, db, dbPromise: () => dbPromise }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

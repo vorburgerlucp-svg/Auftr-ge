@@ -107,8 +107,13 @@ function attrappeOutbox() {
   return { DocOutbox, items, steuer, api };
 }
 
+// PHASE 50N: echter Abmelde-Guard aus entity-abmeldung.js in den Sandbox-Kontext laden.
+const GUARD_SRC = readFileSync(new URL('../entity-abmeldung.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+function guardModul() { const c = {}; c.window = c; c.globalThis = c; vm.createContext(c); vm.runInContext(GUARD_SRC, c); return c.EntityLogoutGuard; }
+
 function welt({ owner = 'EMP-A' } = {}) {
   const ob = attrappeOutbox();
+  ob.DocOutbox.setzeModus = () => {};   // PHASE 50N: Pfadbasis ist im Glue-Test ohne Wirkung (Legacy-Modus)
   const rec = { saves: 0, renders: 0, toasts: [], reloads: 0, speichernAufrufe: [], bzCalls: [], confirms: [], confirmAnswer: true };
   const felder = { 'fzg-modal-id': { value: '' }, 'ma-modal-id': { value: '' }, 'login-screen': { style: {} } };
   const ctx = {
@@ -123,11 +128,13 @@ function welt({ owner = 'EMP-A' } = {}) {
     fetch: async () => ({ arrayBuffer: async () => new Uint8Array([37, 80, 68, 70, 45]).buffer }),
     bzCall: async (method, path, body, opts) => {
       rec.bzCalls.push([method, path]);
+      if (path === '/app/admin/doc-mode') return { ok: true, mode: 'legacy' };
       if (ob.api.failNetwork) { throw new TypeError('network'); }
       if (ob.api.status) { const e = new Error(ob.api.status); e.status = ob.api.status; e.code = ob.api.status; throw e; }
       const uid = (opts && opts.raw) ? path.match(/uploadId=([^&]+)/)[1] : '';
       return { ok: true, status: 'stored', doc: { id: 'edoc-' + 'a'.repeat(32), name: 'x', mime: 'application/pdf', size: 5, sha256: 'b'.repeat(64), createdAt: 'x', uploadId: uid, status: 'pending' } };
     },
+    EntityLogoutGuard: guardModul(),
     save: () => { rec.saves++; return Promise.resolve({ ok: true }); },
     renderAll: () => { rec.renders++; },
     renderDocPreview: () => {},
@@ -276,10 +283,12 @@ test('Logout verwirft nichts', async () => {
   const w = welt();
   w.ctx.tempDocs = [DOK()];
   await w.run('entityDokumenteVorSpeichern("fahrzeug", 7, tempDocs)');
-  assert.equal(w.run('entityAbmeldungBestaetigen()'), true);
+  // PHASE 50N: Die Attrappe (immer true, ohne Rueckfrage) ist ersetzt. Ein offener Eintrag fuehrt zur Rueckfrage;
+  // der Nutzer bestaetigt hier; geloescht wird trotzdem nichts.
+  assert.equal(await w.run('entityAbmeldungBestaetigen()'), true);
   assert.equal(w.ob.items.length, 1);
   assert.equal(w.ob.DocOutbox.calls.some(c => c[0] === 'verwerfen' || c[0] === 'verwerfenVorSpeichern'), false);
-  assert.equal(w.rec.confirms.length, 0);
+  assert.equal(w.rec.confirms.length, 1, 'Rueckfrage bei offenem Dokument fehlt');
 });
 
 test('Ablauf/Widerruf lädt neu; Dokumente bleiben in der persistenten Ablage', async () => {
