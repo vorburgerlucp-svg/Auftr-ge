@@ -112,7 +112,7 @@ function world({ withCore = true, withComms = false, startAt = T0 } = {}) {
   };
   ctx.window = ctx;
   stubEntityOutbox(vm.createContext(ctx));
-  vm.runInContext('var bzSession = null;', ctx);
+  if (!withCore) vm.runInContext('var bzSession = null;', ctx); // mit Kern deklariert office-pilot.html bzSession selbst (let)
   if (withCore) vm.runInContext(CORE, ctx);
   // Ohne Zeitsteuerung wird die Pilotseite nicht geladen: ihr Skript setzt OfficeSession.onEnd voraus.
   if (withCore) vm.runInContext(PILOT_SRC, ctx);

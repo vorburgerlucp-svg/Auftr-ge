@@ -101,7 +101,6 @@ function tab({ id = 'A', store = storage(), server = 'ok', exp = EXP, bus = null
   };
   ctx.window = ctx;
   stubEntityOutbox(vm.createContext(ctx));
-  vm.runInContext('var bzSession = null;', ctx);
   if (bus) ctx.BroadcastChannel = makeChannel(bus, id);
   vm.runInContext(CORE, ctx);
   vm.runInContext(PILOT_SRC, ctx);
@@ -370,14 +369,14 @@ function indexLogoutWorld({ server = 'ok' } = {}) {
     firebase: { auth() { return { signOut: async () => { rec.signOuts++; } }; } },
     indexedDB: { deleteDatabase(n) { rec.deleted.push(n); const q = {}; queueMicrotask(() => q.onsuccess && q.onsuccess()); return q; } },
     bzRender() {}, dbRef: null, pendingSavePromise: null,
-    MONTEUR_TEST_WORKER_URL: BASE,
+    MONTEUR_TEST_WORKER_URL: BASE, lagertoolPilotWorkerAllowed: () => true,
   };
   ctx.window = ctx;
   stubEntityOutbox(vm.createContext(ctx));
   const bz = INDEX.indexOf('const BZ_WORKER =');
   const bzEnd = INDEX.indexOf('// Statuswechsel.', bz);
   vm.runInContext(CORE, ctx);
-  vm.runInContext('var bzSession = null; var officeWartetAufSync=null; var officeSyncGeneration=0; var officeAnmeldungLaeuft=false; var currentLoginUser={id:1}; var lagertoolSitzungMaId=1; var lagertoolOAuthToken=null; var bzGeneration=0; var bzDaten={meldungen:[],rapporte:[]}; var bzMeldung=null; var BZ_PILOT_WORKER_OK=true;', ctx);
+  vm.runInContext('var officeWartetAufSync=null; var officeSyncGeneration=0; var officeAnmeldungLaeuft=false; var currentLoginUser={id:1}; var lagertoolSitzungMaId=1; var lagertoolOAuthToken=null;', ctx);
   vm.runInContext(INDEX.slice(bz, bzEnd), ctx);
   const ca = INDEX.indexOf('function officeSitzungAufraeumen() {');
   vm.runInContext(INDEX.slice(ca, INDEX.indexOf('\n}', ca) + 2), ctx);

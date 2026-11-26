@@ -99,7 +99,6 @@ function tab(g, { id, store = storage(), exp } = {}) {
   };
   ctx.window = ctx;
   stubEntityOutbox(vm.createContext(ctx));
-  vm.runInContext('var bzSession = null;', ctx);
   vm.runInContext(CORE, ctx);
   vm.runInContext(PILOT_SRC, ctx);
   vm.runInContext('OfficeSession.onEnd = (g) => bzSitzungEnde(g);', ctx);
