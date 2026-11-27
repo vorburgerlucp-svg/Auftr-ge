@@ -1,0 +1,182 @@
+// LagerTool Pilot: private office inbox, no unauthenticated data and no unsafe HTML insertion.
+(function(){
+'use strict';
+const kinds={vacation_request:'Ferienantrag · Prio 1',vehicle_service:'Fahrzeug-Service',vehicle_repair:'Fahrzeug-Reparatur',
+  tool_repair:'Werkzeug-Reparatur',material_request:'Materialanfrage',
+  site_issue:'Baustellenproblem',general:'Nachricht',document_upload:'Dokument zur Prüfung'};
+const statusValues=['neu','in_bearbeitung','terminiert','bereit','erledigt','abgelehnt'];
+let requests=[],seen=new Set(),ready=false,loading=false,loginError='',viewVersion=0;
+const node=(tag,text)=>{const e=document.createElement(tag);if(text!=null)e.textContent=String(text);return e;};
+function field(parent,label,tag='input'){
+  const box=node('label'),caption=node('span',label),ctrl=node(tag);
+  box.style.display='block';box.style.marginTop='8px';box.append(caption,ctrl);
+  if(tag==='textarea'){ctrl.rows=2;ctrl.maxLength=900;}
+  parent.append(box);return ctrl;
+}
+function btn(text,action){const b=node('button',text);b.type='button';b.className='btn btn-sm';b.onclick=action;return b;}
+function section(){return document.getElementById('bz-anfragen-section');}
+function active(){return Boolean(typeof bzSession!=='undefined'&&bzSession);}
+function notify(text){
+  if(typeof toast==='function')toast('📬 Monteur-Anfrage',text,'📬');
+}
+function row(label,value){const p=node('p');const b=node('strong',label+': ');p.append(b,node('span',value||'—'));return p;}
+function render(){
+  const root=section();if(!root)return;
+  if(!active()){requests=[];seen.clear();ready=false;}
+  const badge=document.getElementById('bz-anfragen-count');
+  const neu=requests.filter(r=>['neu','BEANTRAGT'].includes(r.status)).length;
+  if(badge)badge.textContent=neu?'('+neu+')':'';
+  root.replaceChildren();
+  if(!active()){
+    root.append(node('h3','Büro-Anmeldung'));
+    root.append(node('p','Nur berechtigte Büromitarbeitende können Monteur-Anfragen lesen und beantworten.'));
+    const name=field(root,'Name'),pin=field(root,'PIN');
+    name.autocomplete='username';pin.type='password';pin.maxLength=4;pin.inputMode='numeric';
+    if(loginError)root.append(node('p',loginError));
+    root.append(btn('Anmelden',async()=>{
+      if(!name.value.trim()||!/^\d{4}$/.test(pin.value)){loginError='Bitte Namen und vierstellige PIN eingeben.';render();return;}
+      try{
+        const version=viewVersion;
+        const auth=await bzCall('POST','/app/office/anmelden',{name:name.value.trim(),pin:pin.value});
+        if(version!==viewVersion)return;
+        if(!auth.officeSession)throw Error('login_failed');
+        if(typeof bzGeneration!=='undefined')bzGeneration++;
+        // Zeitsteuerung der Büro-Sitzung (office-session.js). Ohne sie wird die Anmeldung nicht angenommen.
+        if(typeof OfficeSession==="undefined"||!OfficeSession.start(auth.officeSession,auth.expiresIn))throw Error("session_invalid");
+        bzSession={token:auth.officeSession,name:name.value.trim()};
+        if(auth.pinWechselPflicht){if(typeof bzPinWechsel==='function')bzPinWechsel();else {bzSession=null;loginError='Bitte PIN zuerst in der Büro-App ändern.';render();}return;}
+        loginError='';seen.clear();ready=false;
+        pin.value='';
+        await bzLaden();await load(false);
+      }catch{loginError='Anmeldung fehlgeschlagen.';render();}
+    }));
+    return;
+  }
+  const heading=node('div');heading.style.display='flex';heading.style.justifyContent='space-between';
+  heading.style.alignItems='center';heading.style.flexWrap='wrap';heading.style.gap='8px';
+  heading.append(node('strong',requests.length+' Anfragen · '+neu+' neu'),btn('↻ Aktualisieren',()=>load(false)));
+  root.append(heading);
+  if(!requests.length){root.append(node('p','Keine Anfragen vorhanden.'));return;}
+  for(const item of requests){
+    const card=node('article');card.style.border='1px solid var(--border)';card.style.borderRadius='12px';
+    card.style.padding='12px';card.style.marginTop='12px';
+    card.append(node('h3',(kinds[item.kind]||item.kind)+' · '+(item.targetLabel||'Allgemein')));
+    const meta=node('small','Von: '+(item.authorName||item.employeeId)+' · '+item.createdAt+' · '+item.status);
+    card.append(meta,row('Anfrage',item.message));
+    if(item.kind==='vacation_request'){
+      const details=node('div');card.append(details);
+      details.append(row('Zeitraum',item.from+' bis '+item.to),row('Mitarbeiter-ID',item.employeeId),row('Status',item.status));
+      for(const event of item.history||[])details.append(row('Protokoll',event.at+' · '+event.by+' · '+event.action));
+      if(item.status==='BEANTRAGT'){
+        const conflicts=item.conflicts||[];
+        const summary=node('p',conflicts.length?'Genehmigung gesperrt: Einsätze/Abwesenheiten zuerst in der bestehenden Wochenplanung bereinigen.':'Keine Konflikte im zuletzt gelesenen Plan. Beim Speichern wird erneut atomar geprüft.');
+        details.append(summary);
+        for(const c of conflicts){details.append(row('Konflikt',c.date+' · '+(c.siteId||c.status)+' · '+c.note));details.append(btn('In Wochenplanung öffnen · '+c.date,()=>globalThis.OfficePlanning?.open({from:c.date,employeeId:item.employeeId,onReturn:()=>load(false)})));}
+        if(item.pendingDecision)details.append(node('p','Speicherprüfung offen – noch NICHT genehmigt. Genehmigung erneut ausführen. Für Ablehnung zuerst vorbereitete Ferieneinträge in der bestehenden Planung entfernen.'));
+        const reason=field(details,'Begründung (optional)','textarea');reason.maxLength=1500;reason.value=item.pendingDecision?.reason||'';
+        const approve=btn('Ferien genehmigen',()=>decideVacation(item,'BESTÄTIGT',reason.value));approve.disabled=conflicts.length>0;
+        details.append(btn('Planung erneut prüfen',()=>load(false)),approve,btn('Ferien ablehnen',()=>decideVacation(item,'ABGELEHNT',reason.value)));
+      }else details.append(row('Begründung',item.reason));
+      root.append(card);continue;
+    }
+    if(item.kind==='document_upload'&&item.attachment){
+      const attachment=btn('📎 '+(item.attachment.fileName||'Datei')+' herunterladen',async()=>{
+        try{
+          if(!active())throw Error('not_authorized');
+          const version=viewVersion,session=bzSession;
+          const data=await bzCall('GET','/app/admin/upload/'+encodeURIComponent(item.id),undefined,{binary:true});
+          if(version!==viewVersion||session!==bzSession||!active())return;
+          const url=URL.createObjectURL(data);
+          const a=node('a');a.href=url;a.download=String(item.attachment.fileName||'Dokument')
+            .replace(/[\\/<>:"|?*]/g,'_');
+          document.body.append(a);a.click();a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url),120000);
+        }catch{if(typeof toast==='function')toast('Download fehlgeschlagen','Büro-Berechtigung und Datei prüfen','⚠️');}
+      });
+      card.append(attachment);
+    }
+    if(item.reply)card.append(row('Letzte Rückmeldung',item.reply));
+    if(['erledigt','abgelehnt'].includes(item.status)){
+      card.append(node('p','Abgeschlossen – Original bleibt gespeichert.'));root.append(card);continue;
+    }
+    const select=field(card,'Status','select');
+    for(const v of statusValues){const opt=node('option',v.replace('_',' '));opt.value=v;select.append(opt);}
+    select.value=item.status;
+    const date=field(card,'Servicetermin (Datum)');date.type='date';date.value=item.appointmentDate||'';
+    const time=field(card,'Uhrzeit');time.type='time';time.value=item.appointmentTime||'';
+    const location=field(card,'Abholort / Fach');location.maxLength=100;
+    location.value=item.pickupLocation||'';location.placeholder='z. B. Fach 3';
+    const reply=field(card,'Nachricht an Monteur','textarea');
+    reply.value=item.reply||'';reply.placeholder='Kurze Antwort';
+    card.append(btn('Antwort bestätigen',async()=>{
+      const payload={status:select.value,appointmentDate:date.value,appointmentTime:time.value,
+        pickupLocation:location.value,reply:reply.value};
+      try{
+        await bzCall('POST','/app/admin/requests/'+encodeURIComponent(item.id)+'/reply',payload);
+        if(typeof toast==='function')toast('Antwort gesendet','Im Monteur-Postfach sichtbar','✅');
+        await load(false);
+      }catch(e){
+        if(typeof toast==='function')toast('Antwort nicht gespeichert',
+          e?.code==='appointment_required'?'Bitte Servicedatum ergänzen.':
+          e?.code==='pickup_required'?'Bitte Fach / Abholort oder Antwort angeben.':
+          'Bitte Eingaben prüfen und erneut senden.','⚠️');
+      }
+    }));
+    root.append(card);
+  }
+}
+async function decideVacation(item,decision,reason){
+  const version=viewVersion,session=bzSession;
+  try{
+    await bzCall('POST','/app/admin/ferien/'+encodeURIComponent(item.id)+'/decision',{decision,reason});
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    if(typeof toast==='function')toast('Ferienantrag',decision==='BESTÄTIGT'?'Genehmigt und Wochenplan kontrolliert.':'Abgelehnt; Wochenplan unverändert.','✅');
+    await load(false);
+  }catch(e){
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    if(typeof toast==='function')toast('Nicht bestätigt',e?.code==='planning_conflict'?'Die Planung hat Konflikte. Zuerst dort bereinigen.':'Keine bestätigte Speicherung. Bitte aktualisieren und prüfen.','⚠️');
+    await load(false);
+  }
+}
+async function load(silent=true){
+  if(!active()){if(!silent)render();return;}
+  if(loading)return;loading=true;
+  try{
+    const version=viewVersion;
+    const session=bzSession;
+    const data=await bzCall('GET','/app/admin/requests');
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    let vacations=[];
+    try{const data=await bzCall('GET','/app/admin/ferien');vacations=data.requests||[];}
+    catch(e){if(e?.status!==404)throw e;}
+    if(version!==viewVersion||session!==bzSession||!active())return;
+    const items=[...vacations.map(r=>({...r,kind:'vacation_request',targetLabel:r.from+' bis '+r.to,message:r.note})),...(data.requests||[])];
+    const fresh=ready?items.filter(i=>['neu','BEANTRAGT'].includes(i.status)&&!seen.has(i.id)):[];
+    items.forEach(i=>seen.add(i.id));
+    ready=true;requests=items;
+    if(fresh.length)notify((kinds[fresh[0].kind]||fresh[0].kind)+' – '+(fresh[0].targetLabel||'')+' von '+fresh[0].authorName);
+    const visible=document.getElementById('page-anfragen')?.classList.contains('active');
+    if(visible||!silent)render();
+    else{const badge=document.getElementById('bz-anfragen-count');if(badge){const count=requests.filter(x=>['neu','BEANTRAGT'].includes(x.status)).length;badge.textContent=count?'('+count+')':'';}}
+  }catch(e){if(!silent&&typeof toast==='function')toast('Keine Verbindung zum Postfach','Bitte später aktualisieren','⚠️');}
+  finally{loading=false;}
+}
+function init(){
+  render();
+  // Clear the inbox immediately after the common LagerTool office logout, not merely on the next poll.
+  if(typeof bzAbmelden==='function'){
+    const previousLogout=bzAbmelden;
+    globalThis.bzAbmelden=function(...args){
+      const value=previousLogout(...args);
+      viewVersion++;requests=[];seen.clear();ready=false;render();
+      return value;
+    };
+  }
+  const nav=document.getElementById('nav-anfragen');
+  nav?.addEventListener('click',()=>load(false));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&active())load(true);});
+  window.setInterval(()=>{if(active())load(true);},60000);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
+else init();
+})();

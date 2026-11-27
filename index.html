@@ -1,5 +1,8 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de"><head>
+<script src="pilot-config.js"></script>
+<script src="pilot-pin.js"></script>
+<script src="office-session.js"></script>
 <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -29,6 +32,8 @@
   let hasReceivedFirebaseSync = false;
   let pendingSaveBeforeSync = false;
   function markFirebaseSynced() {
+  if (typeof officeAnmeldungNachSync === 'function') officeAnmeldungNachSync();
+    if (typeof migrationSpeicherungNachAnmeldungNachholen === 'function') migrationSpeicherungNachAnmeldungNachholen();
     hasReceivedFirebaseSync = true;
     if (pendingSaveBeforeSync) {
       pendingSaveBeforeSync = false;
@@ -439,6 +444,8 @@
   .todo-push-status{font-size:12px;color:var(--muted);margin-top:8px}
   @media(max-width:700px){.todo-prio-summary{grid-template-columns:repeat(2,1fr)}.todo-wf-actions .btn{flex:1;justify-content:center;min-height:42px}#todo-alert-box{max-height:90vh;overflow:auto}}
 </style>
+<script src="docs-outbox.js"></script>
+<script src="entity-abmeldung.js"></script>
 </head>
 <body>
 
@@ -454,8 +461,7 @@
           <input type="text" id="login-name" autocomplete="off" placeholder="Tippen oder klicken…"
             style="width:100%;padding:10px;font-size:14px;box-sizing:border-box"
             data-hidden-id="login-name-id"
-            onfocus="loginPickerOpen()" onclick="loginPickerOpen()"
-            oninput="document.getElementById('login-name-id').value=''; spFilter(this)">
+            autocomplete="username">
           <input type="hidden" id="login-name-id" value="">
         </div>
       </div>
@@ -502,6 +508,8 @@
     <button class="nav-btn" onclick="showPage('todo')">✅ To-Do</button>
     <button class="nav-btn" onclick="officeSyncExport()" title="Daten für Monteur-App exportieren">📱 Sync</button>
     <button class="nav-btn" onclick="showPage('einstellungen')">⚙️</button>
+    <button class="nav-btn" onclick="showPage('rapporte')">📋 Rapporte</button>
+    <button class="nav-btn" id="nav-anfragen" onclick="showPage('anfragen')">📬 Anfragen <span id="bz-anfragen-count"></span></button>
     <button class="nav-btn" id="nav-meldungen" onclick="showPage('meldungen')" style="position:relative">
       Meldungen<span id="meldungen-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center">0</span>
     </button>
@@ -845,7 +853,7 @@
 
   <div class="card" style="padding:14px;margin-bottom:16px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input type="text" id="todo-neu-text" placeholder="z.B. Fust Bellikon anrufen dringend / Prio 2" style="flex:2;min-width:200px">
+      <input type="text" id="todo-neu-text" placeholder="z.B. Vaxtor Ardenau anrufen dringend / Prio 2" style="flex:2;min-width:200px">
       <input type="text" id="todo-neu-zustaendig" placeholder="Zuständig (z.B. Luc oder Tobias)" style="flex:1;min-width:160px">
       <button class="btn btn-primary" onclick="addTodoItem()">+ Hinzufügen</button>
     </div>
@@ -873,9 +881,22 @@
   </div>
 </div>
 
+<div id="page-rapporte" class="page">
+  <h2>📋 Arbeitsrapporte der Monteure</h2>
+  <p class="subtitle">Eigene Rubrik: Rapporte, Einreicher und Zeitpunkt – für gezielte Rückfragen</p>
+  <div id="bz-rapporte-section" class="card" style="margin-bottom:14px"></div>
+</div>
+
+<div id="page-anfragen" class="page">
+  <h2>📬 Monteur-Anfragen</h2>
+  <p class="subtitle">Service, Reparatur, Material und Rückmeldungen – nach Person und Auftrag nachvollziehbar.</p>
+  <div id="bz-anfragen-section" class="card"></div>
+</div>
+
 <div id="page-meldungen" class="page">
   <h2>🔔 Meldungen</h2>
   <p class="subtitle">Benachrichtigungen von Monteuren — quittieren um zu schliessen</p>
+  <div id="bz-section" class="card" style="margin-bottom:14px"></div>
   <div id="meldungen-liste"></div>
 </div>
 
@@ -1080,7 +1101,7 @@
       <div><label>Startzeit</label><input type="text" id="ma-startzeit" placeholder="z.B. 06:30"></div>
     </div>
     <div class="form-row cols-1">
-      <div><label>🔐 PIN (4-stellig für Monteur-App)</label><input type="password" id="ma-pin" inputmode="numeric" maxlength="4" placeholder="z.B. 1234" style="letter-spacing:4px;font-size:18px;max-width:160px"></div>
+      <!-- Phase 48: PIN wird ueber "PIN aendern / zuruecksetzen" vergeben -->
     </div>
     <div class="form-row cols-1">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,184,75,.06);border:1px solid rgba(232,184,75,.2);border-radius:8px">
@@ -1115,7 +1136,7 @@
         <input type="hidden" id="ma-buero-id" value="">
         <div id="ma-buero-suggest" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.35)"></div>
       </div>
-      <div><label>👤 Sachbearbeiter</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Stefan Meier"></div>
+      <div><label>👤 Sachbearbeiter</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Testperson Zeta"></div>
     </div>
     <div class="form-row cols-2">
       <div><label>📞 Telefon Sachbearbeiter</label><input type="tel" id="ma-kontakt-tel" placeholder="+41 79 000 00 00"></div>
@@ -1420,7 +1441,7 @@
         <div id="ki-panel-text">
           <textarea id="ki-auftragstext" rows="6"
             style="width:100%;resize:vertical;font-size:12px;font-family:var(--mono);padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"
-            placeholder="E-Mail weiterleiten, Auftragsbestätigung oder Notiz einfügen...&#10;&#10;Beispiel:&#10;Auftrag: Küchenmontage bei Müller AG&#10;Adresse: Hauptstrasse 5, 4051 Basel&#10;Datum: 05.05. – 10.05.2026&#10;3 Monteure, Startzeit 07:00&#10;Kontakt: Hans Müller, 079 123 45 67"></textarea>
+            placeholder="E-Mail weiterleiten, Auftragsbestätigung oder Notiz einfügen...&#10;&#10;Beispiel:&#10;Auftrag: Küchenmontage bei Testfirma AG&#10;Adresse: Hauptstrasse 5, 4051 Basel&#10;Datum: 05.05. – 10.05.2026&#10;3 Monteure, Startzeit 07:00&#10;Kontakt: Hans Müller, 079 123 45 67"></textarea>
         </div>
 
         <!-- Bild-Tab -->
@@ -1453,7 +1474,7 @@
 
     <div class="form-row cols-2">
       <div><label>Name *</label><input type="text" id="bs-name" placeholder="wird automatisch generiert"></div>
-      <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Fust AG" oninput="generiereNameAusKundeOrt()"></div>
+      <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Vaxtor AG" oninput="generiereNameAusKundeOrt()"></div>
     </div>
     <div class="form-row cols-2">
       <div><label>Auftragsnummer</label><input type="text" id="bs-auftragsnummer" placeholder="z.B. A-2026-1234"></div>
@@ -1502,7 +1523,7 @@
     <div class="form-row cols-1">
       <div><label>📍 Adresse</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <input type="text" id="bs-adresse" placeholder="z.B. Hochbergerstr. 60, Basel" style="flex:1" oninput="generiereNameAusKundeOrt()">
+          <input type="text" id="bs-adresse" placeholder="z.B. Teststrasse 60, Basel" style="flex:1" oninput="generiereNameAusKundeOrt()">
           <button type="button" onclick="const a=document.getElementById('bs-adresse').value.trim();if(a)window.open('https://maps.google.com/?q='+encodeURIComponent(a),'_blank');else alert('Bitte zuerst Adresse eingeben');" 
             style="flex-shrink:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px" title="In Google Maps öffnen">🗺</button>
         </div>
@@ -1568,8 +1589,8 @@
     <hr class="divider">
     <div class="card-title">👤 Ansprechperson</div>
     <div class="form-row cols-2">
-      <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Thomas Fust"></div>
-      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"></div>
+      <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Testperson Beta"></div>
+      <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"><label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:normal"><input type="checkbox" id="bs-ap-tel-freigabe"> Telefonnummer für Monteure freigeben</label></div>
     </div>
     <div class="form-row cols-1">
       <div><label>E-Mail</label><input type="email" id="bs-ap-email" placeholder="t.fust@fust.ch"></div>
@@ -1593,7 +1614,7 @@
     <div class="form-row cols-1">
       <div><label>Hotel Adresse</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="bs-hotel-adresse" placeholder="z.B. Rheingasse 2, 4058 Basel" style="flex:1">
+          <input type="text" id="bs-hotel-adresse" placeholder="z.B. Teststrasse 2, 4058 Basel" style="flex:1">
           <button type="button" onclick="const a=document.getElementById('bs-hotel-adresse').value.trim();if(a)window.open('https://maps.google.com/?q='+encodeURIComponent(a),'_blank');" class="btn btn-secondary btn-sm">🗺</button>
         </div>
       </div>
@@ -1601,7 +1622,7 @@
     <div class="form-row cols-1">
       <div>
         <label>🔗 Excel-Bezeichnungen (Aliasse, eine pro Zeile)</label>
-        <textarea id="bs-excel-aliase" rows="2" style="width:100%;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" placeholder="z.B. R+S Westfeld&#10;Fust Dietwil Platten"></textarea>
+        <textarea id="bs-excel-aliase" rows="2" style="width:100%;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" placeholder="z.B. R+S Westfeld&#10;Vaxtor Kessel Platten"></textarea>
         <div style="font-size:11px;color:var(--muted);margin-top:3px">So steht die Baustelle im Excel-Wochenplan. Unverknüpfte Einträge werden beim Speichern automatisch erneut abgeglichen.</div>
       </div>
     </div>
@@ -1923,7 +1944,32 @@ let state = {
 
 
 // Einmalige Migration: Klebstoffe/Silikon/Acryl/Werkzeug Artikel importieren
+// Phase 49B (M3): Startmigrationen speichern nur bei zulaessiger Schreibberechtigung. Fehlt sie noch (Start vor Anmeldung),
+// wird die Speicherung vorgemerkt und nach der Anmeldung nachgeholt; sie wird nicht stillschweigend verworfen.
+let migrationSpeicherungAusstehend = false;
+function migrationSpeichern() {
+  if (lagertoolDarfSchreiben()) { save(); return; }
+  migrationSpeicherungAusstehend = true;
+}
+function migrationSpeicherungNachAnmeldungNachholen() {
+  if (!migrationSpeicherungAusstehend || !lagertoolDarfSchreiben()) return;
+  migrationSpeicherungAusstehend = false;
+  save();
+}
+// Gleiche Reihenfolge wie beim Start (load); alle Migrationen sind kennzeichen- bzw. naechs-geprueft, also ohne Wirkung auf bereits migrierte Daten.
+function startMigrationenNachUebernahme() {
+  // Jede Migration einzeln abgesichert: ein Fehler blockiert weder Anmeldung noch die folgenden Migrationen.
+  const schritte = [migrationKontrollschilderRestore, migrationSdsBohrer, migrationHssBohrer, migrationKlebstoffeEtc, migrationSpanplattenschrauben,
+    migrationSchraubenNeu, migrationAbdeckband38mm, migrationDistanzplatten,
+    migrationTopRocRafixTX, migrationRafixOhneKopfErweiterung, fixRafixOhneKopfNr, applyArtikelPreise,
+    migrationKategorienKorrektur, migrationKategorienReorganisation, migrationKategorienAufbauen];
+  for (const f of schritte) { try { f(); } catch (e) { console.error('[Migration] ' + (f.name || 'unbenannt') + ' fehlgeschlagen:', e); } }
+}
+// Phase 49B (Dubletten): Artikel-ID aus der Artikelnummer (stabil, gleich auf jedem Client) und Anlegen nur ohne vorhandene Nummer.
+function artikelIdAusNr(nr) { return Number(String(nr).replace(/\D/g, '')); }
+function artikelNeuAnlegen(a) { if (!state.artikel.some(x => x.nr === a.nr)) state.artikel.push(a); }
 function migrationKlebstoffeEtc() {
+  if (state._klebstoffeEtcMigriert) return; // Phase 49: einmalig, wie die uebrigen Migrationen (verhindert Schreibvorgang bei jedem Laden)
   if (!state.artikel) state.artikel = [];
   const neueArtikel = [{"id":13004,"name":"Silikon Dichtstoff PERMAFIX 142 transparent","nr":"81.2211.0010","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13005,"name":"Silikon Dichtstoff PERMAFIX 142 RAL 9016 Verkehrsweiss","nr":"81.2211.0020","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13006,"name":"Silikon Dichtstoff PERMAFIX 142 schwarz","nr":"81.2211.0200","kat":"Silikon","einheit":"Stk","bestand":0,"min":5},{"id":13007,"name":"Dichtstoff Acryl PERMAFIX 505 RAL 9016 Verkehrsweiss","nr":"81.2422.0011","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13008,"name":"Dichtstoff Acryl PERMAFIX 505 grau","nr":"81.2422.0012","kat":"Acryl","einheit":"Stk","bestand":0,"min":5},{"id":13009,"name":"Glättespachteln FALCONE Star","nr":"81.2593.0000","kat":"Werkzeug & Zubehör","einheit":"Stk","bestand":0,"min":5},{"id":13010,"name":"Abdeckvlies PETERHANS","nr":"81.7682.2050","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13011,"name":"Doppelseitiges Klebeband PERMAFIX 620/1780","nr":"81.7106.0911","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13012,"name":"Abdeckband PERMAFIX 710 25mm","nr":"81.7303.2024","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13013,"name":"Abdeckband PERMAFIX 710 30mm","nr":"81.7303.2030","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13014,"name":"Abdeckband PERMAFIX 710 50mm","nr":"81.7303.2048","kat":"Abdeckung & Schutz","einheit":"Stk","bestand":0,"min":5},{"id":13015,"name":"Verbindungsplättchen LAMELLO 0","nr":"80.1351.0000","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13016,"name":"Verbindungsplättchen LAMELLO 10","nr":"80.1351.0010","kat":"Lamello","einheit":"Stk","bestand":0,"min":20},{"id":13017,"name":"Verbindungsplättchen LAMELLO 20","nr":"80.1351.0020","kat":"Lamello","einheit":"Stk","bestand":0,"min":20}];
   neueArtikel.forEach(a => {
@@ -1931,7 +1977,7 @@ function migrationKlebstoffeEtc() {
     if (!exists) state.artikel.push(a);
   });
   state._klebstoffeEtcMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: HSS-Bohrer Artikel importieren
@@ -1944,7 +1990,7 @@ function migrationHssBohrer() {
     if (!exists) state.artikel.push(a);
   });
   state._hssBohrerMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: SDS-Bohrer (Bosch) Artikel importieren
@@ -1957,7 +2003,7 @@ function migrationSdsBohrer() {
     if (!exists) state.artikel.push(a);
   });
   state._sdsBohrerMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Spanplattenschrauben Artikel importieren
@@ -1970,7 +2016,7 @@ function migrationSpanplattenschrauben() {
     if (!exists) state.artikel.push(a);
   });
   state._spanplattenschraubenMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Top-Roc und Rafix mit Kopf TX Artikel importieren
@@ -1983,7 +2029,7 @@ function migrationTopRocRafixTX() {
     if (!exists) state.artikel.push(a);
   });
   state._topRocRafixTXMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: Rafix ohne Kopf 252/302mm ergänzen
@@ -1996,17 +2042,24 @@ function migrationRafixOhneKopfErweiterung() {
     if (!exists) state.artikel.push(a);
   });
   state._rafixOhneKopfErgaenztMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Migration: state.kategorien aus vorhandenen Artikel-Kats aufbauen (einmalig + idempotent)
+// Phase 49C: Kategorie-ID aus dem Namen (deterministisch). Zwei Clients, die dieselbe Kategorie anlegen,
+// erzeugen dieselbe ID und damit keine Dublette.
+function katIdAusName(name) {
+  return 'kat_' + String(name).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
 function migrationKategorienAufbauen() {
   const katsImArtikel = [...new Set((state.artikel||[]).map(a => a.kat).filter(Boolean))];
   if (!Array.isArray(state.kategorien)) state.kategorien = [];
   // Neue Kats hinzufügen die noch nicht in state.kategorien sind
   katsImArtikel.forEach(k => {
     if (!state.kategorien.some(x => x.name === k)) {
-      state.kategorien.push({ id: 'kat_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: k, order: state.kategorien.length });
+      let id = katIdAusName(k);
+      if (state.kategorien.some(x => x.id === id)) id += '_2'; // bestehende ID nie ueberschreiben
+      state.kategorien.push({ id, name: k, order: state.kategorien.length });
     }
   });
   // Reihenfolge normalisieren
@@ -2020,7 +2073,7 @@ function migrationKategorienKorrektur() {
   const korrekturen = {"81.7106.0911":"Abdeckung & Schutz","80.1351.0000":"Lamello","80.1351.0010":"Lamello","80.1351.0020":"Lamello"};
   state.artikel.forEach(a => { if (korrekturen[a.nr]) a.kat = korrekturen[a.nr]; });
   state._kategorienKorrekturMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Zentrale Kategorie-Zuordnung anhand des Artikelnamens
@@ -2045,15 +2098,17 @@ function klassifiziereKategorie(name, nr, altKat) {
 function migrationKategorienReorganisation() {
   if (!state.artikel) state.artikel = [];
   if (state._kategorienReorganisationMigriert) return;
-  state.artikel.forEach(a => { a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
+  // Phase 49C: bestehende Kategorien nie ueberschreiben (vorher wurde jeder Artikel neu klassifiziert).
+  // Nur Artikel ohne Kategorie erhalten eine Zuordnung.
+  state.artikel.forEach(a => { if (!a.kat) a.kat = klassifiziereKategorie(a.name, a.nr, a.kat); });
   state._kategorienReorganisationMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Preis pro Stk für Artikel hinterlegen (aus Lieferanten-Preislisten, CHF exkl. MwSt).
 // PREIS_MAP wird bei Bedarf mit weiteren Artikelnummern ergänzt (nr -> CHF pro Stk).
-// Läuft bei jedem Start (kein einmaliges Flag), damit neue Einträge sofort greifen
-// und bestehende Preise bei Aktualisierung überschrieben werden.
+// Phase 49C: Nur fehlende Preise werden ergänzt. Vorhandene Preise werden nie stillschweigend ersetzt;
+// eine Preisänderung bestehender Artikel ist eine ausdrücklich freizugebende Datenänderung.
 const PREIS_MAP = {
   // Senkkopfschrauben ohne Schaft / Vollgewinde (82.1012.xxxxx)
   '82.1012.30012': 0.035, '82.1012.30016': 0.033, '82.1012.30020': 0.035, '82.1012.30025': 0.039, '82.1012.30030': 0.048,
@@ -2098,9 +2153,11 @@ function applyArtikelPreise() {
   if (!Array.isArray(state.artikel)) return;
   let n = 0;
   state.artikel.forEach(a => {
-    if (a.nr && PREIS_MAP[a.nr] !== undefined) { a.preis = PREIS_MAP[a.nr]; n++; }
+    // Phase 49C: nur fehlende Preise ergaenzen (idempotent, kein Schreibvorgang bei unveraenderten Daten).
+    const fehlt = a.preis === undefined || a.preis === null || a.preis === '';
+    if (a.nr && PREIS_MAP[a.nr] !== undefined && fehlt) { a.preis = PREIS_MAP[a.nr]; n++; }
   });
-  if (n > 0) save();
+  if (n > 0) migrationSpeichern();
 }
 
 // Korrigiert die Artikel-Nr von "Rafix ohne Kopf": alte Nr 82.5416.75xxx existiert beim
@@ -2109,9 +2166,13 @@ function fixRafixOhneKopfNr() {
   if (!Array.isArray(state.artikel)) return;
   let n = 0;
   state.artikel.forEach(a => {
-    if (a.nr && a.nr.startsWith('82.5416.75')) { a.nr = a.nr.replace('82.5416.75', '82.5406.75'); n++; }
+    if (!a.nr || !a.nr.startsWith('82.5416.75')) return;
+    const neueNr = a.nr.replace('82.5416.75', '82.5406.75');
+    // Phase 49C: keine Umbenennung, wenn die Zielnummer bereits existiert (sonst doppelte Artikelnummer).
+    if (state.artikel.some(x => x.nr === neueNr)) return;
+    a.nr = neueNr; n++;
   });
-  if (n > 0) save();
+  if (n > 0) migrationSpeichern();
 }
 
 // Einmalige Ergänzung: Abdeckband PERMAFIX 710 38mm fehlte im System
@@ -2119,50 +2180,16 @@ function migrationAbdeckband38mm() {
   if (!Array.isArray(state.artikel)) return;
   if (state._abdeckband38Migriert) return;
   if (!state.artikel.some(a => a.nr === '81.7303.2036')) {
-    state.artikel.push({ id: Date.now()+Math.floor(Math.random()*99999), name: 'Abdeckband PERMAFIX 710 38mm', nr: '81.7303.2036', kat: 'Abdeckung & Schutz', einheit: 'Stk', bestand: 0, min: 5 });
+    state.artikel.push({ id: 8173032036, name: 'Abdeckband PERMAFIX 710 38mm', nr: '81.7303.2036', kat: 'Abdeckung & Schutz', einheit: 'Stk', bestand: 0, min: 5 });
   }
   state._abdeckband38Migriert = true;
-  save();
+  migrationSpeichern();
 }
 
-function migrationSchraubenNeu() {
-  if (state._schraubenNeuMigriert2) return;
-  // Zusätzlich prüfen ob noch alte Schrauben drin sind — wenn ja, nochmal laufen
-  const hatAlteSchrauben = (state.artikel||[]).some(a =>
-    a.kat === 'Schrauben' || a.kat === 'Schrauben & Befestigung' ||
-    (a.name||'').toLowerCase().startsWith('linsenkopf') ||
-    (a.name||'').toLowerCase().startsWith('spanplattenschraube') ||
-    (a.name||'').toLowerCase().startsWith('spax')
-  );
-  if (!hatAlteSchrauben && state._schraubenNeuMigriert2) return;
-
-  // 1. Alle alten Schrauben-Artikel entfernen (alle Kategorien die Schrauben enthalten)
-  const schraubenKats = ['Schrauben', 'Schrauben & Befestigung', 'Rundkopfschrauben', 'Senkkopfschrauben mit Schaft', 'Senkkopfschrauben Vollgewinde', 'Senkkopfschrauben ohne Schaft'];
-  state.artikel = (state.artikel||[]).filter(a => !schraubenKats.includes(a.kat));
-
-  // 2. Alle alten Schrauben-Kategorien entfernen
-  state.kategorien = (state.kategorien||[]).filter(k => !schraubenKats.includes(k.name));
-  const ts = Date.now();
-  const newKats = [
-    { id: 'kat_senk_s_' + ts, name: 'Senkkopfschrauben mit Schaft',   order: 50 },
-    { id: 'kat_senk_v_' + ts, name: 'Senkkopfschrauben ohne Schaft',   order: 51 },
-    { id: 'kat_rund_' + ts,   name: 'Rundkopfschrauben',               order: 52 },
-  ];
-  state.kategorien.push(...newKats);
-
-  // 3. Artikel generieren — Name: "Rundkopfschraube Ø3mm × 12mm", Nr: "82.1510.30012"
-  function makeArtikel(nr, d1, L, kat, prefix) {
-    return {
-      id: Date.now() + Math.floor(Math.random()*99999),
-      name: `${prefix} Ø${d1}mm × ${L}mm`,
-      nr: nr,
-      kat: kat,
-      einheit: 'Stk',
-      bestand: 0,
-      min: 10
-    };
-  }
-
+// Phase 49C: Schrauben-Kategorien der frueheren (loeschenden) Migration. Nur fuer die Pruefung, nicht fuer Schreibvorgaenge.
+const SCHRAUBEN_KATS_ALT = ['Schrauben', 'Schrauben & Befestigung', 'Rundkopfschrauben', 'Senkkopfschrauben mit Schaft', 'Senkkopfschrauben Vollgewinde', 'Senkkopfschrauben ohne Schaft'];
+// Phase 49C: Zielkatalog Schrauben als reine Daten (kein Schreibzugriff).
+function schraubenZielKatalog() {
   // ── Rundkopfschrauben (82.1510) ──
   const rundkopf = [
     ['82.1510.30012',3,12],['82.1510.30016',3,16],['82.1510.30020',3,20],['82.1510.30025',3,25],['82.1510.30035',3,35],
@@ -2208,12 +2235,37 @@ function migrationSchraubenNeu() {
     ['82.1012.60050',6,50],['82.1012.60060',6,60],['82.1012.60070',6,70],['82.1012.60080',6,80],
   ];
 
-  rundkopf.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Rundkopfschrauben','Rundkopfschraube')));
-  senkkopfMitSchaft.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben mit Schaft','Senkkopfschraube m.Schaft')));
-  senkkopfVollgewinde.forEach(([nr,d1,L]) => state.artikel.push(makeArtikel(nr,d1,L,'Senkkopfschrauben ohne Schaft','Senkkopfschraube o.Schaft')));
-
-  state._schraubenNeuMigriert2 = true;
-  save();
+  const ziel = [];
+  const add = (liste, kat, prefix) => liste.forEach(([nr, d1, L]) => ziel.push({ nr, name: `${prefix} Ø${d1}mm × ${L}mm`, kat, einheit: 'Stk', bestand: 0, min: 10 }));
+  add(rundkopf, 'Rundkopfschrauben', 'Rundkopfschraube');
+  add(senkkopfMitSchaft, 'Senkkopfschrauben mit Schaft', 'Senkkopfschraube m.Schaft');
+  add(senkkopfVollgewinde, 'Senkkopfschrauben ohne Schaft', 'Senkkopfschraube o.Schaft');
+  return ziel;
+}
+// Phase 49C: reiner Pruefplan. Veraendert nichts; zaehlt nur, was eine Freigabe betreffen wuerde.
+function schraubenMigrationsPlan(artikel) {
+  const liste = Array.isArray(artikel) ? artikel : [];
+  const ziel = schraubenZielKatalog();
+  const nrs = new Set(liste.map(x => x.nr));
+  const ids = new Set(liste.map(x => x.id));
+  const alte = liste.filter(x => SCHRAUBEN_KATS_ALT.includes(x.kat) || /^(linsenkopf|spanplattenschraube|spax)/i.test(x.name || ''));
+  const fehlend = ziel.filter(z => !nrs.has(z.nr));
+  return {
+    zielAnzahl: ziel.length,
+    vorhanden: ziel.length - fehlend.length,
+    fehlendAnzahl: fehlend.length,
+    fehlendNr: fehlend.map(z => z.nr),
+    idKollisionen: fehlend.filter(z => ids.has(artikelIdAusNr(z.nr))).map(z => z.nr),
+    alteSchraubenAnzahl: alte.length,
+    alteMitBestand: alte.filter(x => Number(x.bestand) > 0).length,
+  };
+}
+// Phase 49C: GESPERRT, kein Schreibzugriff. Die fruehere Fassung loeschte alle bestehenden Schraubenartikel samt
+// Bestand und Kategorien und legte Datensaetze mit Bestand 0 neu an (Artikel-IDs, Mengen und Zuordnungen gingen verloren).
+// Eine Ausfuehrung ist nur nach dokumentierter Freigabe zulaessig (PHASE49C-ABSCHLUSS.md, Abschnitt K).
+function migrationSchraubenNeu() {
+  const plan = schraubenMigrationsPlan(state.artikel);
+  console.info('[Migration] Schrauben gesperrt, kein Schreibzugriff. Plan:', JSON.stringify({ ...plan, fehlendNr: plan.fehlendNr.length }));
 }
 
 // Repariert bestehende Meldungen ohne maId: Monteur über die zugehörige
@@ -2239,7 +2291,7 @@ function migrationMeldungenMaIdReparatur() {
     }
   });
   state._meldungenMaIdRepariert = true;
-  if (repariert > 0) save();
+  if (repariert > 0) migrationSpeichern();
 }
 
 // Einmalige Migration: das separate "Notiz"-Feld bei To-Dos wurde aus der UI
@@ -2259,7 +2311,7 @@ function migrationTodoNotizMerge() {
     }
   });
   state._todoNotizGemerged = true;
-  if (gemerged > 0) save();
+  if (gemerged > 0) migrationSpeichern();
 }
 
 function migrationDistanzplatten() {
@@ -2268,7 +2320,7 @@ function migrationDistanzplatten() {
   if (!Array.isArray(state.artikel)) state.artikel = [];
   // Kategorie hinzufügen falls nicht vorhanden
   if (!state.kategorien.some(k => k.name === 'Distanzplatten')) {
-    state.kategorien.push({ id: 'kat_dist_' + Date.now(), name: 'Distanzplatten', order: 53 });
+    state.kategorien.push({ id: 'kat_distanzplatten', name: 'Distanzplatten', order: 53 }); // Phase 49C: deterministische ID
   }
   const artikel = [
     { nr: '80.1280.0123', dicke: 1 },
@@ -2280,7 +2332,7 @@ function migrationDistanzplatten() {
   artikel.forEach(a => {
     if (!state.artikel.some(x => x.nr === a.nr)) {
       state.artikel.push({
-        id: Date.now() + Math.floor(Math.random()*99999),
+        id: artikelIdAusNr(a.nr),
         name: `Distanzplatte ${a.dicke}mm × 22mm × 100mm`,
         nr: a.nr,
         kat: 'Distanzplatten',
@@ -2291,7 +2343,7 @@ function migrationDistanzplatten() {
     }
   });
   state._distanzplattenMigriert = true;
-  save();
+  migrationSpeichern();
 }
 
 // Einmalige Migration: R+S Zollikon Baustelle aus altem Baustellen-Manager übernehmen
@@ -2303,7 +2355,7 @@ function migrationZollikon() {
     state.baustellen.push({"id":1001,"name":"R+S Zollikon","kunde":"","adresse":"Zollikon","von":"2026-06-01","bis":"2026-06-12","positionen":1,"startzeit":"","tasks":[{"id":"tkq33vnwln","name":"Küche","hours":41.5,"monteurHours":{"Mitteregger Christian":5,"Dubs Gilles":5,"Themporär 2":4.5,"Temporär Zollikon":4.5},"kwHours":{},"fertig":false},{"id":"tzqndkw5m6","name":"Oberbaumöbel Astor","hours":3.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"twgg0v3bo2","name":"Einbauschrank Eingang","hours":3.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"togfq48gnv","name":"Schiebetüre","hours":5.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"t77g23dz6r","name":"Waschküche","hours":29.5,"monteurHours":{},"kwHours":{},"fertig":false},{"id":"td4jhy6p4k","name":"Trennwand Küche – Waschküche","hours":17.5,"monteurHours":{"Mitteregger Christian":12,"Dubs Gilles":11.5},"kwHours":{},"fertig":false},{"id":"tepaq2ck4e","name":"Einbauschrank gross Elternzimmer","hours":11.5,"monteurHours":{"Mitteregger Christian":5.5,"Dubs Gilles":5.5},"kwHours":{},"fertig":false},{"id":"t6kkbn4v4j","name":"Einbauschrank klein Elternzimmer","hours":4,"monteurHours":{"Mitteregger Christian":5,"Dubs Gilles":5},"kwHours":{},"fertig":false},{"id":"t5aj1m2xyc","name":"Bett / Bettmöbel Elternzimmer","hours":7.5,"monteurHours":{"Mitteregger Christian":7,"Dubs Gilles":7},"kwHours":{},"fertig":false},{"id":"tpqxgt5iot","name":"Bettmöbel Kinderzimmer","hours":5.5,"monteurHours":{"Mitteregger Christian":9,"Dubs Gilles":9},"kwHours":{},"fertig":false},{"id":"tigrdlcd4e","name":"Einbauschrank Kinderzimmer","hours":5.5,"monteurHours":{"Mitteregger Christian":7,"Dubs Gilles":7},"kwHours":{},"fertig":false},{"id":"t90li8lbqv","name":"Bürotisch an Einbauschrank Kinderzimmer","hours":3.5,"monteurHours":{"Mitteregger Christian":10,"Dubs Gilles":10},"kwHours":{},"fertig":false},{"id":"t9k2t3474h","name":"Einbauschrank Gang Zimmer","hours":6.5,"monteurHours":{},"kwHours":{},"fertig":false}]});
   }
   state._zollikonMigriert = true;
-  save();
+  migrationSpeichern(); // Phase 49C: gleiche Schreibsperre wie die uebrigen Startmigrationen (vorher direktes save())
 }
 
 // Sicherer localStorage-Wrapper: Fallback auf In-Memory wenn localStorage blockiert ist
@@ -2341,9 +2393,33 @@ function debugClick() {
   console.log('Debug aktiv - jetzt auf den Button klicken (einmalig)');
 }
 
+function lagertoolKeinCache() { /* bewusst leer: kein Gesamtzustand im Browser */ }
+
+// Altbestaende aus frueheren Versionen: gespeicherte Biometrie-PINs und API-Schluessel werden entfernt.
+// Phase 49O: Die lokale Dokumentdatenbank 'lagertool_docs' wird NICHT mehr geloescht. Sie kann ungesicherte,
+// nur lokal vorhandene Dateien enthalten, und ihr Synchronisierungsstatus ist unbekannt. Nur Hinweis, kein Eingriff.
+function bereinigeAltbestaende() {
+  try { safeStorage.keys(WEBAUTHN_PIN_PREFIX).forEach(k => safeStorage.removeItem(k)); } catch (_) {}
+  try { localStorage.removeItem('lagertool_claude_key'); } catch (_) {}
+  legacyDokumenteHinweis();
+}
+// Liest nur die Liste der Datenbanknamen (kein Oeffnen, kein Schreiben, kein Loeschen).
+function legacyDokumenteHinweis() {
+  try {
+    if (!indexedDB || typeof indexedDB.databases !== 'function') return;
+    indexedDB.databases().then(liste => {
+      if ((liste || []).some(d => d && d.name === 'lagertool_docs')) {
+        console.warn('Lokaler Dokument-Altbestand (lagertool_docs) vorhanden. Er wurde nicht geloescht und nicht geprueft.');
+      }
+    }).catch(() => {});
+  } catch (_) {}
+}
+let claudeApiKeySitzung = '';
+
 function load() {
-  const s = safeStorage.getItem('lagertool');
-  if (s) state = JSON.parse(s);
+  bereinigeAltbestaende();
+  // Kein Gesamtzustand im Browser-Speicher: Daten kommen nach dem Login aus Firebase.
+  try { localStorage.removeItem('lagertool'); } catch (_) {}
   // _ts zurücksetzen: Firebase soll beim Start immer gewinnen.
   // Nach eigenem Save wird _ts neu gesetzt und suppressListener schützt den Write.
   state._ts = 0;
@@ -2370,13 +2446,14 @@ function load() {
   migrationSpanplattenschrauben();
   migrationSchraubenNeu();
   migrationAbdeckband38mm();
-  fixRafixOhneKopfNr();
-  applyArtikelPreise();
   migrationDistanzplatten();
-  migrationMeldungenMaIdReparatur();
-  migrationTodoNotizMerge();
+  // Phase 49D: migrationMeldungenMaIdReparatur und migrationTodoNotizMerge sind NICHT freigegeben und werden nicht ausgefuehrt
+  // (Funktionen unveraendert im Code; Freigabe und Fachpruefung ausstehend, siehe PHASE49D-INTEGRATION.md).
   migrationTopRocRafixTX();
   migrationRafixOhneKopfErweiterung();
+  // Phase 49C: Nummern- und Preisergaenzung erst nach allen katalogerzeugenden Migrationen (sonst fehlen Preise neu angelegter Artikel).
+  fixRafixOhneKopfNr();
+  applyArtikelPreise();
   migrationKategorienKorrektur();
   migrationKategorienReorganisation();
   migrationKategorienAufbauen();
@@ -2468,7 +2545,7 @@ function migrationMitarbeiterPins() {
 
   // Fehlende Monteure aus altem Baustellen-Manager ergänzen (nur falls Name noch nicht existiert)
   if (!state._monteureNachimportiert) {
-    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter","pin":"2001"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur","pin":"2002"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur","pin":"2003"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter","pin":"2004"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur","pin":"2005"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur","pin":"2006"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur","pin":"2007"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur","pin":"2008"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur","pin":"2009"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter","pin":"2010"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur","pin":"2011"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur","pin":"2012"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur","pin":"2013"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur","pin":"2014"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur","pin":"2015"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur","pin":"2016"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur","pin":"2017"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur","pin":"2018"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter","pin":"2019"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur","pin":"2020"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur","pin":"2021"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur","pin":"2022"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur","pin":"2023"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur","pin":"2024"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter","pin":"2025"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur","pin":"2026"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter","pin":"2027"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur","pin":"2028"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur","pin":"2029"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur","pin":"2030"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur","pin":"2031"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur","pin":"2032"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur","pin":"2033"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","pin":"1234","admin":true}];
+    const fehlendeListe = [{"vorname":"Ibrahim","nachname":"Bekim","funktion":"leiter","rolle":"leiter"},{"vorname":"Canard","nachname":"Jeremy","funktion":"monteur","rolle":"monteur"},{"vorname":"David","nachname":"Bodein","funktion":"monteur","rolle":"monteur"},{"vorname":"Franck","nachname":"Sebastian","funktion":"leiter","rolle":"leiter"},{"vorname":"Durki","nachname":"Michal","funktion":"monteur","rolle":"monteur"},{"vorname":"Harter","nachname":"Patrick","funktion":"monteur","rolle":"monteur"},{"vorname":"Boguslaw","nachname":"Stefanovic","funktion":"monteur","rolle":"monteur"},{"vorname":"Florent","nachname":"Marbois","funktion":"monteur","rolle":"monteur"},{"vorname":"Slawomir","nachname":"Kubach","funktion":"monteur","rolle":"monteur"},{"vorname":"Sester","nachname":"Christophe","funktion":"leiter","rolle":"leiter"},{"vorname":"Tristan","nachname":"Flieller","funktion":"monteur","rolle":"monteur"},{"vorname":"Gölec","nachname":"Mateus","funktion":"monteur","rolle":"monteur"},{"vorname":"Germpolski","nachname":"Eder","funktion":"monteur","rolle":"monteur"},{"vorname":"Colin","nachname":"Clement","funktion":"monteur","rolle":"monteur"},{"vorname":"Diego","nachname":"Höfs","funktion":"monteur","rolle":"monteur"},{"vorname":"Falasea","nachname":"König","funktion":"monteur","rolle":"monteur"},{"vorname":"Feigel","nachname":"Nicolas","funktion":"monteur","rolle":"monteur"},{"vorname":"Sefki","nachname":"Dauti","funktion":"monteur","rolle":"monteur"},{"vorname":"Günther","nachname":"Peter","funktion":"leiter","rolle":"leiter"},{"vorname":"Müller","nachname":"Christian","funktion":"monteur","rolle":"monteur"},{"vorname":"Böhler","nachname":"Yohan","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Voltz","funktion":"monteur","rolle":"monteur"},{"vorname":"Emmanuel","nachname":"Bonneville","funktion":"monteur","rolle":"monteur"},{"vorname":"Ahmed","nachname":"Bouhadjar","funktion":"monteur","rolle":"monteur"},{"vorname":"Lionel","nachname":"Umbrecht","funktion":"leiter","rolle":"leiter"},{"vorname":"Fournier","nachname":"Johan","funktion":"monteur","rolle":"monteur"},{"vorname":"Alexandre","nachname":"Weingand","funktion":"leiter","rolle":"leiter"},{"vorname":"Jonas","nachname":"Krakau","funktion":"monteur","rolle":"monteur"},{"vorname":"Thibeault","nachname":"Riedel Frank","funktion":"monteur","rolle":"monteur"},{"vorname":"Ribstein","nachname":"Sebastien","funktion":"monteur","rolle":"monteur"},{"vorname":"Tüchsen","nachname":"Uff","funktion":"monteur","rolle":"monteur"},{"vorname":"Czarny","nachname":"Gregg","funktion":"monteur","rolle":"monteur"},{"vorname":"Sanitar-Bauer","nachname":"Simon","funktion":"monteur","rolle":"monteur"},{"vorname":"Tobias","nachname":"Dräyer","funktion":"leiter","rolle":"leiter","admin":true}];
     fehlendeListe.forEach(f => {
       const exists = state.mitarbeiter.some(m =>
         (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
@@ -2481,7 +2558,7 @@ function migrationMitarbeiterPins() {
           nachname: f.nachname,
           funktion: f.funktion,
           rolle: f.rolle,
-          pin: f.pin,
+          pin: '', // PIN nur ueber die Mitarbeiterverwaltung setzen
           admin: f.admin || false
         });
       } else {
@@ -2490,7 +2567,7 @@ function migrationMitarbeiterPins() {
           (m.vorname||'').trim().toLowerCase() === f.vorname.toLowerCase() &&
           (m.nachname||'').trim().toLowerCase() === f.nachname.toLowerCase()
         );
-        if (m && !m.pin) { m.pin = f.pin; m.rolle = m.rolle || f.rolle; }
+        if (m && !m.rolle) { m.rolle = f.rolle; }
         if (m && f.admin && !m.admin) { m.admin = true; }
       }
     });
@@ -2513,19 +2590,18 @@ function migrationMitarbeiterPins() {
     (m.nachname||'').trim().toLowerCase() === 'vorburger'
   );
   if (!admin) {
-    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '0804', admin: true, entwickler: true };
+    admin = { id: 9001, vorname: 'Luc', nachname: 'Vorburger', funktion: 'Admin', pin: '', admin: true, entwickler: true };
     state.mitarbeiter.push(admin);
   } else {
-    if (!admin.pin) admin.pin = '0804';
     if (!admin.admin) admin.admin = true;
     admin.entwickler = true;
   }
 
-  // PINs für Zollikon-Team setzen falls noch nicht vorhanden
+  // Zollikon-Team: fehlende Rollen ergaenzen. PINs werden NIE aus dem Code gesetzt.
   // NUR für bestehende Mitarbeiter – legt KEINE neuen an (Temporäre Monteure entfernt)
   const pinMap = {
-    'Mitteregger Christian': { pin: '3885', rolle: 'leiter' },
-    'Dubs Gilles': { pin: '7883', rolle: 'monteur' }
+    'Mitteregger Christian': { rolle: 'leiter' },
+    'Dubs Gilles': { rolle: 'monteur' }
   };
   Object.entries(pinMap).forEach(([name, info]) => {
     let m = state.mitarbeiter.find(x =>
@@ -2533,7 +2609,6 @@ function migrationMitarbeiterPins() {
       (x.nachname + ' ' + x.vorname).trim() === name
     );
     if (!m) return; // Mitarbeiter existiert nicht → NICHTS tun
-    if (!m.pin) m.pin = info.pin;
     if (!m.rolle) m.rolle = info.rolle;
   });
 
@@ -2557,19 +2632,10 @@ function istAdminUser(u) {
 }
 
 function initLoginScreen() {
-  // Bereits eingeloggt? (sessionStorage)
-  let savedLogin = null;
-  try { savedLogin = sessionStorage.getItem('lagertool_login'); } catch(e) {}
-  if (savedLogin) {
-    try {
-      const u = JSON.parse(savedLogin);
-      const m = state.mitarbeiter.find(x => x.id === u.id);
-      if (m && istAdminUser(m) && !m.abgemeldet) { currentLoginUser = m; lagertoolSitzungMaId = m.id; finishLogin(); return; }
-      // Zugriff nicht (mehr) erlaubt (kein Admin/Entwickler, z.B. Rolle nachträglich
-      // geändert) - alte Session verwerfen statt automatisch einzuloggen.
-      if (m) { try { sessionStorage.removeItem('lagertool_login'); } catch(e2) {} }
-    } catch(e) {}
-  }
+  // Hinweis nach Ablauf, Logout in anderem Tab oder PIN-Wechsel (fester Text, keine Daten).
+  const hinweis = OfficeSession.hinweisLesen();
+  if (hinweis) { const el = document.getElementById('login-error'); if (el) { el.textContent = hinweis; el.style.display = 'block'; } }
+  // Keine automatische Anmeldung aus dem Browser-Speicher: jede Büro-Sitzung braucht Name und PIN.
 
   document.getElementById('login-pin').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
@@ -2749,47 +2815,173 @@ function fzgMonteurPickerOpen() {
   }, { excludeFzgId: fzgId });
 }
 
-function doLogin(fromBiometric) {
-  const id = maIdValue(document.getElementById('login-name-id').value);
-  const pin = document.getElementById('login-pin').value.trim();
+// Büro-Anmeldung: Name und PIN gehen an den Worker. Der Browser prueft nichts selbst.
+// Erst mit dem Firebase-Custom-Token wird Firebase angemeldet, danach werden die Daten geladen.
+const LT_WORKER_URL = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
+let officeAnmeldungLaeuft = false;
+let officeWartetAufSync = null;
+let officeSyncGeneration = -1;
+
+async function doLogin() {
   const errEl = document.getElementById('login-error');
-
-  if (!id) { errEl.textContent = 'Bitte Name wählen'; errEl.style.display = 'block'; return; }
-  if (pin.length !== 4) { errEl.textContent = 'PIN muss 4 Ziffern sein'; errEl.style.display = 'block'; return; }
-
-  const m = state.mitarbeiter.find(x => x.id === id);
-  if (!m || m.pin !== pin) {
-    if (fromBiometric) {
-      // Lokal gespeicherter PIN stimmt nicht mehr (z.B. geändert) - veraltete
-      // Gesichtserkennungs-Zugangsdaten auf diesem Gerät verwerfen.
-      safeStorage.removeItem(WEBAUTHN_CRED_PREFIX+id);
-      safeStorage.removeItem(WEBAUTHN_PIN_PREFIX+id);
-      renderLoginBiometricUI();
-      errEl.textContent = 'PIN wurde geändert – bitte einmal manuell eingeben und Gesichtserkennung neu einrichten.';
-    } else {
-      errEl.textContent = 'Name oder PIN ungültig';
-    }
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
-  // Zugriff auf dieses Tool nur für Entwickler/Administratoren - alle anderen
-  // (Leiter, Monteur, Chef-Monteur) nutzen die Monteur-App.
-  if (!istAdminUser(m)) {
-    errEl.textContent = 'Kein Zugriff — dieses Tool ist nur für Entwickler und Administratoren. Bitte die Monteur-App verwenden.';
-    errEl.style.display = 'block';
-    document.getElementById('login-pin').value = '';
-    return;
-  }
-
+  const name = (document.getElementById('login-name')?.value || '').trim();
+  const pin = (document.getElementById('login-pin')?.value || '').trim();
   errEl.style.display = 'none';
-  currentLoginUser = m;
-  lagertoolSitzungMaId = m.id;
-  try { sessionStorage.setItem('lagertool_login', JSON.stringify({id: m.id})); } catch(e) {}
-  finishLogin();
-  if (!fromBiometric) maybeOfferWebauthnSetup(m);
+  if (!name || !/^\d{4}$/.test(pin)) {
+    errEl.textContent = 'Bitte Name und 4-stelligen PIN eingeben';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (officeAnmeldungLaeuft) return;
+  officeAnmeldungLaeuft = true;
+  let r;
+  try {
+    if (!window.lagertoolPilotWorkerAllowed(LT_WORKER_URL)) throw Error('pilot_not_configured');
+    const version = bzGeneration;
+    const res = await fetch(LT_WORKER_URL + '/app/office/anmelden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, pin }),
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+    let data = null;
+    try { data = await res.json(); } catch (x) { data = null; }
+    if (version !== bzGeneration) return;
+    if (res.ok && data?.pinWechselPflicht && data.officeSession) {
+      if (!officeSitzungSetzen(data.officeSession, name, data.expiresIn, data.employeeId)) throw new Error('session_invalid');
+      document.getElementById('login-pin').value = '';
+      officeAnmeldungLaeuft = false;
+      bzPinWechsel();
+      return;
+    }
+    if (!res.ok || !data || !data.firebaseToken || !data.officeSession) {
+      throw new Error(res.status === 0 ? 'netz' : 'abgelehnt');
+    }
+    r = data;
+  } catch (e) {
+    officeAnmeldungLaeuft = false;
+    document.getElementById('login-pin').value = '';
+    errEl.textContent = e.message === 'netz'
+      ? 'Keine Verbindung zum Server. Bitte erneut versuchen.'
+      : 'Name oder PIN ungültig';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Buero-Sitzung (nur im Speicher) und Mitarbeiter-ID aus dem Server. Ablaufzeit ab Token-exp (siehe officeSitzungSetzen).
+  if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn, r.employeeId)) {
+    officeAnmeldungLaeuft = false;
+    errEl.textContent = 'Anmeldung ungültig. Bitte erneut versuchen.';
+    errEl.style.display = 'block';
+    return;
+  }
+  lagertoolSitzungMaId = String(r.employeeId);
+  officeWartetAufSync = String(r.employeeId);
+  officeSyncGeneration = bzGeneration;
+  document.getElementById('login-pin').value = '';
+  officeFirebaseAnmelden(r.firebaseToken);
 }
+
+// Firebase ausschliesslich mit dem Custom-Token. Keine anonyme Anmeldung.
+function officeFirebaseAnmelden(token) {
+  const generation = bzGeneration;
+  try {
+    if (typeof firebase === 'undefined') throw new Error('sdk');
+    firebase.auth().signInWithCustomToken(token)
+      .then(() => {
+        if (generation !== bzGeneration || !bzSession) {
+          firebase.auth().signOut().catch(() => {});
+          if (bzSession) officeSitzungAbgelaufen();
+          return;
+        }
+        startFirebaseListener(generation);
+      })
+      .catch(err => {
+        if (generation !== bzGeneration) return;
+        console.error('[Firebase] Anmeldung mit Token fehlgeschlagen');
+        officeAnmeldungFehlgeschlagen('Firebase-Anmeldung fehlgeschlagen. Bitte erneut anmelden.');
+      });
+  } catch (e) {
+    officeAnmeldungFehlgeschlagen('Firebase ist nicht verfügbar.');
+  }
+}
+
+function officeAnmeldungFehlgeschlagen(text) {
+  officeAnmeldungLaeuft = false;
+  officeWartetAufSync = null;
+  bzSession = null;
+  lagertoolSitzungMaId = null;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = text;
+  errEl.style.display = 'block';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+// Nach der ersten Synchronisation: Büro-Berechtigung im geladenen Datenbestand bestaetigen.
+function officeAnmeldungNachSync() {
+  if (!officeWartetAufSync) return;
+  if (officeSyncGeneration !== bzGeneration || !bzSession) { officeWartetAufSync = null; return; }
+  const id = officeWartetAufSync;
+  officeWartetAufSync = null;
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  if (!m || !istAdminUser(m)) {
+    officeAnmeldungFehlgeschlagen('Kein Zugang: dieses Konto hat keine Büro-Berechtigung.');
+    firebase.auth().signOut().catch(() => {});
+    return;
+  }
+  currentLoginUser = m;
+  lagertoolSitzungMaId = String(m.id);
+  officeAnmeldungLaeuft = false;
+  finishLogin();
+}
+
+// Ablauf der Firebase-Sitzung: Die Büro-Sitzung endet acht Stunden nach Anmeldung. Die Zeitsteuerung liegt in
+// office-session.js (gemeinsam mit office-pilot.html). Hier: Anbindung an Firebase und Bereinigung.
+OfficeSession.onEnd = (grund) => officeSitzungBeenden(grund);
+
+// Einzige Stelle der Haupt-App, an der eine Büro-Sitzung entsteht. false = Laufzeit nicht gueltig, Anmeldung abgelehnt.
+function officeSitzungSetzen(token, name, expiresIn, employeeId) {
+  if (!OfficeSession.start(token, expiresIn)) return false;
+  bzSession = { token, name, employeeId: employeeId != null ? String(employeeId) : null };
+  return true;
+}
+
+// Gemeinsame Bereinigung fuer Abmelden und Sitzungsende. Entfernt Büro-Zustand, beendet Listener und Abonnements,
+// meldet Firebase ab und loescht den lokalen Dokumentspeicher. Monteur-Sitzungen werden nicht beruehrt.
+// Liefert ein Promise, das erst nach Abmeldung und Loeschung erfuellt ist (vor dem Neuladen abwarten).
+function officeSitzungAufraeumen() {
+  OfficeSession.clear();
+  lagertoolOAuthToken = null;                // Google-Anmeldung der Büro-Sitzung verwerfen
+  bzGeneration++;                          // verspaetete Antworten (bzCall, Firebase) werden verworfen
+  bzSession = null;
+  bzDaten = { meldungen: [], rapporte: [] };
+  bzMeldung = null;
+  officeAnmeldungLaeuft = false;
+  officeWartetAufSync = null; officeSyncGeneration = -1;
+  currentLoginUser = null; lagertoolSitzungMaId = null;
+  try { window.PilotPin?.close(); } catch (_) {}
+  try { if (dbRef) dbRef.off(); } catch (_) {}
+  dbRef = null;                            // kein weiteres Schreiben nach Firebase
+  try { sessionStorage.removeItem('lagertool_login'); } catch (_) {}
+  const signOut = Promise.resolve().then(() => firebase.auth().signOut()).catch(() => {});
+  // Phase 49O: Beim Abmelden werden keine lokalen Dokumente geloescht (Synchronisierungsstatus unbekannt).
+  return Promise.all([signOut]);
+}
+
+// Ablauf der Büro-Sitzung: Bereinigung, dann zur Anmeldung. Neuladen erst nach Abmeldung in Firebase.
+// Ende der Büro-Sitzung: Bereinigung, Hinweis merken, dann neu laden.
+// grund: 'expired' (Ablauf), 'remote-logout' (Logout in anderem Tab), 'pin-changed' (PIN geaendert).
+function officeSitzungBeenden(grund) {
+  const fertig = officeSitzungAufraeumen();
+  const code = { expired: 'abgelaufen', 'remote-logout': 'anderer-tab', 'pin-changed': 'pin-gewechselt', revoked: 'ungueltig', 'logout-unbestaetigt': 'logout-unbestaetigt', 'logout-spiegel-offen': 'logout-spiegel-offen' }[grund] || null;
+  if (code) OfficeSession.hinweisSetzen(code);
+  // Remove private DOM immediately, before the reload clears the full application state.
+  document.getElementById('login-screen').style.display = 'flex';
+  fertig.then(() => location.reload(), () => location.reload());
+}
+// Ablauf der Sitzung (Aufrufe aus bzCall und Listener-Fehler).
+// Ungueltige Sitzung (401, Listener-Fehler): 'abgelaufen' nur, wenn die Uhr den Ablauf bestaetigt. Sonst 'ungueltig'.
+function officeSitzungAbgelaufen() { officeSitzungBeenden(OfficeSession.expired() ? 'expired' : 'revoked'); }
 
 function finishLogin() {
   const loginScreen = document.getElementById('login-screen');
@@ -2919,17 +3111,13 @@ async function webauthnPlatformAvailable() {
   } catch(e) { return false; }
 }
 // Alle auf DIESEM Gerät eingerichteten Logins (i.d.R. genau einer - Lucs/Tobias' eigenes Gerät).
+// Biometrie ist deaktiviert: es werden keine gespeicherten Anmeldedaten mehr gelesen (kein PIN im Browser).
 function findStoredBiometricLogins() {
-  return safeStorage.keys(WEBAUTHN_CRED_PREFIX).map(k => {
-    const maId = parseInt(k.slice(WEBAUTHN_CRED_PREFIX.length));
-    const credB64 = safeStorage.getItem(k);
-    const pin = safeStorage.getItem(WEBAUTHN_PIN_PREFIX+maId);
-    const m = (state.mitarbeiter||[]).find(x => x.id === maId);
-    return (m && credB64 && pin && istAdminUser(m)) ? {maId, credB64, pin, name:(m.vorname+' '+(m.nachname||'')).trim()} : null;
-  }).filter(Boolean);
+  return [];
 }
 
 async function webauthnRegister(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   try {
     if (!istAdminUser(m)) throw new Error('KEIN_ZUGRIFF');
     if (!m.pin) throw new Error('KEIN_PIN');
@@ -2946,7 +3134,6 @@ async function webauthnRegister(m) {
     }});
     if (!cred) throw new Error('Keine Zugangsdaten erhalten');
     safeStorage.setItem(WEBAUTHN_CRED_PREFIX+m.id, bufToB64url(cred.rawId));
-    safeStorage.setItem(WEBAUTHN_PIN_PREFIX+m.id, m.pin);
     safeStorage.setItem(WEBAUTHN_ASKED_PREFIX+m.id, '1');
     m.biometricSetupAm = new Date().toISOString();
     save();
@@ -2990,6 +3177,7 @@ async function webauthnLoginAttempt(entry) {
 }
 
 function renderLoginBiometricUI() {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   const area = document.getElementById('login-biometric-area');
   if (!area) return;
   const entries = webauthnPlatformOk ? findStoredBiometricLogins() : [];
@@ -3006,6 +3194,7 @@ function showLoginPinForm() {
 }
 
 function maybeOfferWebauthnSetup(m) {
+  return; // Biometrie ist in dieser Version deaktiviert (kein PIN im Browser)
   if (!webauthnPlatformOk || !istAdminUser(m)) return;
   if (safeStorage.getItem(WEBAUTHN_CRED_PREFIX+m.id)) return;
   if (safeStorage.getItem(WEBAUTHN_ASKED_PREFIX+m.id)) return;
@@ -3048,15 +3237,33 @@ function openWebauthnSettingsModal() {
 })();
 
 let pendingSavePromise = null;
+// Manueller Logout. Tab-Signal sofort, Oberfläche sofort gesperrt, dann der serverseitige Widerruf mit Zeitlimit.
+// Ein Zweitklick startet keinen zweiten Ablauf. Ein Netzwerkfehler beendet trotzdem lokal (Hinweis, kein Widerruf).
+let officeLogoutLaeuft = false;
 async function doLogout() {
-  // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten,
-  // damit der Reload keine frischen Änderungen "abschneidet" (Datenverlust-Bug).
+  if (officeLogoutLaeuft) return;
+  // PHASE 50N: Flag vor der Rueckfrage setzen (Doppelklick waehrend der Rueckfrage darf nicht zweimal abmelden).
+  officeLogoutLaeuft = true;
+  if (!(await entityAbmeldungBestaetigen())) { officeLogoutLaeuft = false; return; }   // loescht nichts
+  const token = bzSession ? bzSession.token : null;      // nur im Speicher dieser Funktion
+  OfficeSession.logout();                                  // andere Tabs informieren (ohne Token)
+  bzAbmelden();                                            // keine neuen Anfragen mehr
+  officeWartetAufSync = null; officeSyncGeneration = -1;
+  currentLoginUser = null; lagertoolSitzungMaId = null;
+  officeAnmeldungLaeuft = false;
+  const oberflaeche = document.getElementById('login-screen');
+  if (oberflaeche) oberflaeche.style.display = 'flex';
+  const serverPromise = token ? OfficeSession.serverLogout(BZ_WORKER, token) : Promise.resolve('kein-token');
+  // Falls grade noch ein Speichervorgang zu Firebase läuft: kurz abwarten (Datenverlust vermeiden).
   try {
     if (pendingSavePromise) {
       await Promise.race([pendingSavePromise, new Promise(r => setTimeout(r, 2500))]);
     }
   } catch(e) {}
-  try { sessionStorage.removeItem('lagertool_login'); } catch(e) {}
+  const ergebnis = await serverPromise;                    // höchstens das Zeitlimit
+  try { await officeSitzungAufraeumen(); } catch(e) {}
+  const hinweis = OfficeSession.logoutHinweis(ergebnis);
+  if (hinweis) OfficeSession.hinweisSetzen(hinweis);
   location.reload();
 }
 // save() bleibt für alle bestehenden Aufrufer 100% wie bisher nutzbar
@@ -3164,7 +3371,103 @@ function syncStandUebernehmen(neu) {
   (state.fahrzeuge || []).forEach(f => { const l = (lokalVor.fahrzeuge || []).find(x => x.id === f.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) f.docs = l.docs; });
   (state.mitarbeiter || []).forEach(m => { const l = (lokalVor.mitarbeiter || []).find(x => x.id === m.id); if (l) { if (l.foto && l.foto !== '_localOnly') m.foto = l.foto; if (Array.isArray(l.docs) && l.docs.some(d => d.data)) m.docs = l.docs; } });
   (state.baustellen || []).forEach(b => { const l = (lokalVor.baustellen || []).find(x => x.id === b.id); if (l && Array.isArray(l.docs) && l.docs.some(d => d.data)) b.docs = l.docs; });
-  try { safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state))); } catch (_) {}
+  try { lagertoolKeinCache( JSON.stringify(stripLargeData(state))); } catch (_) {}
+}
+// BEGIN VACATION PLAN AUDIT
+function vacationPlanAudit(state,before,by,timestamp){
+  if(!Array.isArray(state.ferienAntraege)||!state.ferienAntraege.length)return;
+  const changes=[];
+  for(const date of [...new Set([...Object.keys(before||{}),...Object.keys(state.plan||{})])].sort()){
+    const old=before?.[date]||{},next=state.plan?.[date]||{};
+    if(JSON.stringify(old)!==JSON.stringify(next))changes.push({date,before:JSON.parse(JSON.stringify(old)),after:JSON.parse(JSON.stringify(next))});
+  }
+  if(!changes.length)return;
+  if(!by||by==='unknown')throw Error('planning_actor_required');
+  state.planAenderungen=[...(state.planAenderungen||[]),{by:String(by),at:timestamp,source:'wochenplanung',changes}];
+}
+// END VACATION PLAN AUDIT
+// Phase 43, Schritt 5: Konfliktpruefung vor dem Speichern und ausdrueckliche Aufloesung.
+// Echte Konflikte (gleiche Stelle, verschiedene Werte) werden NICHT automatisch gespeichert.
+function syncPfadLesen(obj, pfad) {
+  let cur = obj;
+  for (const seg of String(pfad || '').split('/').filter(Boolean)) {
+    if (cur === null || cur === undefined) return undefined;
+    const m = /^(.*)\[(.*)\]$/.exec(seg);
+    if (m) cur = Array.isArray(cur[m[1]]) ? cur[m[1]].find(x => x && String(x.id) === m[2]) : undefined;
+    else cur = cur[seg];
+  }
+  return cur;
+}
+function syncPfadSetzen(obj, pfad, wert) {
+  const segs = String(pfad || '').split('/').filter(Boolean);
+  if (!segs.length) return;
+  let cur = obj;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i], last = i === segs.length - 1;
+    const m = /^(.*)\[(.*)\]$/.exec(seg);
+    if (m) {
+      if (!Array.isArray(cur[m[1]])) { if (wert === undefined) return; cur[m[1]] = []; }
+      const liste = cur[m[1]];
+      const idx = liste.findIndex(x => x && String(x.id) === m[2]);
+      if (last) {
+        if (wert === undefined) { if (idx >= 0) liste.splice(idx, 1); }
+        else if (idx >= 0) liste[idx] = wert; else liste.push(wert);
+        return;
+      }
+      if (idx < 0) { if (wert === undefined) return; liste.push({ id: m[2] }); }
+      cur = liste.find(x => x && String(x.id) === m[2]);
+    } else {
+      if (last) { if (wert === undefined) delete cur[seg]; else cur[seg] = wert; return; }
+      if (cur[seg] === null || typeof cur[seg] !== 'object') { if (wert === undefined) return; cur[seg] = {}; }
+      cur = cur[seg];
+    }
+  }
+}
+function syncKonfliktAnzeigen(konflikte, lokal, remote) {
+  document.getElementById('sync-konflikt-panel')?.remove();
+  const box = document.createElement('div');
+  box.id = 'sync-konflikt-panel';
+  box.setAttribute('role', 'dialog');
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  const karte = document.createElement('div');
+  karte.style.cssText = 'background:#1f2435;color:#e8eaf0;max-width:760px;width:100%;max-height:85vh;overflow:auto;border-radius:10px;padding:18px;font-size:13px;line-height:1.4';
+  const titel = document.createElement('h3');
+  titel.textContent = 'Gleichzeitige Änderung – bitte entscheiden';
+  titel.style.margin = '0 0 8px';
+  const text = document.createElement('p');
+  text.textContent = 'Diese Stellen haben Sie und ein anderer Benutzer unterschiedlich geändert. Es wurde noch nichts gespeichert. Ihre Änderungen bleiben erhalten, bis Sie sich entscheiden.';
+  const tabelle = document.createElement('table');
+  tabelle.style.cssText = 'width:100%;border-collapse:collapse;margin:8px 0';
+  const kopf = document.createElement('tr');
+  ['Stelle', 'Ihr Wert', 'Serverwert'].forEach(t => { const th = document.createElement('th'); th.textContent = t; th.style.cssText = 'text-align:left;border-bottom:1px solid #3a4260;padding:4px'; kopf.append(th); });
+  tabelle.append(kopf);
+  const kurz = v => { const t = v === undefined ? '(nicht vorhanden)' : JSON.stringify(v); return t.length > 160 ? t.slice(0, 157) + '…' : t; };
+  for (const c of konflikte) {
+    const tr = document.createElement('tr');
+    [c.pfad.replace(/^\//, '') || '(Stand)', kurz(syncPfadLesen(lokal, c.pfad)), kurz(syncPfadLesen(remote, c.pfad))].forEach(t => { const td = document.createElement('td'); td.textContent = t; td.style.cssText = 'padding:4px;vertical-align:top;border-bottom:1px solid #2a3045;word-break:break-word'; tr.append(td); });
+    tabelle.append(tr);
+  }
+  const knoepfe = document.createElement('div');
+  knoepfe.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';
+  const knopf = (label, fn, primaer) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:8px 12px;border-radius:6px;border:1px solid #4b9fe8;cursor:pointer;background:' + (primaer ? '#4b9fe8;color:#0f1117' : 'transparent;color:#e8eaf0'); b.onclick = fn; return b; };
+  knoepfe.append(
+    knopf('Meine Werte übernehmen', () => syncKonfliktAufloesen('lokal'), true),
+    knopf('Serverwerte übernehmen', () => syncKonfliktAufloesen('server'), false),
+    knopf('Abbrechen (Änderungen bleiben)', () => { box.remove(); }, false)
+  );
+  karte.append(titel, text, tabelle, knoepfe);
+  box.append(karte);
+  document.body.append(box);
+}
+// Aufloesung: Basis = Serverstand. Danach ist nur noch die lokale Aenderung offen. Die Speicherung prueft den Server erneut (Transaktion).
+async function syncKonfliktAufloesen(modus) {
+  const k = window.__syncKonflikt;
+  if (!k) { document.getElementById('sync-konflikt-panel')?.remove(); return; }
+  if (modus === 'server') for (const c of k.konflikte) syncPfadSetzen(state, c.pfad, syncPfadLesen(k.remote, c.pfad));
+  syncBase = syncKopie(k.remote);
+  window.__syncKonflikt = null;
+  document.getElementById('sync-konflikt-panel')?.remove();
+  return save({ verify: true });
 }
 let saveKette = Promise.resolve();
 // Ein Speichervorgang (läuft seriell hinter save()): frischer lokaler Schnappschuss → Transaktion mit Merge.
@@ -3186,7 +3489,10 @@ async function syncMergeSpeichern(doVerify) {
     letzte = { merged: r.merged, konflikte: r.konflikte, geaendert: r.geaendert, remoteGeaendert, ts: 0 };
     if (!r.geaendert) return undefined;                               // Server enthält bereits alles
     // Kopie: r.merged kann auf den lokalen Schnappschuss zeigen (nur lokal geändert) – der darf nicht verändert werden (Wiederholung der Transaktion)
-    const w = Object.assign({}, r.merged, { _ts: Math.max(Date.now(), remoteTs + 1) }); letzte.ts = w._ts;
+    const audited=syncKopie(r.merged);
+    vacationPlanAudit(audited,remote.plan,typeof currentLoginUser!=='undefined'?currentLoginUser?.id:null,new Date().toISOString());
+    letzte.merged=audited;
+    const w = Object.assign({}, audited, { _ts: Math.max(Date.now(), remoteTs + 1) }); letzte.ts = w._ts;
     return JSON.stringify(w);
   };
   let tr;
@@ -3231,7 +3537,7 @@ function save(opts) {
   // die Docs allein sind ~29MB. Docs werden separat in IndexedDB gespeichert.
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   // Firebase: Merge-Transaktion (siehe oben), seriell – jeder Lauf nimmt den dann aktuellen lokalen Stand.
   if (dbRef && hasReceivedFirebaseSync) {
@@ -3258,84 +3564,287 @@ function save(opts) {
     error:new Error('Keine Serververbindung – Änderung nur auf diesem Gerät vorgemerkt')});
 }
 
-// ── IndexedDB für grosse Dokumente (Fotos, PDFs) ──
-function openDocsDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('lagertool_docs', 1);
-    req.onupgradeneeded = e => { e.target.result.createObjectStore('docs'); };
-    req.onsuccess = e => resolve(e.target.result);
-    req.onerror = e => reject(e.target.error);
-  });
-}
+// Dokumente (Fotos, PDFs) werden NICHT dauerhaft im Browser gespeichert. Sie liegen nur im Speicher der Sitzung
+// bzw. im Worker. Altbestaende aus frueheren Versionen werden beim Start NICHT geloescht (Phase 49O, nur Hinweis).
+function saveDocsToIDB(s) { /* bewusst leer: kein dauerhafter Dokumentcache im Browser */ }
+function loadDocsFromIDB(s) { return Promise.resolve(); }
 
-async function saveDocsToIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readwrite');
-    const store = tx.objectStore('docs');
-    // Fahrzeug-Docs
-    (s.fahrzeuge||[]).forEach(f => {
-      if (f.docs?.some(d => d.data)) store.put(f.docs, 'fzg_' + f.id);
-    });
-    // Mitarbeiter-Docs + Fotos
-    (s.mitarbeiter||[]).forEach(m => {
-      if (m.foto && m.foto !== '_localOnly') store.put(m.foto, 'foto_' + m.id);
-      if (m.docs?.some(d => d.data)) store.put(m.docs, 'ma_' + m.id);
-    });
-    // Baustellen-Docs
-    (s.baustellen||[]).forEach(b => {
-      if (b.docs?.some(d => d.data)) store.put(b.docs, 'bs_' + b.id);
-    });
-  } catch(e) { console.warn('IndexedDB write error:', e); }
+// PHASE 49Q/49R: Fahrzeug- und Mitarbeiterdokumente. Neue Dokumente werden vor dem Speichern verschlüsselt in
+// der lokalen Outbox (IndexedDB, docs-outbox.js) abgelegt, danach auf den Server hochgeladen (zunächst wartend)
+// und erst beim erfolgreichen Speichern des Formulars endgültig zugeordnet (Finalisierung).
+// Abmelden und Neuladen verwerfen nichts. Verwerfen geschieht nur ausdrücklich über entityDokumentEntfernen oder das Prüffenster.
+let entityOutbox = [];           // Anzeige: Einträge des angemeldeten Benutzers (ohne Inhalt)
+let entityOutboxLaeuft = false;
+let entityRetryTimer = null;
+let entityPersistenz = null;     // Ergebnis der Speicherprüfung (status, dauerhaft, kapazitaetKnapp)
+let entityPersistenzAngefragt = false;
+function entityOwner() { return bzSession ? String(bzSession.employeeId || '') : ''; }
+function entityEsc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function entityOutboxPlanen(verzoegerungMs) {
+  clearTimeout(entityRetryTimer);
+  entityRetryTimer = setTimeout(() => { entityOutboxAbarbeiten(); }, verzoegerungMs);
 }
-
-async function loadDocsFromIDB(s) {
-  try {
-    const db = await openDocsDB();
-    const tx = db.transaction('docs', 'readonly');
-    const store = tx.objectStore('docs');
-    const get = key => new Promise(r => { const req = store.get(key); req.onsuccess = () => r(req.result); req.onerror = () => r(null); });
-    for (const f of (s.fahrzeuge||[])) {
-      const docs = await get('fzg_' + f.id);
-      if (docs) f.docs = docs;
-    }
-    for (const m of (s.mitarbeiter||[])) {
-      const foto = await get('foto_' + m.id);
-      if (foto) m.foto = foto;
-      const docs = await get('ma_' + m.id);
-      if (docs) m.docs = docs;
-    }
-    for (const b of (s.baustellen||[])) {
-      const docs = await get('bs_' + b.id);
-      if (docs && Array.isArray(b.docs)) {
-        // NICHT das ganze Array überschreiben (das würde auf einem anderen
-        // Gerät hochgeladene Server-Dokumente wieder verschwinden lassen,
-        // da diese nie in die lokale IndexedDB dieses Geräts gelangen).
-        // Nur bei _localOnly-Einträgen die lokal zwischengespeicherten Bytes
-        // wieder anhängen; Server-Dokumente (storage:'site-document') bleiben
-        // exakt so, wie sie aus Firebase kamen.
-        b.docs = b.docs.map(d => {
-          if (!d._localOnly) return d;
-          const match = docs.find(x => x.name === d.name && x.type === d.type);
-          return match || d;
-        });
-      } else if (docs && !b.docs) {
-        b.docs = docs;
+// Adapter für docs-outbox.js: JSON- oder Rohanfragen über die Büro-Sitzung.
+function entityApi(m, p, o) { return bzCall(m, p, o && o.json ? o.json : undefined, { raw: (o && o.raw) || null }); }
+async function entityBytesVon(dataUrl) { const r = await fetch(dataUrl); return new Uint8Array(await r.arrayBuffer()); }
+const ENTITY_FEHLER_TEXT = {
+  speicher_voll: 'Der Gerätespeicher ist voll.',
+  persistenz_nicht_verfuegbar: 'Die sichere lokale Ablage ist auf diesem Gerät nicht verfügbar.',
+  readback_fehlgeschlagen: 'Die lokale Ablage konnte nicht zuverlässig geprüft werden.',
+  keine_sitzung: 'Keine Büro-Sitzung.',
+  ungueltige_groesse: 'Die Datei ist leer oder zu groß (max. 8 MB).'
+};
+// Vor dem Speichern: neue Dokumente sicher ablegen. Wirft, wenn das nicht gelingt (Datensatz wird dann nicht gespeichert).
+async function entityDokumenteVorSpeichern(kind, entityId, docs) {
+  if (!entityPersistenzAngefragt) { entityPersistenzAngefragt = true; entityPersistenzPruefen(true); }
+  for (const d of (docs || [])) {
+    if (d.storage === 'entity-doc' || d.uploadId || !d.data) continue;
+    if (!entityOwner()) throw Object.assign(new Error('keine_sitzung'), { code: 'keine_sitzung' });
+    const bytes = await entityBytesVon(d.data);
+    const res = await DocOutbox.hinzufuegen({ employeeId: entityOwner(), kind, entityId: String(entityId), name: d.name, type: d.type, bytes });
+    if (!res.ok) throw Object.assign(new Error(res.reason || 'persistenz_nicht_verfuegbar'), { code: res.reason || 'persistenz_nicht_verfuegbar' });
+    d.uploadId = res.uploadId;
+    d.pending = true;
+  }
+}
+// Datensatz-Entwürfe in Speicherform: Server-Dokumente unverändert, Outbox-Dokumente als Platzhalter ohne Inhalt.
+function entityAusFormular(kind, entityId, docs) {
+  return (docs || []).filter(d => d.storage === 'entity-doc' || d.uploadId).map(d => (
+    d.storage === 'entity-doc' ? d : { name: d.name, type: d.type, uploadId: d.uploadId, pending: true, _localOnly: true }
+  ));
+}
+function entityListeDesDatensatzes(kind, entityId) {
+  const liste = kind === 'fahrzeug' ? state.fahrzeuge : state.mitarbeiter;
+  return (liste || []).find(x => String(x.id) === String(entityId));
+}
+// Serverseitig wartend gespeichert: Platzhalter erhält die Serverkennung (noch keine endgültige Zuordnung).
+function entityDokumentUebernehmen(item, doc) {
+  const rec = entityListeDesDatensatzes(item.kind, item.entityId);
+  const i = rec && Array.isArray(rec.docs) ? rec.docs.findIndex(d => d.uploadId === item.uploadId) : -1;
+  if (i < 0) return false;   // Formular nicht gespeichert: Finalisierung erfolgt beim Speichern
+  rec.docs[i] = Object.assign({}, rec.docs[i], { serverDocId: doc.id, serverMeta: { mime: doc.mime, size: doc.size, sha256: doc.sha256, createdAt: doc.createdAt } });
+  save();
+  if (typeof renderAll === 'function') renderAll();
+  return true;
+}
+// Finalisiert wartende Dokumente, deren Datensatz gespeichert ist. Nur Einträge im Zustand 'stored'.
+async function entityFinalisiereBereite() {
+  if (!bzSession) return;
+  const offen = [];
+  for (const [kind, liste] of [['fahrzeug', state.fahrzeuge], ['mitarbeiter', state.mitarbeiter]]) {
+    for (const rec of (liste || [])) {
+      for (const d of (rec.docs || [])) {
+        if (d.uploadId && d.pending && !d.storage) offen.push({ kind, entityId: String(rec.id), uploadId: d.uploadId });
       }
     }
-  } catch(e) { console.warn('IndexedDB read error:', e); }
+  }
+  if (!offen.length) return;
+  let ergebnisse = [];
+  try {
+    await entityModusSicherstellen();
+    ergebnisse = await DocOutbox.finalisiere({ employeeId: entityOwner(), api: entityApi, uploadIds: offen.map(o => o.uploadId) });
+  } catch (_) { return; }
+  let geaendert = false;
+  for (const e of ergebnisse) {
+    if (e.status !== 'final' && e.status !== 'discarded' && e.status !== 'forbidden' && e.status !== 'missing') continue;
+    const rec = entityListeDesDatensatzes(e.kind, e.entityId);
+    const i = rec && Array.isArray(rec.docs) ? rec.docs.findIndex(d => d.uploadId === e.uploadId) : -1;
+    if (i < 0) continue;
+    if (e.status === 'final') {
+      const alt = rec.docs[i];
+      const m = e.serverMeta || {};
+      rec.docs[i] = { id: e.serverDocId, name: alt.name, type: m.mime || alt.type, size: m.size, sha256: m.sha256, createdAt: m.createdAt, storage: 'entity-doc', kind: e.kind, entityId: String(e.entityId) };
+      geaendert = true;
+    } else {
+      rec.docs[i] = Object.assign({}, rec.docs[i], { fehler: e.status });
+      geaendert = true;
+    }
+  }
+  if (geaendert) { save(); if (typeof renderAll === 'function') renderAll(); }
 }
+async function entityOutboxAbarbeiten() {
+  if (!bzSession || entityOutboxLaeuft) return;
+  entityOutboxLaeuft = true;
+  let wartet = false;
+  try {
+    await entityModusSicherstellen();
+    const r = await DocOutbox.hochladen({
+      employeeId: entityOwner(),
+      api: entityApi,
+      onErfolg: (rec, doc) => { entityDokumentUebernehmen(rec, doc); }
+    });
+    wartet = !!(r && r.wartet);
+    await entityFinalisiereBereite();
+  } catch (_) { wartet = true; }
+  finally { entityOutboxLaeuft = false; }
+  await entityOutboxAnzeigen();
+  if (wartet) entityOutboxPlanen(30000);
+}
+// Speicherstatus: ehrlich anzeigen. Ein "dauerhaft" ist keine vollständige Sicherheit.
+async function entityPersistenzPruefen(anfordern) {
+  try {
+    entityPersistenz = anfordern ? await DocOutbox.persistenzAnfordern() : await DocOutbox.persistenzStatus();
+  } catch (_) { entityPersistenz = { status: 'nicht_unterstuetzt' }; }
+  await entityOutboxAnzeigen();
+}
+// Anzeige: Status des Speichers, offene Einträge und Prüffenster (Verwerfen nur ausdrücklich).
+async function entityOutboxAnzeigen() {
+  let liste = [];
+  try { liste = await DocOutbox.liste(entityOwner()); } catch (_) { liste = []; }
+  entityOutbox = liste.filter(x => x.state !== 'final');
+  let el = document.getElementById('entity-outbox-hinweis');
+  const warnung = entityPersistenz && entityPersistenz.status !== 'dauerhaft' ? entityPersistenz.status : null;
+  if (!entityOutbox.length && !warnung) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'entity-outbox-hinweis';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;background:#fff3cd;color:#664d03;border:1px solid #ffe69c;border-radius:8px;padding:8px 12px;font-size:13px;max-height:50vh;overflow:auto';
+    document.body.appendChild(el);
+  }
+  el.replaceChildren();
+  if (warnung === 'nicht_unterstuetzt') el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Dieser Browser sagt keinen dauerhaften Speicher zu. Lokal verschlüsselte Dokumente können verloren gehen, bevor sie auf dem Server sind. Bitte zeitnah hochladen lassen.' }));
+  else if (warnung === 'nicht_dauerhaft') el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Der Browser hat dauerhaften Speicher nicht zugesagt. Lokal verschlüsselte Dokumente können bei Speicherdruck verloren gehen. Das ist kein vollständiger Schutz.' }));
+  if (entityPersistenz && entityPersistenz.kapazitaetKnapp) el.appendChild(Object.assign(document.createElement('p'), { textContent: 'Der Gerätespeicher ist fast voll.' }));
+  if (entityOutbox.length) {
+    const bereit = entityOutbox.filter(x => ['queued', 'uploading', 'stored'].includes(x.state)).length;
+    el.appendChild(Object.assign(document.createElement('p'), { textContent: bereit + ' Dokument(e) sicher verwahrt; Hochladen und Zuordnung laufen.' }));
+    for (const x of entityOutbox.filter(x => ['unknown', 'rejected', 'corrupt', 'key_missing', 'discard_pending', 'discarded'].includes(x.state))) {
+      const zeile = document.createElement('div');
+      zeile.style.cssText = 'margin-top:6px';
+      zeile.appendChild(Object.assign(document.createElement('span'), { textContent: (x.name || 'Dokument') + ' – ' + x.state + (x.fehler ? ' (' + x.fehler + ')' : '') + ' ' }));
+      if (x.state === 'unknown') zeile.appendChild(entityButton('Serverstatus prüfen', () => entityStatusPruefen(x.uploadId)));
+      else if (x.state === 'discard_pending' || x.state === 'discarded') zeile.appendChild(entityButton('Verwerfen wiederholen', () => entityVerwerfenBestaetigen(x)));
+      else zeile.appendChild(entityButton('Verwerfen …', () => entityVerwerfenBestaetigen(x)));
+      el.appendChild(zeile);
+    }
+  }
+}
+function entityButton(text, onclick) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  b.className = 'btn';
+  b.style.cssText = 'margin-left:6px;font-size:12px;padding:2px 8px';
+  b.addEventListener('click', () => { Promise.resolve(onclick()).catch(() => {}); });
+  return b;
+}
+async function entityStatusPruefen(uploadId) {
+  let r;
+  try { await entityModusSicherstellen(); r = await DocOutbox.pruefeUnbekannt({ employeeId: entityOwner(), uploadId, api: entityApi }); }
+  catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
+  toast('Serverstatus', r.ok ? ('Zustand: ' + r.state) : ('Nicht geklärt (' + r.reason + ')'), r.ok ? '✅' : '⚠️');
+  await entityOutboxAnzeigen();
+  entityOutboxPlanen(0);
+}
+// Ausdrückliches Verwerfen. Hinweis: noch nicht serverseitig gespeicherte Dokumente gehen dabei verloren.
+async function entityVerwerfenBestaetigen(x) {
+  const warnung = x.state === 'stored' || x.state === 'queued'
+    ? 'Das Dokument wurde noch nicht endgültig auf dem Server zugeordnet. Beim Verwerfen geht es verloren. '
+    : '';
+  if (!confirm(warnung + '„' + (x.name || 'Dokument') + '“ wirklich verwerfen? Diese Aktion kann nicht rückgängig gemacht werden.')) return false;
+  let r;
+  try { await entityModusSicherstellen(); r = await DocOutbox.verwerfen({ employeeId: entityOwner(), uploadId: x.uploadId, bestaetigt: true, api: entityApi }); }
+  catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
+  if (r.reason === 'blob_offen' || r.reason === 'server_unbestaetigt') toast('Nicht vollständig verworfen', 'Der Server hat das Dokument noch nicht vollständig entfernt. Der Eintrag bleibt erhalten; bitte erneut versuchen.', '⚠️');
+  else if (!r.ok) toast('Nicht verworfen', 'Grund: ' + r.reason, '⚠️');
+  await entityOutboxAnzeigen();
+  return r.ok;
+}
+// Entfernen aus dem Formular vor dem Speichern. Gespeicherte Dokumente bleiben unberührt.
+async function entityDokumentEntfernen(liste, i) {
+  const d = liste[i];
+  if (!d) return;
+  if (d.storage === 'entity-doc') return toast('Hinweis', 'Gespeicherte Dokumente können hier nicht entfernt werden.', 'ℹ️');
+  if (d.uploadId) {
+    const item = entityOutbox.find(x => x.uploadId === d.uploadId);
+    if (item && item.state === 'uploading') return toast('Bitte warten', 'Der Upload läuft noch.', '⏳');
+    if (!confirm('„' + (d.name || 'Dokument') + '“ aus dem Formular entfernen? Es wird nicht gespeichert.')) return;
+    let r;
+    try { await entityModusSicherstellen(); r = await DocOutbox.verwerfenVorSpeichern({ employeeId: entityOwner(), uploadId: d.uploadId, bestaetigt: true, api: entityApi }); }
+    catch (e) { r = { ok: false, reason: (e && e.code) || 'modus_unbekannt' }; }
+    if (!r.ok && r.reason !== 'nicht_gefunden') {
+      if (r.reason === 'bereits_zugeordnet' || r.reason === 'nicht_verwerfbar') return toast('Hinweis', 'Das Dokument ist bereits gespeichert und kann hier nicht entfernt werden.', 'ℹ️');
+      return toast('Nicht entfernt', 'Das Dokument konnte nicht entfernt werden (' + r.reason + ').', '⚠️');
+    }
+  }
+  liste.splice(i, 1);
+  await entityOutboxAnzeigen();
+}
+// Ablauf bei Abmelden: nichts wird verworfen.
+// PHASE 50N: Abmeldebestaetigung. Liest den Outbox-Zustand des angemeldeten Nutzers; loescht nichts.
+// Lesefehler fuehren zur Rueckfrage (fail-safe), niemals zu stiller Bestaetigung.
+async function entityAbmeldungBestaetigen() {
+  let liste = null, fehler = false;
+  try { liste = await DocOutbox.liste(entityOwner()); } catch (_) { fehler = true; }
+  return EntityLogoutGuard.bestaetigen({
+    liste, fehler,
+    online: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
+    frage: text => (confirm(text) ? true : false)
+  });
+}
+// PHASE 50N: Dokumentmodus einmal je Sitzung vom Server holen. Fehler -> kein Pfad, kein Rueckfall.
+let entityModusCache = null;   // { token, modus }
+async function entityModusSicherstellen() {
+  if (!bzSession) throw Object.assign(new Error('session_required'), { code: 'session_required', status: 401 });
+  const token = bzSession.token;
+  if (entityModusCache && entityModusCache.token === token) return entityModusCache.modus;
+  const r = await bzCall('GET', '/app/admin/doc-mode');
+  const modus = r && r.mode;
+  if (modus !== 'off' && modus !== 'legacy' && modus !== 'authority') throw Object.assign(new Error('modus_unbekannt'), { code: 'modus_unbekannt' });
+  DocOutbox.setzeModus(modus === 'authority' ? 'authority' : 'legacy');
+  entityModusCache = { token, modus };
+  return modus;
+}
+// Download-Pfad nach Modus. Im Authority-Modus wird die Dokument-ID als uploadId übergeben.
+async function entityBlobVon(kind, entityId, docId) {
+  const modus = await entityModusSicherstellen();
+  const authority = modus === 'authority';
+  const pfad = authority ? '/app/admin/entity-docs2/download' : '/app/admin/entity-docs/download';
+  const idParam = authority ? '&uploadId=' : '&docId=';
+  return bzCall('GET', pfad + '?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(entityId) + idParam + encodeURIComponent(docId), undefined, { binary: true });
+}
+async function entityOeffnen(kind, entityId, docId) {
+  try {
+    const blob = await entityBlobVon(kind, entityId, docId);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e) { toast('Fehler', 'Dokument konnte nicht geladen werden (' + (e.code || e.message) + ')', '⚠️'); }
+}
+async function entityDataUrlVon(kind, entityId, doc) {
+  const blob = await entityBlobVon(kind, entityId, doc.id);
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+}
+window.addEventListener('online', () => { if (bzSession) entityOutboxPlanen(0); });
+setInterval(() => { if (bzSession) entityOutboxAbarbeiten(); }, 20000);
+// Speichern: neue Dokumente zuerst sicher ablegen, dann den Datensatz speichern, dann hochladen.
+async function entitySpeichernMit(kind, feldId, speichernIntern, docsRef) {
+  const feld = document.getElementById(feldId);
+  const id = kind === 'mitarbeiter' ? (maIdValue(feld.value) ?? Date.now()) : (parseInt(feld.value) || Date.now());
+  feld.value = String(id);
+  try {
+    await entityDokumenteVorSpeichern(kind, id, docsRef());
+  } catch (e) {
+    return toast('Dokument nicht gespeichert', (ENTITY_FEHLER_TEXT[e.code] || 'Das Dokument konnte nicht sicher abgelegt werden.') + ' Der Datensatz wurde nicht gespeichert.', '⚠️');
+  }
+  speichernIntern();
+  await entityFinalisiereBereite();
+  entityOutboxPlanen(0);
+}
+function saveFzgModal() { return entitySpeichernMit('fahrzeug', 'fzg-modal-id', saveFzgModalIntern, () => tempDocs); }
+function saveMaModal() { return entitySpeichernMit('mitarbeiter', 'ma-modal-id', saveMaModalIntern, () => tempMaDocs); }
 
 // Erstellt eine Kopie des State OHNE grosse base64-Daten (Dokumente, Fotos).
 // Firebase bekommt nur die schlanken Nutzdaten (~72 KB statt ~29 MB).
 function stripLargeData(s) {
   const copy = JSON.parse(JSON.stringify(s));
+  // PHASE 49P: Server-Dokumente (entity-doc) und Outbox-Platzhalter bleiben als Metadaten erhalten.
   (copy.fahrzeuge||[]).forEach(f => {
-    f.docs = (f.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+    f.docs = (f.docs||[]).map(d => (d.storage === 'entity-doc' || d.pending) ? d : ({ name: d.name, type: d.type, _localOnly: true }));
   });
   (copy.mitarbeiter||[]).forEach(m => {
     if (m.foto) m.foto = '_localOnly';
-    m.docs = (m.docs||[]).map(d => ({ name: d.name, type: d.type, _localOnly: true }));
+    m.docs = (m.docs||[]).map(d => (d.storage === 'entity-doc' || d.pending) ? d : ({ name: d.name, type: d.type, _localOnly: true }));
   });
   (copy.baustellen||[]).forEach(b => {
     // Server-Dokumente (storage:'site-document') enthalten ohnehin nur
@@ -3391,6 +3900,246 @@ function fahrzeugManuelleResetPruefen() {
 function renderAll() { renderArtikelTable(); renderStats(); renderFahrzeugDropdowns(); renderHistory(); renderFzgSettings(); renderWerkzeugDropdowns(); renderFahrzeugePage(); renderKatSelects(); }
 
 // ── NAVIGATION ─────────────────────────────────────────
+// ── BÜRO: RAPPORTE UND BAUSTELLENMELDUNGEN (Worker) ──
+// Die Daten liegen auf dem Server (R2). Die Büro-Sitzung wird nur im Speicher dieser Seite gehalten.
+// Die Pilot-Büroansicht darf niemals unbemerkt den produktiven Worker kontaktieren.
+const BZ_WORKER = String(window.MONTEUR_TEST_WORKER_URL || '').trim();
+const BZ_PILOT_WORKER_OK = window.lagertoolPilotWorkerAllowed ? window.lagertoolPilotWorkerAllowed(BZ_WORKER) : /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(BZ_WORKER) && BZ_WORKER !== 'https://auftragstool-ai.vorburgerluc-p.workers.dev';
+let bzGeneration = 0;
+const BZ_STATUS = { eingereicht: '📨 Eingereicht', in_bearbeitung: '🛠️ In Bearbeitung', quittiert: '✅ Ausführung quittiert', abgeschlossen: '🏁 Abgeschlossen' };
+const BZ_AKTION = { zuweisen: 'Zugewiesen', bearbeitung: 'Bearbeitung', quittiert: 'Quittiert', abgeschlossen: 'Abgeschlossen', zurueckgegeben: 'Zur Bearbeitung zurück', wieder_geoeffnet: 'Wieder geöffnet' };
+let bzSession = null;          // { token, name }
+let bzDaten = { meldungen: [], rapporte: [] };
+let bzSiteId = '';
+let bzRapportSiteId = 'all';    // Separate Filter, damit Meldungen und Rapporte sich nicht beeinflussen
+let bzRapportAutorId = 'all';
+let bzBusy = {};               // verhindert Doppelklicks je Vorgang
+let bzMeldung = null;          // Fehler- oder Hinweistext
+
+function bzEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function bzName(id) {
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(id));
+  return m ? ((m.vorname || '') + ' ' + (m.nachname || '')).trim() : ('ID ' + id);
+}
+
+function bzFehlertext(e) {
+  if (e.code === 'status_conflict') return 'Der Vorgang wurde inzwischen von jemand anderem geändert. Die Liste wird aktualisiert.';
+  if (e.code === 'already_quittiert') return 'Dieser Vorgang wurde bereits quittiert.';
+  if (e.code === 'forbidden') return 'Dafür fehlt die Berechtigung.';
+  if (e.code === 'pilot_not_configured') return 'Pilotserver nicht konfiguriert. Es wurde keine Verbindung zum Produktivserver aufgebaut.';
+  if (e.code === 'invalid_transition') return 'Dieser Statuswechsel ist nicht erlaubt.';
+  if (e.code === 'zuweisung_required') return 'Bitte einen Monteur auswählen.';
+  if (e.status === 0) return 'Keine Verbindung zum Server. Nichts wurde geändert. Bitte erneut versuchen.';
+  if (e.code === 'unauthorized') return 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.';
+  return 'Der Vorgang konnte nicht abgeschlossen werden.';
+}
+
+async function bzCall(method, path, body, {binary = false, raw = null} = {}) {
+  const version = bzGeneration;
+  // Abgelaufene Sitzung: keine Anfrage mehr senden, sondern sofort abmelden (auch ohne ausgeloesten Timer).
+  // Ohne Sitzung wird nichts gesendet, ausser der Anmeldung selbst.
+  if (path !== '/app/office/anmelden' && !bzSession) { const e = new Error('session_required'); e.code = 'session_required'; e.status = 401; throw e; }
+  if (bzSession && OfficeSession.expired()) {
+    officeSitzungAbgelaufen();
+    const e = new Error('session_expired'); e.code = 'session_expired'; e.status = 401; throw e;
+  }
+  if (!BZ_PILOT_WORKER_OK) {
+    const e = new Error('pilot_not_configured');e.status = 0;e.code = 'pilot_not_configured';throw e;
+  }
+  let res;
+  try {
+    res = await fetch(BZ_WORKER + path, {
+      method,
+      headers: Object.assign({ 'Content-Type': raw ? raw.type : 'application/json' }, bzSession ? { Authorization: 'Bearer ' + bzSession.token } : {}),
+      body: raw ? raw.bytes : (body ? JSON.stringify(body) : undefined),
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+  } catch (netz) {
+    const e = new Error('network'); e.status = 0; e.code = 'network'; throw e;
+  }
+  if (res.ok && binary) {
+    const blob = await res.blob();
+    if (version !== bzGeneration || !bzSession) { const e = new Error('session_changed'); e.code = 'session_changed'; throw e; }
+    return blob;
+  }
+  let data = null;
+  try { data = await res.json(); } catch (x) { data = null; }
+  if (version !== bzGeneration) { const e = new Error('session_changed'); e.code = 'session_changed'; throw e; }
+  if (!res.ok) {
+    const e = new Error(data && data.error ? data.error : 'http_' + res.status);
+    e.status = res.status; e.code = data && data.error; e.aktuell = data && data.aktuell;
+    if (res.status === 401 && bzSession && path !== '/app/pin-wechsel') {
+      bzAbmelden();
+      if (typeof officeSitzungAbgelaufen === 'function') officeSitzungAbgelaufen();
+    }
+    throw e;
+  }
+  return data;
+}
+
+async function bzAnmelden(source = 'meldungen') {
+  const suffix = source === 'rapporte' ? '-rapport' : '';
+  const name = (document.getElementById('bz' + suffix + '-login-name')?.value || '').trim();
+  const pin = document.getElementById('bz' + suffix + '-login-pin')?.value || '';
+  if (!name || !/^\d{4}$/.test(pin)) { bzMeldung = 'Bitte Name und 4-stelligen PIN eingeben.'; return bzRender(); }
+  try {
+    const r = await bzCall('POST', '/app/office/anmelden', { name, pin });
+    if (!officeSitzungSetzen(r.officeSession, name, r.expiresIn, r.employeeId)) throw new Error('session_invalid');
+    if (r.pinWechselPflicht) { bzPinWechsel(); return; }
+    bzMeldung = null;
+    await bzLaden();
+  } catch (e) {
+    bzSession = null;
+    bzMeldung = e.status === 0 ? bzFehlertext(e) : 'Name oder PIN ist ungültig.';
+    bzRender();
+  }
+}
+
+function bzAbmelden() {
+  bzGeneration++;
+  OfficeSession.clear();
+  window.PilotPin?.close();
+  bzRapportSiteId = 'all'; bzRapportAutorId = 'all';
+  bzSession = null;
+  bzDaten = { meldungen: [], rapporte: [] };
+  bzMeldung = null;
+  bzRender();
+}
+
+// Laedt alle Vorgaenge vom Server. Ein Fehler laesst die alte Anzeige stehen und sagt es.
+async function bzLaden() {
+  if (!bzSession) return bzRender();
+  const version = bzGeneration;
+  try {
+    const [m, r] = await Promise.all([bzCall('GET', '/app/admin/meldungen'), bzCall('GET', '/app/admin/rapporte')]);
+    if (version !== bzGeneration || !bzSession) return;
+    bzDaten = { meldungen: m.meldungen || [], rapporte: r.rapporte || [] };
+    bzMeldung = null;
+  } catch (e) {
+    if (e.code === 'session_changed') return;
+    if (e.code === 'unauthorized' || e.status === 401) { bzSession = null; bzMeldung = 'Die Büro-Anmeldung ist abgelaufen. Bitte erneut anmelden.'; }
+    else bzMeldung = bzFehlertext(e);
+  }
+  bzRender();
+}
+
+function bzPinWechsel() {
+  PilotPin.open({ change: (altPin, neuPin) => bzCall('POST', '/app/pin-wechsel', { altPin, neuPin }),
+    cancel: () => bzAbmelden(), complete: () => {
+      // PIN geaendert: alte Sitzung beenden (auch in anderen Tabs), Hinweis, neu laden.
+      officeAnmeldungLaeuft = false;
+      OfficeSession.logout();
+      officeSitzungBeenden('pin-changed');
+    } });
+}
+
+// Statuswechsel. expectedStatus ist der Stand, den das Büro gerade sieht.
+async function bzStatus(id, nach, zugewiesenId) {
+  const m = bzDaten.meldungen.find(x => String(x.id) === String(id));
+  if (!m || bzBusy[id]) return;
+  bzBusy[id] = true;
+  try {
+    const body = { nach, expectedStatus: m.status };
+    if (zugewiesenId) body.zugewiesenId = String(zugewiesenId);
+    await bzCall('POST', '/app/admin/meldungen/' + encodeURIComponent(String(id)) + '/status', body);
+    toast('Gespeichert', BZ_STATUS[nach] || '', '✅');
+  } catch (e) {
+    toast('Nicht gespeichert', bzFehlertext(e), '⚠️');
+  } finally {
+    delete bzBusy[id];
+  }
+  await bzLaden();
+}
+
+function bzMonteurOptionen(aktuell) {
+  const monteure = (state.mitarbeiter || []).filter(x => (x.rolle || '').toLowerCase() === 'monteur');
+  return '<option value="">– wählen –</option>' + monteure.map(x => {
+    const sel = String(x.id) === String(aktuell) ? ' selected' : '';
+    return `<option value="${bzEsc(x.id)}"${sel}>${bzEsc(((x.vorname || '') + ' ' + (x.nachname || '')).trim())}</option>`;
+  }).join('');
+}
+
+function bzAktionen(m) {
+  const id = JSON.stringify(String(m.id));
+  if (m.status === 'eingereicht') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen('')}</select>
+      <button class="btn btn-primary btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>In Bearbeitung setzen</button>`;
+  }
+  if (m.status === 'in_bearbeitung') {
+    return `<select id="bz-z-${bzEsc(m.id)}" style="max-width:220px">${bzMonteurOptionen(m.zugewiesenId)}</select>
+      <button class="btn btn-sm" onclick='bzStatusAusSelect(${id}, "in_bearbeitung")'>Zuweisung speichern</button>`;
+  }
+  if (m.status === 'quittiert') {
+    return `<button class="btn btn-primary btn-sm" onclick='bzStatus(${id}, "abgeschlossen")'>Abschließen</button>
+      <button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Zur Bearbeitung öffnen</button>`;
+  }
+  if (m.status === 'abgeschlossen') {
+    return `<button class="btn btn-sm" onclick='bzStatus(${id}, "in_bearbeitung")'>Wieder öffnen</button>`;
+  }
+  return '';
+}
+
+// Zuweisung kommt aus dem Auswahlfeld derselben Karte.
+function bzStatusAusSelect(id, nach) {
+  const sel = document.getElementById('bz-z-' + id);
+  const wert = sel ? sel.value : '';
+  if (nach === 'in_bearbeitung' && !wert) { toast('Fehlende Angaben', 'Bitte einen Monteur auswählen', '⚠️'); return; }
+  bzStatus(id, nach, wert);
+}
+
+function bzVerlauf(v) {
+  if (!v || !v.length) return '<div style="font-size:12px;color:var(--muted)">Noch kein Verlauf</div>';
+  return v.map(e => {
+    const art = BZ_AKTION[e.aktion] || e.aktion;
+    return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${bzEsc(String(e.at || '').slice(0, 16).replace('T', ' '))} · ${bzEsc(art)} · ${bzEsc(BZ_STATUS[e.von] || e.von)} → ${bzEsc(BZ_STATUS[e.nach] || e.nach)} · durch ${bzEsc(bzName(e.durchId))}${e.kommentar ? ' · ' + bzEsc(e.kommentar) : ''}</div>`;
+  }).join('');
+}
+
+function bzRender() {
+  bzRenderRapporte();
+  const el = document.getElementById('bz-section');
+  if (!el) return;
+  if (!bzSession) {
+    el.innerHTML = `
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Büro-Anmeldung für Rapporte und Meldungen</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Name und PIN wie bei der Anmeldung. Die Prüfung erfolgt auf dem Server.</div>
+      <input type="text" id="bz-login-name" placeholder="Name" style="margin-bottom:6px">
+      <input type="password" id="bz-login-pin" maxlength="4" inputmode="numeric" placeholder="PIN" style="margin-bottom:6px">
+      <button class="btn btn-primary" onclick="bzAnmelden()">Anmelden</button>
+      ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin-top:8px">${bzEsc(bzMeldung)}</div>` : ''}`;
+    return;
+  }
+  const baustellen = state.baustellen || [];
+  if (!bzSiteId && baustellen.length) bzSiteId = String(baustellen[0].id);
+  const siteOpts = baustellen.map(b => `<option value="${bzEsc(b.id)}"${String(b.id) === bzSiteId ? ' selected' : ''}>${bzEsc(b.name)}</option>`).join('');
+  const meldungen = bzDaten.meldungen.filter(m => String(m.siteId) === bzSiteId).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div><b>Angemeldet als ${bzEsc(bzSession.name)}</b></div>
+      <button class="btn btn-sm" onclick="bzAbmelden()">Abmelden</button>
+    </div>
+    <label>Baustelle</label>
+    <select id="bz-site" onchange="bzSiteId=this.value;bzRender()">${siteOpts}</select>
+    ${bzMeldung ? `<div style="font-size:12px;color:var(--red);margin:8px 0">${bzEsc(bzMeldung)}</div>` : ''}
+    <div style="font-weight:700;font-size:13px;margin:14px 0 6px">Baustellenmeldungen (${meldungen.length})</div>
+    ${meldungen.length ? meldungen.map(m => `
+      <div style="border-top:1px solid var(--border);padding:8px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div><b>${bzEsc(m.type)}</b> · ${bzEsc(m.message)}</div>
+          <span style="font-size:12px;font-weight:700">${bzEsc(BZ_STATUS[m.status] || m.status)}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px">Autor: ${bzEsc(bzName(m.autorId))} · ${bzEsc(String(m.createdAt || '').slice(0, 16).replace('T', ' '))}${m.zugewiesenId ? ' · zugewiesen an ' + bzEsc(bzName(m.zugewiesenId)) : ''}</div>
+        ${m.quittiertAt ? `<div style="font-size:12px">Quittiert: ${bzEsc(String(m.quittiertAt).slice(0, 16).replace('T', ' '))}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${bzAktionen(m)}</div>
+        <details style="margin-top:6px"><summary style="font-size:12px;cursor:pointer">Verlauf (${(m.verlauf || []).length})</summary>${bzVerlauf(m.verlauf)}</details>
+      </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Keine Meldungen für diese Baustelle</div>'}
+    <div style="margin-top:10px"><button class="btn btn-sm" onclick="bzLaden()">↻ Aktualisieren</button></div>`;
+}
+
 function showPage(id) {
   // Admin-only Bereiche (Priorität 13): Lagerverwaltung und Fahrzeug-Inventar.
   // Gleiches Muster wie bei "einstellungen" weiter unten - verhindert auch
@@ -3417,7 +4166,8 @@ function showPage(id) {
   if (id === 'mitarbeiter') renderMitarbeiterPage();
   if (id === 'wochenplan') renderWochenplan();
   if (id === 'baustatus') renderBaustatus();
-  if (id === 'meldungen') renderMeldungen();
+  if (id === 'meldungen') { renderMeldungen(); if (bzSession) bzLaden(); else bzRender(); }
+  if (id === 'rapporte') { if (bzSession) bzLaden(); else bzRenderRapporte(); }
   if (id === 'meinprofil') renderMeinProfil();
   if (id === 'einstellungen') {
     if (!currentLoginUser?.entwickler) { toast('Zugriff verweigert', 'Nur für Entwickler', '🔒'); return; }
@@ -3642,7 +4392,7 @@ async function todoPersistMutation(mutator, opts={}) {
       try { if(typeof persisted==='string') persisted=JSON.parse(persisted); } catch(_){ persisted=null; }
       if(persisted && Array.isArray(persisted.todos)) {
         state.todos=persisted.todos; state._ts=persisted._ts||state._ts;
-        safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+        lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
       }
       renderTodoPage();
       todoPopupPruefen();
@@ -3729,6 +4479,7 @@ async function todoPushAktivieren(){
     if(!pkRes.ok||!pk.publicKey) throw new Error(pk.message||pk.error||'VAPID Public Key fehlt.');
     let sub=await reg.pushManager.getSubscription();
     if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:todoUrlBase64ToUint8Array(pk.publicKey)});
+    if(!lagertoolOAuthToken||!bzSession||!OfficeSession.aktiv()) throw new Error('Bitte zuerst als Büro anmelden.');
     const r=await fetch(new URL('api/v1/push/subscriptions',GPT_ASSISTANT_URL),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+lagertoolOAuthToken},body:JSON.stringify({subscription:sub.toJSON(),device:{ua:navigator.userAgent,platform:navigator.platform||'',label:(currentLoginUser?todoActor().name:'Gerät')}})});
     const data=await r.json(); if(!r.ok) throw new Error(data.message||data.error||'Push-Registrierung fehlgeschlagen');
     toast('Push aktiv','Dieses Gerät erhält Prio-1- und Prio-2-Meldungen.','🔔'); todoPushStatusAktualisieren();
@@ -3909,7 +4660,7 @@ function renderEinstellungen() {
   el('cfg-fb-projectid', c.fbProjectId);
   el('cfg-fb-appid', c.fbAppId);
   // Claude API Key aus localStorage (NICHT in state/Firebase, bleibt lokal)
-  el('cfg-claude-apikey', localStorage.getItem('lagertool_claude_key') || '');
+  el('cfg-claude-apikey', claudeApiKeySitzung || '');
   // Kategorien-Manager: nur für Entwickler
   const katCard = document.getElementById('kat-manager-card');
   if (katCard) {
@@ -3924,8 +4675,9 @@ function renderEinstellungen() {
 
 function saveClaudeApiKey() {
   const key = document.getElementById('cfg-claude-apikey')?.value.trim() || '';
-  if (key) { localStorage.setItem('lagertool_claude_key', key); toast('Gespeichert', 'API Key lokal gespeichert', '✅'); }
-  else { localStorage.removeItem('lagertool_claude_key'); toast('Entfernt', 'API Key gelöscht', '🗑'); }
+  claudeApiKeySitzung = key || '';
+  if (key) toast('Gespeichert', 'API Key für diese Sitzung gespeichert', '✅');
+  else toast('Entfernt', 'API Key gelöscht', '🗑');
 }
 
 // ── KATEGORIEN-MANAGEMENT (nur Entwickler) ─────────────────────────────────
@@ -4269,7 +5021,7 @@ function closeFzgModal() {
 
 // (Monteur-Picker im Fahrzeug-Modal: jetzt über universellen spOpen/spFilter)
 
-function saveFzgModal() {
+function saveFzgModalIntern() {
   const name = document.getElementById('fzg-modal-name').value.trim();
   const monteur = document.getElementById('fzg-modal-monteur').value.trim();
   const monteurIdRaw = document.getElementById('fzg-modal-monteur-id').value;
@@ -4291,7 +5043,7 @@ function saveFzgModal() {
     park: document.getElementById('fzg-modal-park').value,
     zone: document.getElementById('fzg-modal-zone').value.trim(),
     parkbis: document.getElementById('fzg-modal-parkbis').value,
-    docs: tempDocs,
+    docs: entityAusFormular('fahrzeug', id, tempDocs),
     service: tempService,
     werkzeug: tempWz,
     nutzungsHistorie: alt?.nutzungsHistorie||[]
@@ -4354,7 +5106,7 @@ function renderDocPreview() {
   if (!tempDocs.length) { grid.innerHTML = ''; return; }
   grid.innerHTML = tempDocs.map((d, i) => `
     <div class="doc-preview-item">
-      ${d.type?.startsWith('image')
+      ${d.type?.startsWith('image') && d.data
         ? `<img src="${d.data}" onclick="openLightbox('${d.data}')">`
         : `<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px">📄</div>`}
       <button class="doc-remove" onclick="removeDoc(${i})">✕</button>
@@ -4363,8 +5115,7 @@ function renderDocPreview() {
 }
 
 function removeDoc(i) {
-  tempDocs.splice(i, 1);
-  renderDocPreview();
+  return entityDokumentEntfernen(tempDocs, i).then(() => renderDocPreview());
 }
 
 function openLightbox(src) {
@@ -4490,7 +5241,9 @@ function renderFahrzeugePage() {
       : '';
     const docs = (f.docs||[]);
     const docHtml = docs.length ? `<div class="fzg-docs">${docs.map(d =>
-      d.type?.startsWith('image') && d.data ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
+      d.storage === 'entity-doc' ? `<span class="badge badge-yellow" style="cursor:pointer" title="${entityEsc(d.name)}" onclick="event.stopPropagation();entityOeffnen('fahrzeug','${entityEsc(f.id)}','${entityEsc(d.id)}')">📄 ${entityEsc(d.name)}</span>`
+      : d.pending ? `<span class="badge badge-red" title="${entityEsc(d.name)}">⏳ ${entityEsc(d.name)} (nicht hochgeladen)</span>`
+      : d.type?.startsWith('image') && d.data ? `<img class="doc-thumb" src="${d.data}" onclick="event.stopPropagation();openLightbox('${d.data}')" title="${d.name}">`
       : `<span class="badge badge-yellow" title="${d.name}">📄 PDF</span>`
     ).join('')}</div>` : '';
 
@@ -5331,7 +6084,8 @@ function maCardHtml(m) {
           ? `<div style="font-size:12px">🚐 <span class="badge badge-green" style="font-size:10px">${fzg.name}</span></div>`
           : `<div style="font-size:12px;color:var(--muted)">🚐 Kein Fahrzeug zugewiesen</div>`}
         ${m.buero ? `<div style="font-size:12px">🏢 ${m.buero}</div>` : ''}
-        ${(currentLoginUser?.entwickler || currentLoginUser?.admin) && m.pin ? `<div style="font-size:12px;color:var(--muted)">🔑 PIN: <span style="font-family:var(--mono);color:var(--accent2);letter-spacing:2px">${m.pin}</span></div>` : ''}
+        ${currentLoginUser?.admin === true ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;margin-top:4px" onclick="event.stopPropagation();pinResetOeffnen('${m.id}')">🔐 PIN ändern / zurücksetzen</button>` : ''}
+        <!-- Phase 48: PIN wird nicht mehr angezeigt -->
         ${m.kontaktName ? `<div style="font-size:11px;color:var(--muted)">👤 ${m.kontaktName}${m.kontaktTel ? ` · <a href="tel:${m.kontaktTel}" onclick="event.stopPropagation()" style="color:var(--accent2);text-decoration:none">${m.kontaktTel}</a>` : ''}</div>` : ''}
         ${m.notfall ? `<div style="font-size:11px;color:var(--muted)">🆘 ${m.notfall}</div>` : ''}
         ${(m.docs||[]).length ? `<div style="font-size:11px;color:var(--muted)">📁 ${m.docs.length} Dokument(e)</div>` : ''}
@@ -5488,7 +6242,9 @@ async function maAnalysiereVerleihvertrag() {
   if (!doc) return toast('Hinweis','Bitte zuerst einen Verleihvertrag (PDF) bei "Dokumente" hochladen','⚠️');
   toast('Analysiere','Lese Vertrag…','⏳');
   try {
-    const text = await extrahierePdfText(doc.data);
+    // PHASE 49P: Server-Dokumente werden für die Analyse erst vom Server geladen (nur mit Büro-Sitzung).
+    const dataUrl = doc.data || await entityDataUrlVon('mitarbeiter', document.getElementById('ma-modal-id').value, doc);
+    const text = await extrahierePdfText(dataUrl);
     if (!text || text.trim().length<20) return toast('Hinweis','Kein auslesbarer Text gefunden (evtl. gescanntes Bild-PDF) – bitte Felder manuell ausfüllen','⚠️');
     const p = parseVerleihvertragText(text);
     if (p.buero) { maSetIfEmpty('ma-buero', p.buero); bueroAutocomplete(document.getElementById('ma-buero')); }
@@ -5535,7 +6291,6 @@ function showMaModal(id) {
   document.getElementById('ma-eintritt').value = m?.eintritt || '';
   document.getElementById('ma-geburtsdatum').value = m?.geburtsdatum || '';
   document.getElementById('ma-funktion').value = m?.funktion || '';
-  document.getElementById('ma-pin').value = m?.pin || '';
   document.getElementById('ma-admin').checked = !!(m?.admin);
   document.getElementById('ma-startzeit').value = m?.startzeit || '';
   document.getElementById('ma-notfall').value = m?.notfall || '';
@@ -5724,7 +6479,7 @@ function renderMaDocPreview() {
   if (!tempMaDocs.length) { grid.innerHTML = ''; return; }
   grid.innerHTML = tempMaDocs.map((d, i) => `
     <div class="doc-preview-item">
-      ${d.type?.startsWith('image')
+      ${d.type?.startsWith('image') && d.data
         ? `<img src="${d.data}" onclick="openLightbox('${d.data}')">`
         : `<div style="height:80px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px">📄</div>`}
       <button class="doc-remove" onclick="removeMaDoc(${i})">✕</button>
@@ -5733,8 +6488,7 @@ function renderMaDocPreview() {
 }
 
 function removeMaDoc(i) {
-  tempMaDocs.splice(i, 1);
-  renderMaDocPreview();
+  return entityDokumentEntfernen(tempMaDocs, i).then(() => renderMaDocPreview());
 }
 
 // ════════════════════════════════════════════════════════
@@ -6132,7 +6886,77 @@ async function schluesselImportAusfuehren() {
   toast('Schlüsselliste übernommen', zugeordnet + ' zugeordnet, ' + ungeklaert + ' ungeklärt', '🔑');
 }
 
-function saveMaModal() {
+// ── Phase 48: PIN-Verwaltung (nur Administratoren; der PIN wird nie angezeigt oder gespeichert, ausser einmalig als generierter Wert) ──
+function pinResetOeffnen(maId) {
+  const m = (state.mitarbeiter || []).find(x => String(x.id) === String(maId));
+  if (!m) return toast('Fehler', 'Mitarbeiter nicht gefunden', '⚠️');
+  let box = document.getElementById('pin-reset-dialog');
+  if (box) box.remove();
+  box = document.createElement('div');
+  box.id = 'pin-reset-dialog';
+  box.setAttribute('role', 'dialog');
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  const karte = document.createElement('div');
+  karte.style.cssText = 'background:#1f2435;color:#e8eaf0;max-width:420px;width:100%;border-radius:10px;padding:18px;font-size:13px';
+  const titel = document.createElement('h3');
+  titel.textContent = 'PIN ändern / zurücksetzen';
+  titel.style.margin = '0 0 6px';
+  const name = document.createElement('p');
+  name.textContent = [m.vorname, m.nachname].filter(Boolean).join(' ');
+  const hinweis = document.createElement('p');
+  hinweis.style.cssText = 'color:#9aa3bd;font-size:12px';
+  hinweis.textContent = 'Der bisherige PIN muss nicht bekannt sein. Bestehende Sitzungen dieses Mitarbeiters werden beendet.';
+  const feld = (id, label, typ) => { const w = document.createElement('label'); w.style.cssText = 'display:block;margin:8px 0'; w.textContent = label; const i = document.createElement('input'); i.id = id; i.type = typ; i.inputMode = 'numeric'; i.maxLength = 4; i.autocomplete = 'off'; i.style.cssText = 'display:block;width:100%;margin-top:4px;padding:8px;letter-spacing:4px'; w.append(i); return w; };
+  const neu = feld('pin-reset-neu', 'Neuer PIN (4 Ziffern)', 'password');
+  const wdh = feld('pin-reset-wdh', 'Neuen PIN wiederholen', 'password');
+  const mussAendern = document.createElement('label');
+  mussAendern.style.cssText = 'display:flex;gap:8px;align-items:center;margin:10px 0';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'pin-reset-pflicht'; cb.checked = true;
+  mussAendern.append(cb, document.createTextNode('Mitarbeiter muss den PIN bei der nächsten Anmeldung ändern'));
+  const ausgabe = document.createElement('p');
+  ausgabe.id = 'pin-reset-ausgabe';
+  ausgabe.style.cssText = 'color:#4be88a;font-size:13px;word-break:break-all';
+  const knoepfe = document.createElement('div');
+  knoepfe.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+  const btn = (label, fn, primaer) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:8px 12px;border-radius:6px;border:1px solid #4b9fe8;cursor:pointer;background:' + (primaer ? '#4b9fe8;color:#0f1117' : 'transparent;color:#e8eaf0'); b.onclick = fn; return b; };
+  knoepfe.append(
+    btn('PIN generieren', () => pinResetGenerieren(maId), false),
+    btn('Speichern', () => pinResetSenden(maId), true),
+    btn('Abbrechen', () => box.remove(), false)
+  );
+  karte.append(titel, name, hinweis, neu, wdh, mussAendern, ausgabe, knoepfe);
+  box.append(karte);
+  document.body.append(box);
+}
+async function pinResetGenerieren(maId) {
+  // Vier Ziffern ohne Modulo-Verzerrung: Wert nur bei Bereich 0..9999 uebernehmen (sonst neu ziehen).
+  let wert;
+  do { wert = crypto.getRandomValues(new Uint16Array(1))[0]; } while (wert >= 60000);
+  const pin = String(wert % 10000).padStart(4, '0');
+  document.getElementById('pin-reset-neu').value = pin;
+  document.getElementById('pin-reset-wdh').value = pin;
+  document.getElementById('pin-reset-ausgabe').textContent = 'Generierter PIN (bitte jetzt notieren und übergeben): ' + pin;
+}
+async function pinResetSenden(maId) {
+  const pin = document.getElementById('pin-reset-neu').value.trim();
+  const wdh = document.getElementById('pin-reset-wdh').value.trim();
+  if (!/^\d{4}$/.test(pin)) return toast('Fehler', 'PIN muss aus genau 4 Ziffern bestehen', '⚠️');
+  // Phase 49: PIN nur ueber geschuetzte Verbindung (https); lokale Testadresse ausgenommen.
+  if (!/^https:\/\//.test(BZ_WORKER) && !/^http:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(BZ_WORKER)) return toast('Fehler', 'Keine geschützte Verbindung – PIN wird nicht gesendet', '⚠️');
+  if (pin !== wdh) return toast('Fehler', 'Die beiden PIN-Eingaben stimmen nicht überein', '⚠️');
+  try {
+    const antwort = await bzCall('POST', '/app/admin/employees/' + encodeURIComponent(String(maId)) + '/pin', { pin, pinBestaetigung: wdh, mussAendern: document.getElementById('pin-reset-pflicht').checked });
+    document.getElementById('pin-reset-neu').value = '';
+    document.getElementById('pin-reset-wdh').value = '';
+    document.getElementById('pin-reset-dialog')?.remove();
+    toast('PIN gesetzt', 'Bestehende Sitzungen des Mitarbeiters wurden beendet.', '✅');
+    return antwort;
+  } catch (e) {
+    toast('Fehler', 'PIN konnte nicht gesetzt werden', '⚠️');
+  }
+}
+
+function saveMaModalIntern() {
   const vorname = document.getElementById('ma-vorname').value.trim();
   const nachname = document.getElementById('ma-nachname').value.trim();
   if (!vorname || !nachname) return toast('Fehler', 'Vor- und Nachname erforderlich', '⚠️');
@@ -6153,7 +6977,6 @@ function saveMaModal() {
     eintritt: document.getElementById('ma-eintritt').value,
     geburtsdatum: document.getElementById('ma-geburtsdatum').value,
     funktion: document.getElementById('ma-funktion').value.trim(),
-    pin: document.getElementById('ma-pin').value.trim() || undefined,
     admin: document.getElementById('ma-admin').checked,
     startzeit: document.getElementById('ma-startzeit').value.trim(),
     faehigkeiten: Array.from(document.querySelectorAll('#ma-faehigkeiten-wrap input:checked')).map(cb=>cb.value),
@@ -6181,7 +7004,7 @@ function saveMaModal() {
       vertragsdatum: document.getElementById('ma-verleih-vertragsdatum').value
     },
     foto: tempMaFoto,
-    docs: tempMaDocs
+    docs: entityAusFormular('mitarbeiter', id, tempMaDocs)
   };
   // Schlüssel/Kreditkarte nur setzen, wenn vorhanden (ältere Datensätze bleiben unverändert schlank)
   if (tempMaSchluessel.length || (m && m.schluessel)) data.schluessel = tempMaSchluessel.map(k => ({...k}));
@@ -6854,7 +7677,7 @@ function wpStatusZelleHtml(statusE, m, ds, neben) {
     ? '<span title="'+bsKwEsc(anz.titel + (neben ? ' – Excel-Eintrag steht neben einem anderen Einsatz dieses Tages' : ''))+'">⚠ '+bsKwEsc(exTxt || 'Baustelle ungeklärt')+'<span style="display:block;font-size:9px;opacity:.8">'+bsKwEsc(anz.label + nebenTxt)+'</span></span>'
     : eigentlichStatus
       ? '<span title="Als „Baustelle ungeklärt“ gespeichert – ist ein Planungsstatus">'+bsKwEsc(eigentlichStatus)+' *</span>'
-      : bsKwEsc(planStatusAnzeige(statusE)) + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
+      : bsKwEsc(planStatusAnzeige(statusE)) + (statusE.vacationPending?' · Speicherprüfung offen':'') + (exTxt && excelNorm(exTxt) !== excelNorm(planStatusAnzeige(statusE)) ? '<span style="display:block;opacity:.7;font-size:9px">'+bsKwEsc(exTxt)+'</span>' : '');
   return '<div class="wp-cell" draggable="true" '
     +'data-key="status_ma'+m.id+'" data-ds="'+ds+'" data-ma="'+m.id+'" data-bs="0" '
     +'style="background:'+sHex+';color:'+sTc+';font-size:11px;min-height:28px;justify-content:center'+(unverkn?';border:1px solid #e8574b':'')+'" '
@@ -7937,7 +8760,7 @@ function excelZelleKlassifizieren(zelle) {
       return { typ: 'status', status, text };
     }
   }
-  // Hotel-Zusatz separat erhalten ("Fust Dietwil + Hotel")
+  // Hotel-Zusatz separat erhalten ("Vaxtor Kessel + Hotel")
   let hotel = null, rest = text;
   const hm = text.match(/\s*(?:[+,\/]|\bund\b)\s*((?:hotel|airbnb)\b.*)$/i);
   if (hm && hm.index > 0) { hotel = hm[1].trim(); rest = text.slice(0, hm.index).trim(); }
@@ -7988,9 +8811,9 @@ function bsAbgleichAliase(bs) {
 }
 // Deterministischer starker Treffer: keine freie Fuzzy-Entscheidung, sondern ein eindeutiger
 // Teilmengen-Treffer zwischen Excel-Bezeichnung und Name/Kommission/Projekt/Alias.
-// Beispiel: "Fust Rütihof Platten" darf eindeutig auf "Fust Rütihof" zeigen, wenn im
+// Beispiel: "Vaxtor Eschenau Platten" darf eindeutig auf "Vaxtor Eschenau" zeigen, wenn im
 // Einsatztag genau eine aktive Baustelle diese Identität erfüllt. Abweichende Orts-/Projektwörter
-// verhindern den Treffer (z.B. "Fust Service Diverses" ≠ "Fust Service Nebikon").
+// verhindern den Treffer (z.B. "Vaxtor Service Diverses" ≠ "Vaxtor Service Sonnhalde").
 function excelStarkeKandidaten(text, datum, kandidaten) {
   const tt = excelTokens(text);
   if (tt.length < 2) return [];
@@ -8007,7 +8830,7 @@ function excelStarkeKandidaten(text, datum, kandidaten) {
   });
 }
 // Eindeutiger Tippfehler-Treffer: erlaubt genau dort eine automatische Zuordnung,
-// wo die Identität trotz kleiner Schreibabweichung klar ist (z.B. Rüthihof ↔ Rütihof).
+// wo die Identität trotz kleiner Schreibabweichung klar ist (z.B. Eschenau ↔ Eschenau).
 // Sicherheitsregeln:
 //  • nur aktive Baustellen im gültigen Zeitraum
 //  • mindestens zwei relevante Identitätswörter
@@ -8084,7 +8907,7 @@ function excelBaustelleAbgleichen(text, datum) {
   if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
 
   // Priorität 3: kleiner, eindeutiger Tippfehler in der Identität.
-  // Beispiel: "Fust Rüthihof Platten" → "Fust Rütihof", sofern am Einsatztag
+  // Beispiel: "Vaxtor Eschenau Platten" → "Vaxtor Eschenau", sofern am Einsatztag
   // genau diese eine aktive Baustelle passt. Niemals bei mehreren Kandidaten raten.
   const fuzzyStark = excelStarkeFuzzyKandidaten(text, datum, aktiv);
   if (fuzzyStark.length === 1) return { status: 'eindeutig', bs: fuzzyStark[0], kandidaten: fuzzyStark, weg: 'eindeutig-tippfehler', vorschlaege: [] };
@@ -8119,7 +8942,7 @@ function excelAehnliche(tt, kandidaten) {
     return (tt.length >= 2 && tt.every(t => bt.some(x => excelTokGleich(t, x)))) || (nameT.length >= 2 && nameT.every(x => tt.some(t => excelTokGleich(t, x))));
   }).slice(0, 3);
 }
-// Vorschläge bei ähnlicher Schreibweise (z.B. "Rüthihof" ↔ "Rütihof"): alle Namenswörter der
+// Vorschläge bei ähnlicher Schreibweise (z.B. "Eschenau" ↔ "Eschenau"): alle Namenswörter der
 // Baustelle kommen (mind. eines davon nur ähnlich) im Excel-Text vor. Nie automatisch zuordnen.
 function excelVorschlaege(tt, kandidaten) {
   const out = [];
@@ -8402,7 +9225,7 @@ function excelNachAbgleich() {
 }
 
 // Reparatur bereits importierter Einträge: Bezeichnung aus notiz wiederherstellen
-// ("Baustelle ungeklärt: Fust Basel" → excelText "Fust Basel"). Nichts erfinden.
+// ("Baustelle ungeklärt: Vaxtor Elmbach" → excelText "Vaxtor Elmbach"). Nichts erfinden.
 function excelReparatur() {
   let repariert = 0, ohneText = 0;
   Object.values(state.plan || {}).forEach(tag => Object.entries(tag || {}).forEach(([key, e]) => {
@@ -8504,8 +9327,10 @@ async function excelAtomarAendern(mutator, verifiziere, opts) {
     let remote;
     try { remote = typeof current === 'string' ? JSON.parse(current) : JSON.parse(JSON.stringify(current)); }
     catch (e) { letzte = { geaendert: false, fehler: 'Serverstand nicht lesbar' }; return undefined; }
+    const beforePlan=JSON.parse(JSON.stringify(remote.plan||{}));
     let res;
-    try { res = excelMitState(remote, () => mutator(remote)); }
+    try { res = excelMitState(remote, () => mutator(remote));
+      vacationPlanAudit(remote,beforePlan,typeof currentLoginUser!=='undefined'?currentLoginUser?.id:null,new Date().toISOString()); }
     catch (e) { letzte = { geaendert: false, fehler: 'Mutator-Fehler: ' + (e && e.message || e) }; return undefined; }
     letzte = res || { geaendert: false };
     if (!res || !res.geaendert) return undefined;                       // Abbruch, nichts schreiben
@@ -8632,7 +9457,6 @@ async function excelBestandReparieren(opts) {
     nachgelesen: r.status === 'geschrieben-verifiziert' ? true : (r.status.startsWith('geschrieben-') ? false : null) };
   if (res.sicherung) {
     window._letzteExcelReparatur = { sicherung: res.sicherung, geschrieben: r.status.startsWith('geschrieben-') || r.status === 'lokal-gespeichert', status: r.status };
-    try { safeStorage.setItem('lagertool_backup_excel_reparatur_' + Date.now(), JSON.stringify(res.sicherung)); } catch (_) {}
   }
   return out;
 }
@@ -9053,7 +9877,7 @@ async function wpPdfImport(file) {
     }
 
     // Scan-PDF → Claude Vision API
-    const apiKey = localStorage.getItem('lagertool_claude_key');
+    const apiKey = claudeApiKeySitzung;
     if (!apiKey) return toast('API Key benötigt', 'Gescanntes PDF erkannt. Bitte Claude API Key unter ⚙️ Einstellungen hinterlegen.', '🔑');
 
     toast('PDF Import', 'Scan erkannt – sende an Claude Vision…', '🤖');
@@ -9806,14 +10630,14 @@ function kiParseText(t) {
   const bl = t.match(/(?:bauleiter)[:\s]+([^|\n]+)/i);
   if (bl) p.bauleiter = bl[1].trim();
 
-  // Kunde aus "Ordner: Fust KW22 / AuftragsNr-Kunde..." → Kunde = Teil vor /
+  // Kunde aus "Ordner: Vaxtor KW22 / AuftragsNr-Kunde..." → Kunde = Teil vor /
   const ordner = t.match(/(?:ordner|projekt)[:\s]+([^\n/]+)/i);
   if (ordner) {
-    // Firmenname aus Ordner extrahieren (z.B. "Fust KW 22-2026" → "Fust")
+    // Firmenname aus Ordner extrahieren (z.B. "Vaxtor KW 22-2026" → "Vaxtor")
     const firmaPart = ordner[1].trim().split(/\s+KW|\s+\d{4}/i)[0].trim();
     if (firmaPart && !p.kunde) p.kunde = firmaPart;
   }
-  // Baustellen-Name aus Ordner: "121565319-Fust Luzern KW22" → "Fust Luzern"
+  // Baustellen-Name aus Ordner: "100000004-Vaxtor Luzern KW22" → "Vaxtor Luzern"
   const ordnerName = t.match(/\d{6,}[-–]\s*([^\n(]+)/);
   if (ordnerName && !p.name) {
     p.name = ordnerName[1].trim().replace(/\s+KW\d+[-\d]*/i,'').replace(/\s+\(\d+\)$/,'').trim().substring(0,60);
@@ -9923,7 +10747,7 @@ function generiereNameAusKundeOrt() {
   // Ortschaft aus Adresse extrahieren: letztes Token nach Komma oder PLZ
   let ort = '';
   if (adresse) {
-    // Suche PLZ + Ort: z.B. "4051 Basel" oder "Hochbergerstr. 60, Basel"
+    // Suche PLZ + Ort: z.B. "4051 Basel" oder "Teststrasse 60, Basel"
     const plzOrt = adresse.match(/\d{4,5}\s+([A-Za-zÄÖÜäöüß\s\-]+)/);
     if (plzOrt) {
       ort = plzOrt[1].trim().split(' ')[0]; // nur erster Teil nach PLZ
@@ -10018,6 +10842,7 @@ function showBsModal(id) {
   if (mtEl) mtEl.value = bs?.montageTyp||'';
   document.getElementById('bs-ap-name').value = bs?.apName||'';
   document.getElementById('bs-ap-tel').value = bs?.apTel||'';
+  document.getElementById('bs-ap-tel-freigabe').checked = bs?.apTelFreigegeben===true;
   document.getElementById('bs-ap-email').value = bs?.apEmail||'';
   document.getElementById('bs-hotel-name').value = bs?.hotelName||'';
   document.getElementById('bs-hotel-adresse').value = bs?.hotelAdresse||'';
@@ -10134,7 +10959,7 @@ function readBsFile(file) {
 // Ersetzt für NEUE Dateien den bisherigen reinen Base64/IndexedDB-Weg.
 // Bestehende IndexedDB-Dokumente (readBsFile-Altbestand) bleiben unberührt.
 // ══════════════════════════════════════════════════════════════
-const LAGERTOOL_SITE_DOCS_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/api/v1/site-documents';
+const LAGERTOOL_SITE_DOCS_URL = String(window.MONTEUR_TEST_WORKER_URL || '') + '/api/v1/site-documents';
 
 // Leitet aus der Adresse eine Ortsangabe ab - identische Logik wie
 // deriveCityFromAddress() im Worker, damit Browser- und ChatGPT-Pfad auf
@@ -10168,6 +10993,8 @@ function lagertoolOAuthWaitForToken(timeoutMs = 120000) {
   });
 }
 async function lagertoolOAuthEnsureToken() {
+  // Google-Anmeldung nur innerhalb einer aktiven Büro-Sitzung (lokale Ablaufkontrolle).
+  if (!bzSession || !OfficeSession.aktiv()) throw new Error('Bitte zuerst als Büro anmelden.');
   if (lagertoolOAuthToken) return lagertoolOAuthToken;
   await lagertoolOAuthLogin();
   const statusEl = document.getElementById('bs-doc-upload-status');
@@ -10590,6 +11417,7 @@ function bsFormAlsDaten() {
     montageDetail: document.getElementById('bs-montageDetail').value.trim(),
     apName: document.getElementById('bs-ap-name').value.trim(),
     apTel: document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben: document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail: document.getElementById('bs-ap-email').value.trim(),
     material: document.getElementById('bs-material').value.trim(),
     werkzeug: document.getElementById('bs-werkzeug').value.trim(),
@@ -10870,6 +11698,7 @@ async function saveBsModal() {
     montageTyp:document.getElementById('bs-montageArt').value,
     apName:document.getElementById('bs-ap-name').value.trim(),
     apTel:document.getElementById('bs-ap-tel').value.trim(),
+    apTelFreigegeben:document.getElementById('bs-ap-tel-freigabe').checked,
     apEmail:document.getElementById('bs-ap-email').value.trim(),
     parkplatz:document.getElementById('bs-parkplatz').value.trim(),
     zufahrt:document.getElementById('bs-zufahrt').value.trim(),
@@ -11500,7 +12329,7 @@ function saveFirebaseConfig() {
   if (k) state.config.fbApiKey    = k.value.trim();
   if (p) state.config.fbProjectId = p.value.trim();
   if (a) state.config.fbAppId     = a.value.trim();
-  safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+  lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
 }
 
 function applyFirebaseConfig() {
@@ -11521,32 +12350,26 @@ function applyFirebaseConfig() {
 }
 
 function initFirebase(url, key, pid, appid) {
-  console.log('[Firebase] initFirebase called', url, pid);
+  if (pid !== 'demo-lagertool' || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw Error('pilot_emulator_required');
   window._fbPid = pid;
   try {
-    firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
-    console.log('[Firebase] app initialized');
-    firebase.auth().signInAnonymously()
-      .then(() => {
-        console.log('[Firebase] anonym angemeldet');
-        startFirebaseListener();
-      })
-      .catch((err) => {
-        console.error('[Firebase] Anmeldung fehlgeschlagen', err);
-        toast('Firebase Anmeldung fehlgeschlagen', err.message || '', '⚠️');
-      });
+    const app = firebase.initializeApp({ apiKey: key, databaseURL: url, projectId: pid, appId: appid || '1:0:web:0' });
+    app.auth().useEmulator('http://127.0.0.1:9099');
+    app.database().useEmulator('127.0.0.1', 9000);
+    console.log('[Firebase] app initialized (ohne Anmeldung, wartet auf Büro-Login)');
   } catch (e) {
     console.error('[Firebase] init error', e);
   }
 }
 
-function startFirebaseListener() {
+function startFirebaseListener(generation = bzGeneration) {
   const pid = window._fbPid;
   try {
     const _db = firebase.database();
     dbRef = _db.ref('lagertool');
     console.log('[Firebase] dbRef set, adding listener...');
     dbRef.on('value', (snapshot) => {
+      if (generation !== bzGeneration || !bzSession) return;
       // suppressListener bleibt true bis der Timeout es zurücksetzt.
       // NICHT hier auf false setzen, sonst kommt das Echo durch!
       if (suppressListener) { firebaseReady = true; return; }
@@ -11578,6 +12401,24 @@ function startFirebaseListener() {
           // Alle anderen (Admin, Leiter, Monteur) + Entwickler ohne lokale Daten:
           // Firebase-Daten übernehmen
           console.log('[Firebase] Server-Modus: Übernehme Firebase-Daten (' + (remote.mitarbeiter?.length||0) + ' MA, ' + (remote.artikel?.length||0) + ' Art)');
+          // Phase 41B (Phase 42 integriert): Eine ungespeicherte lokale Änderung wird NICHT still durch den Serverstand ersetzt.
+          // Sie wird über den 3-Wege-Merge gespeichert: gleichzeitig geänderte Stellen melden einen Konflikt (Serverwert bleibt),
+          // alle übrigen lokalen Änderungen bleiben erhalten.
+          const ohneTs41b = o => { const c = syncKopie(o); if (c && typeof c === 'object') delete c._ts; return c; };
+          const lokalUngespeichert41b = !!syncBase && syncKanon(ohneTs41b(stripLargeData(state)), new WeakMap()) !== syncKanon(ohneTs41b(syncBase), new WeakMap());
+          if (lokalUngespeichert41b) {
+            console.warn('[Firebase] Ungespeicherte lokale Änderung bleibt erhalten; Zusammenführung beim Speichern (Phase 41B)');
+            try { toast('Parallele Änderung', 'Ungespeicherte lokale Änderung bleibt erhalten. Gleichzeitig geänderte Stellen werden beim Speichern als Konflikt gemeldet.'); } catch (e) {}
+            // Phase 43: echter Konflikt -> nicht speichern, Entscheidung anzeigen. Sonst (keine Konflikte) wie bisher zusammenfuehren.
+            const m43 = syncMergeStand(syncBase ? ohneTs41b(syncBase) : {}, ohneTs41b(stripLargeData(state)), ohneTs41b(remote));
+            if (m43.konflikte.length) {
+              window.__syncKonflikt = { konflikte: m43.konflikte.map(c => ({ pfad: c.pfad })), remote: syncKopie(ohneTs41b(remote)) };
+              syncKonfliktAnzeigen(window.__syncKonflikt.konflikte, ohneTs41b(stripLargeData(state)), window.__syncKonflikt.remote);
+              return;
+            }
+            save({ verify: true });
+            return;
+          }
           const lokalVorSync = state;
           syncBase = syncKopie(remote);          // Basis für den 3-Wege-Merge beim nächsten Speichern (vor Migrationen!)
           state = remote;
@@ -11621,12 +12462,9 @@ function startFirebaseListener() {
 
           mitarbeiterDeduplizieren();
           migrationFahrzeugMonteurId();
-          migrationSchraubenNeu();
-          migrationDistanzplatten();
-          migrationMeldungenMaIdReparatur();
-          migrationTodoNotizMerge();
+          startMigrationenNachUebernahme(); // Phase 49B: Serverstand uebernommen, Migrationen mit Speicherung nach Anmeldung
           markFirebaseSynced();
-          safeStorage.setItem('lagertool', JSON.stringify(stripLargeData(state)));
+          lagertoolKeinCache( JSON.stringify(stripLargeData(state)));
           renderAll();
           try { todoNachRemoteSync(); } catch (_) {}
           setTimeout(updateMeldungenBadge, 100);
@@ -11655,7 +12493,8 @@ function startFirebaseListener() {
         firebaseReady = true;
       } catch(e2) { console.error('[Firebase] parse error', e2); }
     }, (err) => {
-      console.error('[Firebase] listener error', err);
+      console.error('[Firebase] listener error');
+      if (currentLoginUser) officeSitzungAbgelaufen();
       showSyncIndicator('❌ ' + err.message);
     });
     const statusEl = document.getElementById('fb-status');
@@ -11672,7 +12511,7 @@ function startFirebaseListener() {
 // ── FAHRZEUGHISTORIE EXPORT ─────────────────────────────
 // NOTFALL: zeigt den aktuellen localStorage-Inhalt zur Rettung/Diagnose an
 function notfallDatenAnzeigen() {
-  const raw = safeStorage.getItem('lagertool');
+  const raw = null;
   if (!raw) { alert('Kein lokaler Datenbestand gefunden.'); return; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch(e) { alert('Daten beschädigt: ' + e.message); return; }
@@ -11790,14 +12629,11 @@ function exportFzgHistorie() {
 // ── SYNC FÜR MONTEUR-APP ────────────────────────────────
 function officeSyncExport() {
   if (!currentLoginUser?.entwickler) return toast('Zugriff verweigert', 'Nur für Entwickler', '🔒');
-  const data = safeStorage.getItem('lagertool');
+  const data = null;
   if (!data) return toast('Fehler','Keine Daten','⚠️');
   // Speichere unter einem zweiten Key den die Monteur-App auch lesen kann
   // Versuche alle möglichen Storage-Keys
-  try {
-    safeStorage.setItem('lagertool_sync', data);
-    safeStorage.setItem('lagertool_sync_ts', Date.now().toString());
-  } catch(e) {}
+  // Kein Schreiben in den Browser-Speicher (vertrauliche Daten bleiben im Worker bzw. im Speicher der Sitzung).
   // Download als JSON-Datei für manuellen Import
   const blob = new Blob([data], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -11996,7 +12832,7 @@ function importData(e) {
       markFirebaseSynced();
       // Schlanke Daten nach localStorage (72KB statt 29MB), Docs nach IndexedDB
       const slimJson = JSON.stringify(stripLargeData(state));
-      safeStorage.setItem('lagertool', slimJson);
+      lagertoolKeinCache( slimJson);
       saveDocsToIDB(state);
       renderAll();
 
@@ -12310,10 +13146,11 @@ if (state.config.adminPw) { const el = document.getElementById('cfg-admin-pw'); 
 
 // Firebase: immer hardcoded Config verwenden (Netlify)
 window.addEventListener('load', function() {
-  const FB_URL    = 'https://wochenplanung-6b50a-default-rtdb.europe-west1.firebasedatabase.app';
-  const FB_KEY    = 'AIzaSyBwCjK7nzs8BV3GyFTouVFK16aUWGTntu4';
-  const FB_PID    = 'wochenplanung-6b50a';
-  const FB_APPID  = '1:715914728927:web:7630a296888f052c8f606a';
+  if (!['127.0.0.1', 'localhost'].includes(location.hostname)) return;
+  const FB_URL    = 'https://demo-lagertool-default-rtdb.firebaseio.com';
+  const FB_KEY    = 'demo-local-key';
+  const FB_PID    = 'demo-lagertool';
+  const FB_APPID  = '1:0:web:local';
   // Felder befüllen
   const u = document.getElementById('cfg-fb-url');
   const k = document.getElementById('cfg-fb-apikey');
@@ -12946,7 +13783,7 @@ function renderBaustatusKVP() {
     '<option value="__frei__">✏️ Freie Eingabe (nicht im System)...</option>' +
     baustellen.map(b=>'<option value="'+b.id+'">'+b.name+'</option>').join('') + '</select></div>' +
     '<div id="kvp-bau-frei-wrap" style="display:none"><label style="font-size:11px;color:var(--muted);">Baustellen-Name (frei)</label>' +
-    '<input type="text" id="kvp-bau-frei" placeholder="z.B. Fust Luzern KW22" style="width:100%;"></div>' +
+    '<input type="text" id="kvp-bau-frei" placeholder="z.B. Vaxtor Luzern KW22" style="width:100%;"></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Task/Position</label>' +
     '<select id="kvp-task" style="width:100%;"><option value="">-- zuerst Baustelle wählen --</option></select></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Beschreibung</label>' +
@@ -13389,7 +14226,7 @@ function forceSave() {
   state._ts = Date.now();
   const slimState = stripLargeData(state);
   const slimJson = JSON.stringify(slimState);
-  safeStorage.setItem('lagertool', slimJson);
+  lagertoolKeinCache( slimJson);
   saveDocsToIDB(state);
   if (dbRef) {
     const btn = document.getElementById('btn-force-save');
@@ -13438,7 +14275,7 @@ function forceSave() {
   </div>
 </div>
 <script id="gpt-assistant-script">
-const GPT_ASSISTANT_URL = 'https://auftragstool-ai.vorburgerluc-p.workers.dev/';
+const GPT_ASSISTANT_URL = String(window.MONTEUR_TEST_WORKER_URL || '') + '/';
 const LAGERTOOL_OAUTH_CLIENT_ID = 'lagertool-webapp';
 const LAGERTOOL_OAUTH_REDIRECT_URI = 'https://vorburgerlucp-svg.github.io/Auftr-ge/';
 let lagertoolOAuthToken = null;
@@ -14305,6 +15142,7 @@ function gptToggleSpeech(){
 // PWA/Push-Grundregistrierung: keine Berechtigungsabfrage ohne Benutzeraktion.
 window.addEventListener('load',()=>{ todoServiceWorker().then(()=>todoPushStatusAktualisieren()).catch(()=>{}); todoHandleDeepLink(); setTimeout(todoPopupPruefen,500); });
 </script>
-
+<script src="office-rapports.js"></script>
+<script src="office-comms.js"></script>
 
 </body></html>
