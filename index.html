@@ -853,7 +853,7 @@
 
   <div class="card" style="padding:14px;margin-bottom:16px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input type="text" id="todo-neu-text" placeholder="z.B. Fust Bellikon anrufen dringend / Prio 2" style="flex:2;min-width:200px">
+      <input type="text" id="todo-neu-text" placeholder="z.B. Vaxtor Ardenau anrufen dringend / Prio 2" style="flex:2;min-width:200px">
       <input type="text" id="todo-neu-zustaendig" placeholder="Zuständig (z.B. Luc oder Tobias)" style="flex:1;min-width:160px">
       <button class="btn btn-primary" onclick="addTodoItem()">+ Hinzufügen</button>
     </div>
@@ -1136,7 +1136,7 @@
         <input type="hidden" id="ma-buero-id" value="">
         <div id="ma-buero-suggest" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.35)"></div>
       </div>
-      <div><label>👤 Sachbearbeiter</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Stefan Meier"></div>
+      <div><label>👤 Sachbearbeiter</label><input type="text" id="ma-kontakt-name" placeholder="z.B. Testperson Zeta"></div>
     </div>
     <div class="form-row cols-2">
       <div><label>📞 Telefon Sachbearbeiter</label><input type="tel" id="ma-kontakt-tel" placeholder="+41 79 000 00 00"></div>
@@ -1441,7 +1441,7 @@
         <div id="ki-panel-text">
           <textarea id="ki-auftragstext" rows="6"
             style="width:100%;resize:vertical;font-size:12px;font-family:var(--mono);padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)"
-            placeholder="E-Mail weiterleiten, Auftragsbestätigung oder Notiz einfügen...&#10;&#10;Beispiel:&#10;Auftrag: Küchenmontage bei Müller AG&#10;Adresse: Hauptstrasse 5, 4051 Basel&#10;Datum: 05.05. – 10.05.2026&#10;3 Monteure, Startzeit 07:00&#10;Kontakt: Hans Müller, 079 123 45 67"></textarea>
+            placeholder="E-Mail weiterleiten, Auftragsbestätigung oder Notiz einfügen...&#10;&#10;Beispiel:&#10;Auftrag: Küchenmontage bei Testfirma AG&#10;Adresse: Hauptstrasse 5, 4051 Basel&#10;Datum: 05.05. – 10.05.2026&#10;3 Monteure, Startzeit 07:00&#10;Kontakt: Hans Müller, 079 123 45 67"></textarea>
         </div>
 
         <!-- Bild-Tab -->
@@ -1474,7 +1474,7 @@
 
     <div class="form-row cols-2">
       <div><label>Name *</label><input type="text" id="bs-name" placeholder="wird automatisch generiert"></div>
-      <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Fust AG" oninput="generiereNameAusKundeOrt()"></div>
+      <div><label>Kunde</label><input type="text" id="bs-kunde" placeholder="z.B. Vaxtor AG" oninput="generiereNameAusKundeOrt()"></div>
     </div>
     <div class="form-row cols-2">
       <div><label>Auftragsnummer</label><input type="text" id="bs-auftragsnummer" placeholder="z.B. A-2026-1234"></div>
@@ -1523,7 +1523,7 @@
     <div class="form-row cols-1">
       <div><label>📍 Adresse</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <input type="text" id="bs-adresse" placeholder="z.B. Hochbergerstr. 60, Basel" style="flex:1" oninput="generiereNameAusKundeOrt()">
+          <input type="text" id="bs-adresse" placeholder="z.B. Teststrasse 60, Basel" style="flex:1" oninput="generiereNameAusKundeOrt()">
           <button type="button" onclick="const a=document.getElementById('bs-adresse').value.trim();if(a)window.open('https://maps.google.com/?q='+encodeURIComponent(a),'_blank');else alert('Bitte zuerst Adresse eingeben');" 
             style="flex-shrink:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px" title="In Google Maps öffnen">🗺</button>
         </div>
@@ -1589,7 +1589,7 @@
     <hr class="divider">
     <div class="card-title">👤 Ansprechperson</div>
     <div class="form-row cols-2">
-      <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Thomas Fust"></div>
+      <div><label>Name</label><input type="text" id="bs-ap-name" placeholder="z.B. Testperson Beta"></div>
       <div><label>Telefon</label><input type="tel" id="bs-ap-tel" placeholder="+41 61 000 00 00"><label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:normal"><input type="checkbox" id="bs-ap-tel-freigabe"> Telefonnummer für Monteure freigeben</label></div>
     </div>
     <div class="form-row cols-1">
@@ -1614,7 +1614,7 @@
     <div class="form-row cols-1">
       <div><label>Hotel Adresse</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="bs-hotel-adresse" placeholder="z.B. Rheingasse 2, 4058 Basel" style="flex:1">
+          <input type="text" id="bs-hotel-adresse" placeholder="z.B. Teststrasse 2, 4058 Basel" style="flex:1">
           <button type="button" onclick="const a=document.getElementById('bs-hotel-adresse').value.trim();if(a)window.open('https://maps.google.com/?q='+encodeURIComponent(a),'_blank');" class="btn btn-secondary btn-sm">🗺</button>
         </div>
       </div>
@@ -1622,7 +1622,7 @@
     <div class="form-row cols-1">
       <div>
         <label>🔗 Excel-Bezeichnungen (Aliasse, eine pro Zeile)</label>
-        <textarea id="bs-excel-aliase" rows="2" style="width:100%;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" placeholder="z.B. R+S Westfeld&#10;Fust Dietwil Platten"></textarea>
+        <textarea id="bs-excel-aliase" rows="2" style="width:100%;resize:vertical;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" placeholder="z.B. R+S Westfeld&#10;Vaxtor Kessel Platten"></textarea>
         <div style="font-size:11px;color:var(--muted);margin-top:3px">So steht die Baustelle im Excel-Wochenplan. Unverknüpfte Einträge werden beim Speichern automatisch erneut abgeglichen.</div>
       </div>
     </div>
@@ -8760,7 +8760,7 @@ function excelZelleKlassifizieren(zelle) {
       return { typ: 'status', status, text };
     }
   }
-  // Hotel-Zusatz separat erhalten ("Fust Dietwil + Hotel")
+  // Hotel-Zusatz separat erhalten ("Vaxtor Kessel + Hotel")
   let hotel = null, rest = text;
   const hm = text.match(/\s*(?:[+,\/]|\bund\b)\s*((?:hotel|airbnb)\b.*)$/i);
   if (hm && hm.index > 0) { hotel = hm[1].trim(); rest = text.slice(0, hm.index).trim(); }
@@ -8811,9 +8811,9 @@ function bsAbgleichAliase(bs) {
 }
 // Deterministischer starker Treffer: keine freie Fuzzy-Entscheidung, sondern ein eindeutiger
 // Teilmengen-Treffer zwischen Excel-Bezeichnung und Name/Kommission/Projekt/Alias.
-// Beispiel: "Fust Rütihof Platten" darf eindeutig auf "Fust Rütihof" zeigen, wenn im
+// Beispiel: "Vaxtor Eschenau Platten" darf eindeutig auf "Vaxtor Eschenau" zeigen, wenn im
 // Einsatztag genau eine aktive Baustelle diese Identität erfüllt. Abweichende Orts-/Projektwörter
-// verhindern den Treffer (z.B. "Fust Service Diverses" ≠ "Fust Service Nebikon").
+// verhindern den Treffer (z.B. "Vaxtor Service Diverses" ≠ "Vaxtor Service Sonnhalde").
 function excelStarkeKandidaten(text, datum, kandidaten) {
   const tt = excelTokens(text);
   if (tt.length < 2) return [];
@@ -8830,7 +8830,7 @@ function excelStarkeKandidaten(text, datum, kandidaten) {
   });
 }
 // Eindeutiger Tippfehler-Treffer: erlaubt genau dort eine automatische Zuordnung,
-// wo die Identität trotz kleiner Schreibabweichung klar ist (z.B. Rüthihof ↔ Rütihof).
+// wo die Identität trotz kleiner Schreibabweichung klar ist (z.B. Eschenau ↔ Eschenau).
 // Sicherheitsregeln:
 //  • nur aktive Baustellen im gültigen Zeitraum
 //  • mindestens zwei relevante Identitätswörter
@@ -8907,7 +8907,7 @@ function excelBaustelleAbgleichen(text, datum) {
   if (stark.length > 1) return { status: 'mehrdeutig', grund: 'mehrere', kandidaten: stark, vorschlaege: [] };
 
   // Priorität 3: kleiner, eindeutiger Tippfehler in der Identität.
-  // Beispiel: "Fust Rüthihof Platten" → "Fust Rütihof", sofern am Einsatztag
+  // Beispiel: "Vaxtor Eschenau Platten" → "Vaxtor Eschenau", sofern am Einsatztag
   // genau diese eine aktive Baustelle passt. Niemals bei mehreren Kandidaten raten.
   const fuzzyStark = excelStarkeFuzzyKandidaten(text, datum, aktiv);
   if (fuzzyStark.length === 1) return { status: 'eindeutig', bs: fuzzyStark[0], kandidaten: fuzzyStark, weg: 'eindeutig-tippfehler', vorschlaege: [] };
@@ -8942,7 +8942,7 @@ function excelAehnliche(tt, kandidaten) {
     return (tt.length >= 2 && tt.every(t => bt.some(x => excelTokGleich(t, x)))) || (nameT.length >= 2 && nameT.every(x => tt.some(t => excelTokGleich(t, x))));
   }).slice(0, 3);
 }
-// Vorschläge bei ähnlicher Schreibweise (z.B. "Rüthihof" ↔ "Rütihof"): alle Namenswörter der
+// Vorschläge bei ähnlicher Schreibweise (z.B. "Eschenau" ↔ "Eschenau"): alle Namenswörter der
 // Baustelle kommen (mind. eines davon nur ähnlich) im Excel-Text vor. Nie automatisch zuordnen.
 function excelVorschlaege(tt, kandidaten) {
   const out = [];
@@ -9225,7 +9225,7 @@ function excelNachAbgleich() {
 }
 
 // Reparatur bereits importierter Einträge: Bezeichnung aus notiz wiederherstellen
-// ("Baustelle ungeklärt: Fust Basel" → excelText "Fust Basel"). Nichts erfinden.
+// ("Baustelle ungeklärt: Vaxtor Elmbach" → excelText "Vaxtor Elmbach"). Nichts erfinden.
 function excelReparatur() {
   let repariert = 0, ohneText = 0;
   Object.values(state.plan || {}).forEach(tag => Object.entries(tag || {}).forEach(([key, e]) => {
@@ -10630,14 +10630,14 @@ function kiParseText(t) {
   const bl = t.match(/(?:bauleiter)[:\s]+([^|\n]+)/i);
   if (bl) p.bauleiter = bl[1].trim();
 
-  // Kunde aus "Ordner: Fust KW22 / AuftragsNr-Kunde..." → Kunde = Teil vor /
+  // Kunde aus "Ordner: Vaxtor KW22 / AuftragsNr-Kunde..." → Kunde = Teil vor /
   const ordner = t.match(/(?:ordner|projekt)[:\s]+([^\n/]+)/i);
   if (ordner) {
-    // Firmenname aus Ordner extrahieren (z.B. "Fust KW 22-2026" → "Fust")
+    // Firmenname aus Ordner extrahieren (z.B. "Vaxtor KW 22-2026" → "Vaxtor")
     const firmaPart = ordner[1].trim().split(/\s+KW|\s+\d{4}/i)[0].trim();
     if (firmaPart && !p.kunde) p.kunde = firmaPart;
   }
-  // Baustellen-Name aus Ordner: "121565319-Fust Luzern KW22" → "Fust Luzern"
+  // Baustellen-Name aus Ordner: "100000004-Vaxtor Luzern KW22" → "Vaxtor Luzern"
   const ordnerName = t.match(/\d{6,}[-–]\s*([^\n(]+)/);
   if (ordnerName && !p.name) {
     p.name = ordnerName[1].trim().replace(/\s+KW\d+[-\d]*/i,'').replace(/\s+\(\d+\)$/,'').trim().substring(0,60);
@@ -10747,7 +10747,7 @@ function generiereNameAusKundeOrt() {
   // Ortschaft aus Adresse extrahieren: letztes Token nach Komma oder PLZ
   let ort = '';
   if (adresse) {
-    // Suche PLZ + Ort: z.B. "4051 Basel" oder "Hochbergerstr. 60, Basel"
+    // Suche PLZ + Ort: z.B. "4051 Basel" oder "Teststrasse 60, Basel"
     const plzOrt = adresse.match(/\d{4,5}\s+([A-Za-zÄÖÜäöüß\s\-]+)/);
     if (plzOrt) {
       ort = plzOrt[1].trim().split(' ')[0]; // nur erster Teil nach PLZ
@@ -13783,7 +13783,7 @@ function renderBaustatusKVP() {
     '<option value="__frei__">✏️ Freie Eingabe (nicht im System)...</option>' +
     baustellen.map(b=>'<option value="'+b.id+'">'+b.name+'</option>').join('') + '</select></div>' +
     '<div id="kvp-bau-frei-wrap" style="display:none"><label style="font-size:11px;color:var(--muted);">Baustellen-Name (frei)</label>' +
-    '<input type="text" id="kvp-bau-frei" placeholder="z.B. Fust Luzern KW22" style="width:100%;"></div>' +
+    '<input type="text" id="kvp-bau-frei" placeholder="z.B. Vaxtor Luzern KW22" style="width:100%;"></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Task/Position</label>' +
     '<select id="kvp-task" style="width:100%;"><option value="">-- zuerst Baustelle wählen --</option></select></div>' +
     '<div><label style="font-size:11px;color:var(--muted);">Beschreibung</label>' +

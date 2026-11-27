@@ -3,9 +3,9 @@ function dom(){const ids=new Map();class El{constructor(tag){this.tagName=tag;th
  const body=new El('body');return{body,ids,document:{body,readyState:'complete',createElement:t=>new El(t),getElementById:id=>ids.get(id),querySelector:()=>body,addEventListener(){}},el:t=>new El(t)};}
 function montage(responses){const d=dom(),calls=[];const ctx={...d,console,URL,Blob,setTimeout:()=>1,clearTimeout(){},MonteurApi:{hasSession:()=>true,messageFor:e=>e.code||e.message,get:async(path,q)=>{calls.push({path,q});return responses.shift();},downloadMontageDocument:async()=>new Blob(['test'])}};ctx.window=ctx;vm.createContext(ctx);const p=new URL('../monteur-montage.js',import.meta.url);if(fs.existsSync(p))vm.runInContext(fs.readFileSync(p,'utf8'),ctx);return{d,ctx,calls};}
 test('montage search shows explicit choices and released fields; phone/navigation URLs are fixed safe schemes',async()=>{
- const x=montage([{ok:true,choices:[{id:'a',name:'Jäggi Arlesheim'},{id:'b',name:'Jäggi Zweitauftrag'}]}, {ok:true,kind:'montage',site:{id:'a',name:'Jäggi Arlesheim',adresse:'Testweg Zürich',ansprechpartner:[{name:'Test',telefon:'0610000000'}]},documents:[]}]);
- assert.ok(x.ctx.MonteurMontage);x.ctx.MonteurMontage.open(x.d.body);x.d.ids.get('monteur-montage-search').value='Jägi';await x.d.body.all().find(e=>e.textContent==='Suchen').click();
- assert.equal(x.calls.length,1);await x.d.body.all().find(e=>e.textContent==='Jäggi Arlesheim').click();assert.equal(x.calls[1].q.siteId,'a');
+ const x=montage([{ok:true,choices:[{id:'a',name:'Dorvan Tannwald'},{id:'b',name:'Dorvan Zweitauftrag'}]}, {ok:true,kind:'montage',site:{id:'a',name:'Dorvan Tannwald',adresse:'Testweg Zürich',ansprechpartner:[{name:'Test',telefon:'0610000000'}]},documents:[]}]);
+ assert.ok(x.ctx.MonteurMontage);x.ctx.MonteurMontage.open(x.d.body);x.d.ids.get('monteur-montage-search').value='Dorvan';await x.d.body.all().find(e=>e.textContent==='Suchen').click();
+ assert.equal(x.calls.length,1);await x.d.body.all().find(e=>e.textContent==='Dorvan Tannwald').click();assert.equal(x.calls[1].q.siteId,'a');
  const links=x.d.body.all().filter(e=>e.tagName==='a');assert.ok(links.some(l=>l.href==='tel:0610000000'));assert.ok(links.some(l=>l.href.startsWith('https://www.google.com/maps/search/?api=1&query=')));
 });
 test('late montage results after logout/reset do not restore private details or suggestions',async()=>{

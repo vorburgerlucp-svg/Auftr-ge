@@ -587,7 +587,7 @@
       ['Bericht erfassen',{tool:'report_draft',args:{}}]
     ])shortcuts.append(button(label,()=>ask(command)));
     shortcutDetails.append(shortcuts);panel.append(shortcutDetails);
-    const label=el('label','Deine Anfrage');input=el('textarea');input.id='assistant-message';input.maxLength=4000;input.placeholder='z. B. Adresse Mercedes Schlieren oder Wer ist die Projektleitung?';input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const message=input.value.trim();if(message)ask({message});}});label.append(input);panel.append(label);
+    const label=el('label','Deine Anfrage');input=el('textarea');input.id='assistant-message';input.maxLength=4000;input.placeholder='z. B. Adresse Quorum Morbach oder Wer ist die Projektleitung?';input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const message=input.value.trim();if(message)ask({message});}});label.append(input);panel.append(label);
     addDictation(panel,input,'assistant-voice-question','Frage diktieren');
     if(speechAvailable()){
       panel.append(el('p','Datenschutz: Die Spracherkennung kann Audio an den Dienst des Browseranbieters übertragen. Sie startet nur mit deinem Klick. Prüfe den erkannten Text vor dem Senden.'));
